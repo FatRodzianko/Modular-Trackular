@@ -734,3 +734,62 @@ all of the block's ticks. Per track and FX column:
   interacts with negative Micro-move; the patch should keep or fix it on purpose.
 - Nothing in this section has been checked on hardware. Checked in the emulator:
   Micro-move timing, CC send timing, preload request and buffer swap.
+
+## 13. Pattern screen: bottom bar, selection, undo (`patch/humanize`)
+
+The Pattern screen object is `patview` = `0x20021770`. Its editor state is `ed` =
+`patview + 0x1000` = `0x20022770`.
+
+### Bottom bar
+
+- Eight buttons sit under the screen. Their label controls are int8 control indices at
+  `ed+0x292`..`+0x299`. The bar has 3 pages (`ed+0x4e2` = current, `ed+0x4e1` = count).
+  More (button 7, `pat_more_button` `0x600e2a44`) moves to the next page when no other
+  button is held and calls `pat_show_page` (`0x600e29ec`), which binds the page's
+  buttons and draws its labels.
+- Bindings live in a button manager at `*(0x200209e0)`: entry count at `+5`, 20-byte
+  entries at `*(+0x1c)` (`+0` kind, `+4` handler, `+0x10` flag).
+  `btn_bind(manager, index, flag, handler)` (`0x600cf6ec`) sets kind 1 and the
+  handler, `0x600cf74c` sets kind 3, and `btn_clear(manager, first, last)`
+  (`0x600cf53c`) zeroes entries. The stock handlers ignore their arguments.
+
+| Page | Bind / labels | Buttons |
+|---|---|---|
+| 1 | `0x600e2858` / `0x600e52ac` | Pattern, Length, Step jump, Fill (`0x600e22b0`), Preview (`0x600e2b18`), Undo, Redo, More. Buttons 0–2, 5 and 6 are bound as kind 3 |
+| 2 | `0x600e2900` / `0x600e559c` | Render Selection `0x600e379c`, Invert `0x600e0e3c`, Duplicate `0x600df9f4`, Expand `0x600df9a8`, Shrink `0x600df960`, Copy `0x600e11a4`, Paste `0x600e12a0`, More |
+| 3 | `0x600e29a4` / `0x600e584c` | Pattern Name `0x600dfe64`, Track Name `0x600dfdd0`, buttons 2–6 unused, More |
+
+- Each label gets `disp_ctrl_set_text` (top line), `disp_ctrl_set_ptr38` (second
+  line), `disp_ctrl_set_colors` (a color set at `+0x44`, `+0x54` or `+0x64` of
+  `*(display+8)`) and `disp_ctrl_set_data` (`patview+0x12ac`, `+0x12cc` or `+0x12ec`),
+  then all 8 get style, value and refresh. Page 3 sets colors and data only for
+  buttons 0, 1 and 7; the unused buttons keep page 2's.
+
+### Selection and editing
+
+- Cursor: track `ed+0x1e4`, step `ed+0x1e6`. Selection: mode `ed+0x1f4` (2 = a
+  selection is active), corners `ed+0x1f7`/`+0x1f8` and `ed+0x1fa`/`+0x1fc` (track,
+  step), whole tracks `ed+0x1fe`.
+- `ed_selection_to_seq()` (`0x600e0b58`) writes the rectangle into the first 4 bytes of
+  the sequencer object (`0x20017274`): first step, first track, last step, last track,
+  sorted by `seq_set_selection` (`0x600aeee4`). Without a selection it is the cursor
+  cell. Whole tracks run from step 0 to the last-step byte (`data+0x1c`, the pattern
+  length − 1).
+- `ed_selected_column_q()` (`0x600def3c`) picks the part of each step an edit applies
+  to (for Invert: 0 the whole step, 2/3 note and instrument, 4 FX1, 5 FX2).
+- Invert (`0x600e0e3c`) shows the sequence the editing buttons follow:
+  `undo_push(fm)` (`0x600c3d90`), `ed_selection_to_seq()`, the edit
+  (`seq_invert_selection(seq, column)`, `0x600ad918`), `patview_fill_rows_q(patview)`,
+  `fm_mark_pattern_changed(fm)` (`0x600bccd8`). `fm` is the file manager `0x2001e488`.
+- Undo: `undo_push` copies the whole current pattern (0x3030 bytes) into a 20-slot ring
+  in SDRAM at `0x83f811cc`, its pattern number to `0x83f62fcc + slot`, and the cursor
+  and selection (`undo_save_cursor`, `0x600c3cf0`) to 14-byte records at `0x2001f618`.
+  Ring state at `0x2001f610`: next slot, count, redo count.
+- `fm_mark_pattern_changed(fm)` sets `fm + 0x4ca + current pattern` to 1, so the pattern
+  is saved with the project.
+- Random numbers: `rand_range_q(lo, hi)` (ITCM `0x3af4`, veneer `0x600af0e8`) returns
+  lo..hi − 1 from a Park–Miller state. The random fill and the random FX use it.
+
+`patch/humanize` binds page 3's button 2 and labels it "Humanize" (its README lists the
+hooks). Its handler follows the Invert sequence above, so stock Undo reverts it.
+Checked in the emulator only.

@@ -7,11 +7,18 @@ used when there is no local build), "branches" (Thumb-2 BL sites to retarget) an
 (aligned 32-bit literals to replace with a symbol address; "thumb": true sets bit 0,
 for function pointers such as vtable entries).
 
+A bundle spec combines several patches into one firmware: "include" lists their
+patch.json files (relative to the bundle's folder) and "version" gives the version
+text (Config shows 1.2.0-<version>, at most 3 characters). The included patches' own
+version-text words ("version": true) are dropped, and the bundle's text is appended
+after the last patch. Each patch keeps its own base address; their code ranges and
+hook sites must not overlap.
+
 - Refuses unless the stock image matches the SHA-256 in patch.json.
 - Every branch or word site is checked against its original bytes before it is rewritten
   (as a Thumb-2 BL, or as the symbol address for words).
-- The patch binary is appended right after the stock image. The gap up to its base
-  address is filled with 0xFF and written as data, so the output has no hole.
+- The patch binaries are appended after the stock image. Gaps up to each base address
+  are filled with 0xFF and written as data, so the output has no hole.
 - The stock record layout is kept (changed records get new data and checksums), the
   new data goes in 16-byte records before the start/end records, and the output is
   read back and compared with the intended image.
@@ -26,6 +33,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ptf import Record, encode_ptf, read_ptf  # noqa: E402
+
+VERSION_PREFIX = b"%d.%d.%d-"
+VERSION_MAX = 3                     # "1.2.0-" + 3 characters: longer text doesn't show
 
 
 def thumb_bl(at: int, target: int) -> bytes:
@@ -51,6 +61,23 @@ def load_symbols(path: Path) -> dict[str, int]:
     return syms
 
 
+def load_patch(spec: dict, pdir: Path, in_bundle: bool) -> dict:
+    """One patch: its code blob, symbols and hook sites (words resolved to values)."""
+    bin_path, sym_path = pdir / spec["bin"], pdir / spec["sym"]
+    if not bin_path.exists() and "prebuilt_bin" in spec:
+        bin_path, sym_path = pdir / spec["prebuilt_bin"], pdir / spec["prebuilt_sym"]
+        print(f"no local build, using the prebuilt patch: {bin_path.relative_to(pdir.parent.parent)}")
+    syms = load_symbols(sym_path)
+    words = []
+    for wd in spec.get("words", []):
+        if in_bundle and wd.get("version"):
+            continue
+        value = syms[wd["to"]] | (1 if wd.get("thumb") else 0)
+        words.append((wd, value))
+    return {"name": spec["name"], "base": int(spec["base"], 16), "blob": bin_path.read_bytes(),
+            "syms": syms, "branches": spec["branches"], "words": words}
+
+
 def main() -> int:
     stock_path, spec_path, out_path = (Path(a) for a in sys.argv[1:4])
     spec = json.loads(spec_path.read_text())
@@ -61,39 +88,74 @@ def main() -> int:
     if digest != spec["stock_image_sha256"]:
         sys.exit(f"stock image hash {digest} does not match {spec['firmware']}")
 
-    base = int(spec["base"], 16)
-    bin_path, sym_path = pdir / spec["bin"], pdir / spec["sym"]
-    if not bin_path.exists() and "prebuilt_bin" in spec:
-        bin_path, sym_path = pdir / spec["prebuilt_bin"], pdir / spec["prebuilt_sym"]
-        print(f"no local build, using the prebuilt patch: {bin_path.relative_to(pdir.parent.parent)}")
-    blob = bin_path.read_bytes()
-    syms = load_symbols(sym_path)
+    if "include" in spec:
+        parts = []
+        for inc in spec["include"]:
+            ipath = (pdir / inc).resolve()
+            ispec = json.loads(ipath.read_text())
+            if ispec["stock_image_sha256"] != spec["stock_image_sha256"]:
+                sys.exit(f"{inc} is for another firmware")
+            parts.append(load_patch(ispec, ipath.parent, in_bundle=True))
+        version = spec["version"].encode()
+        if not 0 < len(version) <= VERSION_MAX:
+            sys.exit(f"version text {spec['version']!r}: 1 to {VERSION_MAX} characters")
+    else:
+        parts = [load_patch(spec, pdir, in_bundle=False)]
+        version = None
+
+    # Code layout: each patch at its own base, in address order, after the stock image.
     stock_end = ptf.base + len(ptf.image)
-    if base < stock_end:
-        sys.exit(f"patch base {base:#x} overlaps the stock image (ends {stock_end:#x})")
+    parts.sort(key=lambda p: p["base"])
+    end = stock_end
+    tail = bytearray()
+    for p in parts:
+        if p["base"] < end:
+            sys.exit(f"{p['name']} at {p['base']:#x} overlaps what comes before it (ends {end:#x})")
+        tail += b"\xff" * (p["base"] - end) + p["blob"]
+        end = p["base"] + len(p["blob"])
 
     image = bytearray(ptf.image)
-    for br in spec["branches"]:
-        at = int(br["at"], 16)
-        off = at - ptf.base
-        old = bytes.fromhex(br["old"])
-        if image[off:off + 4] != old:
-            sys.exit(f"{at:#x}: expected {old.hex()}, found {image[off:off + 4].hex()}")
-        new = thumb_bl(at, syms[br["to"]])
-        image[off:off + 4] = new
-        print(f"{at:#x}: bl -> {br['to']} @ {syms[br['to']]:#x}  ({old.hex()} -> {new.hex()})  {br.get('note', '')}")
+    sites: dict[int, str] = {}
 
-    for wd in spec.get("words", []):
+    def claim(at: int, who: str) -> int:
+        if at in sites:
+            sys.exit(f"{at:#x}: patched by both {sites[at]} and {who}")
+        sites[at] = who
+        return at - ptf.base
+
+    for p in parts:
+        for br in p["branches"]:
+            at = int(br["at"], 16)
+            off = claim(at, p["name"])
+            old = bytes.fromhex(br["old"])
+            if image[off:off + 4] != old:
+                sys.exit(f"{at:#x}: expected {old.hex()}, found {image[off:off + 4].hex()}")
+            new = thumb_bl(at, p["syms"][br["to"]])
+            image[off:off + 4] = new
+            print(f"{at:#x}: bl -> {br['to']} @ {p['syms'][br['to']]:#x}  ({old.hex()} -> {new.hex()})  {br.get('note', '')}")
+
+    words = [(wd, value, p["name"]) for p in parts for wd, value in p["words"]]
+    if version is not None:
+        end = (end + 3) & ~3
+        vaddr = end
+        text = VERSION_PREFIX + version + b"\0"
+        tail += b"\xff" * (vaddr - stock_end - len(tail)) + text
+        end = vaddr + len(text)
+        vw = spec["version_word"]
+        words.append(({"at": vw["at"], "old": vw["old"], "to": "version text",
+                       "note": f"1.2.0-{version.decode()}"}, vaddr, spec["name"]))
+
+    for wd, value, who in words:
         at = int(wd["at"], 16)
-        off = at - ptf.base
+        off = claim(at, who)
         old = bytes.fromhex(wd["old"])
         if at & 3 or image[off:off + 4] != old:
             sys.exit(f"{at:#x}: expected aligned word {old.hex()}, found {image[off:off + 4].hex()}")
-        new = struct.pack("<I", syms[wd["to"]] | (1 if wd.get("thumb") else 0))
+        new = struct.pack("<I", value)
         image[off:off + 4] = new
-        print(f"{at:#x}: word -> {wd['to']} @ {syms[wd['to']]:#x}  ({old.hex()} -> {new.hex()})  {wd.get('note', '')}")
+        shown = value & ~1 if wd.get("thumb") else value
+        print(f"{at:#x}: word -> {wd['to']} @ {shown:#x}  ({old.hex()} -> {new.hex()})  {wd.get('note', '')}")
 
-    tail = b"\xff" * (base - stock_end) + blob
     patched = ptf
     patched.image = image                         # same length as stock; records re-encoded
 
@@ -110,8 +172,8 @@ def main() -> int:
         if a >> 16 != upper:
             upper = a >> 16
             added.append(Record(4, 0, upper.to_bytes(2, "big")))
-        added.append(Record(0, a, tail[i:i + 16]))
-    full_image = bytes(image) + tail
+        added.append(Record(0, a, bytes(tail[i:i + 16])))
+    full_image = bytes(image) + bytes(tail)
     patched.records = records + added + end_records
     patched.image = bytearray(full_image)
 
@@ -123,7 +185,8 @@ def main() -> int:
         sys.exit("read-back mismatch")
     if len(check.data_ranges()) != 1:
         sys.exit(f"output has gaps: {check.data_ranges()}")
-    print(f"wrote {out_path}: {len(full_image)} bytes ({len(blob)} patch bytes at {base:#x})")
+    blobs = ", ".join(f"{p['name']} {len(p['blob'])} bytes at {p['base']:#x}" for p in parts)
+    print(f"wrote {out_path}: {len(full_image)} bytes ({blobs})")
     print(f"file sha256 {hashlib.sha256(out_path.read_bytes()).hexdigest()}")
     return 0
 

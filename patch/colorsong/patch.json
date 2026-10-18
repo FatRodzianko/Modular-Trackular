@@ -75,6 +75,7 @@
       "at": "0x600CBF9C",
       "old": "34b80360",
       "to": "mt_version_fmt",
+      "version": true,
       "note": "version text 1.2.0-c10 (or p10)"
     },
     {

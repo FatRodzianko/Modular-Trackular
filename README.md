@@ -15,13 +15,20 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   the identical color, in any column. Colors are saved per project. Micro-move and
   Volume FX are ignored, so humanizing a track keeps its color.
   Tested on hardware. See [patch/colorsong/README.md](patch/colorsong/README.md).
+- **humanize**: a Humanize button on the Pattern screen gives the notes in the
+  selection (or the cursor's track) small random Micro-move and Volume/Velocity
+  FX, so programmed parts sound less mechanical. Undo reverts it. Tested in the
+  emulator, not yet on hardware. See [patch/humanize/README.md](patch/humanize/README.md).
+- **all**: colorsong and humanize in one firmware (version text `1.2.0-MT1`),
+  from [patch/all/patch.json](patch/all/patch.json).
 - **versiontest**: the smallest possible mod (version text `1.2.0-MT0`), a harmless
   first check that your unit installs patched firmware. See
   [patch/versiontest/README.md](patch/versiontest/README.md).
 - **Reverse engineering notes**: [docs/FINDINGS.md](docs/FINDINGS.md) covers the
   `.ptf` format, chip and memory map, MPU, update path and recovery, EVE display
   layer and widget library, screens, the Song screen, pattern and project file
-  formats, the SD-card/FatFs API, and the hardware lessons learned. Function names
+  formats, the SD-card/FatFs API, the hardware lessons learned, the sequencer and FX
+  timing, and the Pattern screen's buttons, selection and undo. Function names
   with notes are in [ghidra/names_1.2.0.tsv](ghidra/names_1.2.0.tsv).
 - **Tools**: `.ptf` conversion and patching, Ghidra headless scripts, and a Unicorn
   emulator harness that runs the stock firmware's own code (drawing, pattern
@@ -44,9 +51,11 @@ Config → Firmware. You can return to stock the same way.
 | `ghidra/names_1.2.0.tsv` | Function names worked out so far, with notes |
 | `ghidra/scripts/` | Ghidra scripts: memory map setup, vtable functions, names, index export, decompile, callers |
 | `patch/colorsong/` | Colored Song blocks: C + assembly shim, linker script, build script, patch spec, prebuilt binary |
+| `patch/humanize/` | Humanize button: C, linker script, build script, patch spec, prebuilt binary |
+| `patch/all/` | Bundle spec: colorsong + humanize in one firmware |
 | `patch/versiontest/` | Version-text test patch |
 | `tools/ptf.py` | Read / convert / re-encode `.ptf` (Intel HEX), with a byte-exact round-trip check |
-| `tools/patch_ptf.py` | Apply a patch spec to a stock `.ptf` (stock hash + original-byte checks, gap-free append) |
+| `tools/patch_ptf.py` | Apply a patch or bundle spec to a stock `.ptf` (stock hash + original-byte checks, gap-free append) |
 | `tools/thumbdis.py` | Quick Thumb disassembly with literal-pool values and strings |
 | `tools/movw_refs.py` | Find literal and MOVW/MOVT references to an address |
 | `tools/vtables.py` | Find C++ vtables and list their method pointers |
@@ -56,6 +65,8 @@ Config → Firmware. You can return to stock the same way.
 | `tools/emu/fakefs.py` | Fake SD card behind the firmware's file system object (read and write) |
 | `tools/emu/song_grid.py`, `render_project.py` | Render a project's Song grid with the firmware's own drawing code |
 | `tools/emu/test_colorsong.py`, `test_rescan.py` | colorsong rule and scenario tests on the patched firmware |
+| `tools/emu/test_humanize.py` | humanize button, label and edit-rule tests on the patched firmware |
+| `tools/emu/seq_timing.py` | Run the stock sequencer on test patterns and print the MIDI it sends, with timing |
 | `tools/emu/check_version.py` | Print the version text a `.ptf` would show |
 
 Local-only folders (ignored by git): `work/` (converted images, exports), `out/`

@@ -1,6 +1,6 @@
 """Run individual Tracker+ firmware functions under Unicorn (Cortex-M7, Thumb).
 
-Loads the stock image, maps the i.MX RT1062 memories the firmware uses, applies the
+Loads the stock image, maps the i.MX RT10xx memories the firmware uses, applies the
 startup data-copy table (ITCM code, DTCM .data), and calls functions with a fake
 EVE display object that records every display-list word instead of sending it
 over SPI. Nothing here runs the real boot path: callers set up the RAM state a

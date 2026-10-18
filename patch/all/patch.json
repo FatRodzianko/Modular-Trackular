@@ -1,0 +1,13 @@
+{
+  "name": "all",
+  "description": "All mods in one firmware: colorsong + humanize",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "include": ["../colorsong/patch.json", "../humanize/patch.json"],
+  "version": "MT1",
+  "version_word": {
+    "at": "0x600CBF9C",
+    "old": "34b80360",
+    "note": "literal: \"%d.%d.%d\" (0x6003b834) used by sprintf in 0x600cbe88"
+  }
+}

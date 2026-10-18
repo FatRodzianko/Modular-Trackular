@@ -149,3 +149,33 @@
 600e4038	patfill_show_to_q	Fill popup "to" value text
 600bb098	voice_fx_filter_cutoff	FX 27/28/29: player+0x30 = normalized cutoff, +0x34 = type
 600bb020	voice_update_cutoff_q	applies player+0x30 through voice_set_cutoff (or the automation path)
+# Pattern screen: bottom bar, selection, undo (FINDINGS section 13). patview = 0x20021770, ed = patview + 0x1000.
+600e29ec	pat_show_page	binds the current page's buttons and draws its labels (ed+0x4e2 = page)
+600e2858	pat_bind_page1	Pattern, Length, Step jump, Fill, Preview, Undo, Redo, More
+600e2900	pat_bind_page2	Render Selection, Invert, Duplicate, Expand, Shrink, Copy, Paste, More
+600e29a4	pat_bind_page3	Pattern Name, Track Name, buttons 2..6 unused, More
+600e52ac	pat_labels_page1	
+600e559c	pat_labels_page2	
+600e584c	pat_labels_page3	sets colors and data only for buttons 0, 1 and 7
+600e2a44	pat_more_button	next page when no other button is held
+600e22b0	pat_fill_button_q	page 1 button 3
+600e2b18	pat_preview_button_q	page 1 button 4
+600e379c	pat_render_selection_button	
+600e0e3c	pat_invert_button	undo_push, ed_selection_to_seq, seq_invert_selection, fill rows, mark changed
+600df9f4	pat_duplicate_button	
+600df9a8	pat_expand_button	
+600df960	pat_shrink_button	
+600e11a4	pat_copy_button	
+600e12a0	pat_paste_button	
+600dfe64	pat_pattern_name_button	
+600dfdd0	pat_track_name_button	
+600ad918	seq_invert_selection	(seq, column): reverses the selected steps
+600c3d90	undo_push	(fm): current pattern -> 20-slot ring at 0x83f811cc
+600c3cf0	undo_save_cursor	(fm, slot): cursor and selection -> 0x2001f618 + 14*slot
+600e0b58	ed_selection_to_seq	editor selection (or the cursor cell) -> seq[0..3]
+600aeee4	seq_set_selection	(seq, step a, track a, step b, track b): sorted into seq[0..3]
+600def3c	ed_selected_column_q	part of each step an edit applies to
+600bccd8	fm_mark_pattern_changed	(fm): fm+0x4ca+pattern = 1
+600cf6ec	btn_bind	(manager, index, flag, handler): kind 1
+600cf74c	btn_bind_kind3	(manager, index, arg): kind 3
+600cf53c	btn_clear	(manager, first, last)

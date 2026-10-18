@@ -1,0 +1,46 @@
+{
+  "name": "humanize",
+  "description": "Pattern screen button (More, More, button 3) that adds small random Volume/Velocity and Micro-move FX to the notes in the selection, or the cursor's track",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "base": "0x601BC000",
+  "bin": "build/humanize.bin",
+  "sym": "build/humanize.sym",
+  "prebuilt_bin": "prebuilt/humanize.bin",
+  "prebuilt_sym": "prebuilt/humanize.sym",
+  "branches": [
+    {
+      "at": "0x600E29BA",
+      "old": "ecf797fe",
+      "to": "mt_hz_bind",
+      "note": "Pattern screen page 3: bind button 0 (Pattern Name); also binds button 2 to Humanize"
+    },
+    {
+      "at": "0x600E5884",
+      "old": "1cf06afa",
+      "to": "mt_hz_label",
+      "note": "Pattern screen page 3 labels: button 2's (empty) text -> Humanize"
+    },
+    {
+      "at": "0x600E593C",
+      "old": "1cf032fa",
+      "to": "mt_hz_colors",
+      "note": "Pattern screen page 3 labels: Track Name's colors, also given to button 2"
+    },
+    {
+      "at": "0x600E5966",
+      "old": "1cf047fa",
+      "to": "mt_hz_data",
+      "note": "Pattern screen page 3 labels: Track Name's data, also given to button 2"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "version": true,
+      "note": "version text 1.2.0-hz1"
+    }
+  ]
+}

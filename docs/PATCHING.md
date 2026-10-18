@@ -36,14 +36,19 @@ the compiled patch code in `patch/<name>/prebuilt/`, so this works out of the bo
 python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.json build/TrackerPlus_c10.ptf
 ```
 
-The patcher checks the stock image, checks the original bytes at every patched
-address, writes the new `.ptf`, reads it back, and prints its SHA-256. For the current
-patches the output must be byte-identical to the builds tested on hardware:
+Use `patch/humanize/patch.json` for humanize alone, or `patch/all/patch.json` for
+colorsong and humanize in one firmware.
 
-| Patch | Output file | Version text in Config | Output SHA-256 |
-|---|---|---|---|
-| colorsong `c10` | `TrackerPlus_c10.ptf` | `1.2.0-c10` | `5d82977eadf595b6a491b90c793dcd1bfc644cec74920a98897d86444e28cb4a` |
-| versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
+The patcher checks the stock image, checks the original bytes at every patched
+address, writes the new `.ptf`, reads it back, and prints its SHA-256. The output
+must be byte-identical to these builds:
+
+| Patch | Output file | Version text in Config | On hardware | Output SHA-256 |
+|---|---|---|---|---|
+| colorsong | `TrackerPlus_c10.ptf` | `1.2.0-c10` | tested | `5d82977eadf595b6a491b90c793dcd1bfc644cec74920a98897d86444e28cb4a` |
+| humanize | `TrackerPlus_hz1.ptf` | `1.2.0-hz1` | not yet | `d336ccadc8e67c78b8b05e9830dbe69fd464aa7ab5508093600d11c8aebc54e8` |
+| all (colorsong + humanize) | `TrackerPlus_MT1.ptf` | `1.2.0-MT1` | not yet | `d8f99ecc9d4c767046a43422c97d76ac10cb43a077e804600ad7f8790651f19c` |
+| versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 
 **Name the output `TrackerPlus<anything>.ptf`.** Config's firmware list only shows
 files that start with `TrackerPlus` and end with `.ptf`. Keep names short: on the
@@ -70,6 +75,7 @@ python -m pip install unicorn capstone numpy
 python tools/emu/check_version.py build/TrackerPlus_c10.ptf          # -> '1.2.0-c10'
 python tools/emu/test_colorsong.py build/TrackerPlus_c10.ptf
 python tools/emu/test_rescan.py build/TrackerPlus_c10.ptf "path/to/<project A>" "path/to/<project B>"
+python tools/emu/test_humanize.py build/TrackerPlus_hz1.ptf
 ```
 
 The test projects are copies of project folders from the SD card (`Projects/...`).
