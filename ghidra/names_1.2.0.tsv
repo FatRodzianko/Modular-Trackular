@@ -1,0 +1,83 @@
+# address	name	note
+# Names applied to the 1.2.0 Ghidra program by ApplyNames.java. "_q" suffix = best guess.
+60030318	Reset_Handler	MCUXpresso startup: FlexRAM config, data/bss tables, stack fill, libc init, main
+60094b50	SystemInit
+60166294	libc_init_array
+600a1edc	main
+600a1d3c	fw_clear_turnon	deletes /Firmware/_turnon if present
+600a1d68	system_reset	SCB->AIRCR = 0x05FA0004 (SYSRESETREQ), then spins
+600a1d94	fw_request_update	writes ptf name to /Firmware/_fwinfo, "start" to /Firmware/_turnon, resets
+6011f6b0	eve_color_rgb	0x04000000 | rgb
+6011f6d8	eve_vertex2f	0x40000000 | x<<15 | y
+6011f860	eve_blend_func	0x0B000000 | src<<3 | dst
+6011f8b8	eve_line_width
+6011f904	eve_scissor_xy
+6011f938	eve_scissor_size
+6011f96c	eve_begin	0x1F000000 | prim (3 lines, 4 line strip, 9 rects)
+6011f994	eve_end
+6011f9b8	eve_save_context
+6011f9dc	eve_restore_context
+6011fd08	eve_cmd_gradient
+6011fa88	eve_cmd_text_q
+60101c6c	disp_ctrl_set_position	ctrl +0x1c/+0x1e
+60101c8c	disp_ctrl_set_size	ctrl +0x20/+0x22
+60101cac	disp_ctrl_set_style	vtable +0x14
+60101cd0	disp_ctrl_set_style_fields
+60101cf4	disp_ctrl_set_flag0
+60101d0c	disp_ctrl_clear_flag0
+60101d5c	disp_ctrl_set_text	vtable +0x18
+60101d74	disp_ctrl_set_ptr38
+60101d8c	disp_ctrl_set_value	vtable +0x1c
+60101da4	disp_ctrl_set_colors	vtable +0x20; array of 0x00RRGGBB
+60101df8	disp_ctrl_set_data	vtable +0x24
+60101e84	disp_ctrl_refresh	queues control for redraw
+60102014	disp_synchronize_q
+60120350	ctrl_keyboard_draw	on-screen 42-key name keyboard
+6011ffd8	ctrl_textedit_draw
+60105140	ctrl_textlist_draw	27 px rows
+60106d6c	ctrl_list2col_draw	27 px rows, left/right text
+60108b7c	ctrl_list_draw_q
+601010c4	ctrl_bar_draw_q
+600d8590	disp_create_bar_q	allocates 0x34-byte control, vtable 0x60043090
+600cb64c	disp_create_label_q	vtable 0x6004694c
+600ff4dc	scr_song_create_controls	Song screen (module 0x600fd000)
+600fdd38	scr_song_update
+6010ea7c	scr_factorytest_create_controls
+60108eac	song_grid_draw	song screen: 16 x 12 grid of track blocks; filled color = theme+0x04 or +0x1c, empty = +0x20
+60108e24	song_grid_track_selection	tracks bounding box of the selected cells
+60109038	song_ctrl_draw_grid	vtable 0x60046c80 slot; calls song_grid_draw then song_grid_overlay_q
+60108144	song_grid_overlay_q
+6010827c	song_ctrl_ctor	0x5c-byte control, created by scr_song_create_controls via 0x600ff48c
+600ff48c	disp_create_song_ctrl
+600fe25c	scr_song_set_grid_data	fills screen+0xcc grid data (slots, masks, track flags) and calls disp_ctrl_set_data
+600c3998	pattern_update_track_usage	(ctx, patternNo 1-based, patternData): sets project lo/hi track-used bits; returns changed
+600c3b30	pattern_update_usage_current
+600c205c	pattern_save_now
+600c1fb4	pattern_write_file	0x302c data bytes + CRC = 0x3030
+600e1798	project_collect_used_patterns_q
+600908a4	crt_frame_dummy_q	GCC crtstuff; carries the image-end symbol 0x601bab78
+600908c8	crt_register_tm_clones_q
+600932a4	BOARD_ConfigMPU	MPU regions; 0x20280000 falls in region 4 (RW, Device)
+600cbe88	app_init_version_text_q	sprintf(0x200205d4, *(0x600cbf9c) "%d.%d.%d", 1, 2, 0)
+60167194	sprintf
+6009ded0	fs_name_filter	case 4: firmware list = "TrackerPlus*.ptf"
+600fe3d8	scr_song_start	Song screen entry: usage_current, then bl scr_song_set_grid_data at 0x600fe402
+600c2350	pattern_read_file	open(path, mode 0) / read 0x3030 / close via FS vtable
+600c23d4	pattern_load_now
+600c2690	project_save_workspace	writes Workspace/project.mt (0x914 bytes)
+600c2600	project_serialize	playlist RAM 0x202045c2 -> file +0x10 (0x100); RAM 0x202046c4 -> file +0x110 (0x700)
+600c4afc	file_write_chunked_q
+600a12ec	fs_exists	FS class vtable 0x60038224 +0x08
+600a1388	fs_open	+0x2c: (res{handle,ok}, fs, path, mode, x); allocates a 0x104 handle
+600a1498	fs_read	+0x30: (fs, buf, size, handle) -> bytes read or -1 (FatFs f_read)
+600a1670	fs_close	+0x40: (fs, handle, free)
+600a1318	fs_remove	+0x14
+6016712c	snprintf
+6009e7ac	fs_file_read
+6011458c	project_copy_patterns	project open: %s/%s/patterns/pattern_%02d.mtp -> Workspace/patterns (copier call at 0x601145ce)
+60114c7c	project_save_patterns	project save: Workspace/patterns -> %s/%s/patterns
+600c4578	file_copy_step	(copier, src, dst): 4 = done/skipped (missing src), chunked 0x7f80
+6009c398	fatfs_f_read	direct disk_read into caller buffer for >=512 at sector boundary, else via FIL+0x50
+60099854	fatfs_disk_read	drive 2 -> SD
+6009f680	sd_read_blocks	NXP SD_ReadBlocks: card lock (infinite wait), bounce buffer for unaligned
+6009de84	sdmmc_osa_lock_q	(lock, timeout) - called with 0xffffffff

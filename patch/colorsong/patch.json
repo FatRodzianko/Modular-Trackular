@@ -1,0 +1,88 @@
+{
+  "name": "colorsong",
+  "description": "Color Song screen track blocks by track content (hue = instruments, shade = everything else except Micro-move/Volume FX)",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "base": "0x601BAB80",
+  "bin": "build/colorsong.bin",
+  "sym": "build/colorsong.sym",
+  "prebuilt_bin": "prebuilt/colorsong.bin",
+  "prebuilt_sym": "prebuilt/colorsong.sym",
+  "branches": [
+    {
+      "at": "0x600C1360",
+      "old": "02f01afb",
+      "to": "mt_usage_hook",
+      "note": "pattern load (file manager)"
+    },
+    {
+      "at": "0x600C3B04",
+      "old": "fff748ff",
+      "to": "mt_usage_hook",
+      "note": "0x600c3a8c"
+    },
+    {
+      "at": "0x600C3B3E",
+      "old": "fff72bff",
+      "to": "mt_usage_hook",
+      "note": "pattern_update_usage_current (after save)"
+    },
+    {
+      "at": "0x600C3C8E",
+      "old": "fff783fe",
+      "to": "mt_usage_hook",
+      "note": "0x600c3b58 (song screen)"
+    },
+    {
+      "at": "0x600C3EFC",
+      "old": "fff74cfd",
+      "to": "mt_usage_hook",
+      "note": "0x600c3eac"
+    },
+    {
+      "at": "0x60117740",
+      "old": "acf72af9",
+      "to": "mt_usage_hook",
+      "note": "0x60117730 (file manager)"
+    },
+    {
+      "at": "0x60108FD2",
+      "old": "16f06dfb",
+      "to": "mt_color_hook_normal",
+      "note": "song_grid_draw filled block"
+    },
+    {
+      "at": "0x60108F7C",
+      "old": "16f098fb",
+      "to": "mt_color_hook_flagged",
+      "note": "song_grid_draw filled block, flagged track"
+    },
+    {
+      "at": "0x600FE402",
+      "old": "fff72bff",
+      "to": "mt_song_enter",
+      "note": "Song screen entry: bl scr_song_set_grid_data -> rescan, then original"
+    },
+    {
+      "at": "0x601145CE",
+      "old": "aff7d3ff",
+      "to": "mt_copy_hook",
+      "note": "project open: copy project pattern file -> Workspace/patterns (0x6011458c)"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "note": "version text 1.2.0-c10 (or p10)"
+    },
+    {
+      "at": "0x60042DD8",
+      "old": "39dd0f60",
+      "to": "mt_song_update",
+      "thumb": true,
+      "note": "Song screen vtable: update method 0x600fdd39 -> mt_song_update (one pattern file per update)"
+    }
+  ]
+}

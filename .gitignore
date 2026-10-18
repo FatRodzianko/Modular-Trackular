@@ -1,0 +1,24 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Polyend firmware and anything derived from it (never commit Polyend code)
+*.ptf
+*.bin
+# ...except our own compiled patch code (no Polyend code), for patching without a toolchain
+!patch/*/prebuilt/*.bin
+*.hex
+work/
+
+# Ghidra projects
+*.gpr
+*.rep/
+*.lock
+*.lock~
+ghidra/projects/
+
+# Emulator output
+out/
+build/
+patch/*/build/
