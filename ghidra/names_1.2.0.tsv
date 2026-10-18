@@ -199,3 +199,14 @@
 600e1f98	scr_pattern_update	Pattern screen update (vtable slot 0x600403dc)
 60118658	cfg_menu_apply	(screen, value): store into the selected item; type 4 calls desc[3] unchecked
 600cab60	cfg_menu_close_editor_q	
+# RAM map (FINDINGS section 15)
+600ff704	audio_memory_init	(pool, count): count blocks of 0x104 bytes (pool 0x20004378, 80 blocks)
+600b421c	audio_setup_q	audio engine setup; calls audio_memory_init
+60188780	_sbrk	heap from 0x2002fc68; pointer at 0x2002fb9c
+60188840	heap_limit_check	(new end): fails at or above 0x20051c68
+60166550	_malloc_r	newlib nano
+600a1ec0	malloc_or_halt	allocation behind new; loops forever on failure when a flag is set
+6010c254	heap_free_q	mallinfo().fordblks, shown as free heap
+6010c268	stack_max_used_q	deepest stack use: scans 0x20058000 down for the 0xAA fill
+600cb548	cfg_debug_info	Config: CPU load, free heap, max stack (with /.develop on the card)
+601225a4	sdram_top_buffers_init_q	clears two 8 KB buffers at 0x83ff5bf0

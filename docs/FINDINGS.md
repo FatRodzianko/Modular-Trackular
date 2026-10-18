@@ -243,10 +243,10 @@ sweep, per region:
 |---|---|---|
 | Flash after image end `0x601bab78` | Only the GCC crtstuff end-of-image symbol (`0x600908a4`, `0x600908c8`). No self-check of the image | **Patch code goes here**, appended with no gap |
 | Flash `0x601b1594`–`0x601bab78` | 0x95e4 bytes, mostly zeros, inside the image and not in the copy tables | Leave alone (may be referenced const data) |
-| DTCM `0x2002fbe4`–`0x20053000` | `_end` / heap start used by the allocator; the stack sits above | Heap, not free |
+| DTCM `0x2002fc68`–`0x20051c67` | The heap (`_sbrk`, section 15); above it 5 KB, then the stack | Heap, not free; the 5 KB gap is a candidate (section 15) |
 | OCRAM `0x20204f4c`–`0x20207fff` (tail of the 32 KB bank) | No address constants, no MOVW/MOVT | **Patch RAM goes here**: colorsong `0x20205000`–`0x20207fbf` (12,208 bytes used), humanize settings `0x20207fc0`–`0x20207fff` |
 | `0x20208000`–`0x202fffff` | Doesn't exist on this unit (reserved address space) | **Never use.** An access to `0x20280000` froze the unit (section 11) |
-| SDRAM `0x80000000`–`0x83ffffff` | Sample memory and buffers all the way to `0x83ff5bf0` | Not free |
+| SDRAM `0x80000000`–`0x83ff9bef` | Sample memory and fixed buffers, the last two at `0x83ff5bf0`–`0x83ff9bef` | Not free; the 25 KB above is a candidate (section 15) |
 
 Caveat: the bootloader's maximum image size is unknown (1.2.0 is 1.6 MB and grew
 28 KB over 1.0.3). `patch/versiontest` exists to test exactly that on hardware.
@@ -851,3 +851,66 @@ items (`tools/emu/test_humanize.py` walks it).
 last item, in nodes from the firmware's heap, and keeps the values in its own RAM
 (`0x20207fc0`) and in `<project folder>/humanize.bin`, read and written from the
 Pattern and Config screens' update methods. Tested on hardware.
+
+## 15. RAM map and RAM for patches
+
+A survey of all RAM, to find room for patch state beyond the OCRAM tail. Sources: the
+reset handler's FlexRAM setup and copy tables (section 2), the allocator, Ghidra's
+references (`ghidra/scripts/RefsInRange.java` for small ranges,
+`RefsSummary.java` for large ones), and the functions behind each candidate. None of
+the candidates below has been tested on hardware yet.
+
+### Layout
+
+| Range | Size | What |
+|---|---|---|
+| ITCM `0x00000008`–`0x0001fb37` | 127 KB | Fast RAM code, copied from flash at reset |
+| ITCM `0x0001fb38`–`0x0001ffff` | 1,224 B | **Candidate.** After the copied code; no references (the one Ghidra lists, `0x1ffff` in `0x600acac8`, is an unrelated constant). Above 64 KB the MPU maps ITCM as Device memory (region 4): aligned accesses only |
+| DTCM `0x20000000`–`0x20004377` | 17 KB | `.data` |
+| DTCM `0x20004378`–`0x200094b7` | 20 KB | Audio block pool: `audio_memory_init(0x20004378, 80)` (`0x600ff704`, from the audio setup `0x600b421c`) makes 80 blocks of 0x104 bytes, the same design as the Teensy Audio Library's `AudioMemory()` |
+| DTCM `0x200094b8`–`0x200097ff` | 840 B | **Candidate.** Between the pool and `.bss`; no references |
+| DTCM `0x20009800`–`0x2002fbe3` | 153 KB | `.bss` |
+| DTCM `0x2002fbe4`–`0x2002fc67` | 132 B | Variables outside the `.bss` table (`0x2002fb9c` region holds the heap pointer); not free |
+| DTCM `0x2002fc68`–`0x20051c67` | 136 KB | **Heap** (newlib nano). `_sbrk` (`0x60188780`) starts at `0x2002fc68` and refuses to pass `0x20051c68` (`heap_limit_check`, `0x60188840`). `malloc_or_halt` (`0x600a1ec0`, behind `new`) **loops forever** when an allocation fails (if a flag is set), so running out of heap freezes the unit |
+| DTCM `0x20051c68`–`0x20052fff` | 5,016 B | **Candidate.** Between the heap limit and the stack; only the limit constant refers to it. A stack overflow past 20 KB would reach it first |
+| DTCM `0x20053000`–`0x20057fff` | 20 KB | Stack (filled with `0xAA` at reset for the high-water mark) |
+| OCRAM `0x20200000`–`0x20204f4b` | 20 KB | `.bss` |
+| OCRAM `0x20205000`–`0x20207fff` | 12 KB | **Used by patches**: colorsong `0x20205000`–`0x20207fbf`, humanize `0x20207fc0`–`0x20207fff` (tested on hardware) |
+| SDRAM `0x80000000`–`0x83ff9bef` | 64 MB | Sample memory and fixed buffers. The top holds a stack of buffers: pattern copies, undo ring (`0x83f811cc`), audio and display buffers, ending with two 8 KB buffers at `0x83ff5bf0` (`0x601225a4`) |
+| SDRAM `0x83ff9bf0`–`0x83ffffff` | 25 KB | **Candidate.** After the last buffer; no references. Cached (MPU region 8, Normal write-back). Whether it is ready before `main` (patch constructors run earlier) is unchecked |
+
+### Measuring use on the device
+
+With an (empty) file named `.develop` in the root of the SD card, the firmware sets a
+developer flag at boot (`0x600aa62e`: `/.develop` exists → `*(0x2001fa58+0xb99)`), and
+the Config screen shows, once a second (`cfg_debug_info`, `0x600cb548`):
+
+- CPU load: min, max, average and last, in %;
+- **free heap**: newlib `mallinfo().fordblks` (`heap_free_q`, `0x6010c254`), the free
+  bytes inside the part of the heap claimed so far. It leaves out the room the heap
+  hasn't grown into, so the real headroom is this plus (`0x20051c68` − the current
+  break, `*(0x2002fb9c)`);
+- **max stack**: the deepest stack use since boot (`stack_max_used_q`, `0x6010c268`),
+  out of 20,480 bytes.
+
+### Options for patch RAM
+
+1. **Fixed regions, assigned by the patcher.** A patch states how much RAM it needs;
+   the patcher hands out space from the regions above, in `include` order, and moves
+   the patch's RAM addresses the same way it moves its code (a second relocation
+   table: link with the RAM origin shifted, and compare). Patch code would declare its
+   state as ordinary variables in a no-init RAM section instead of fixed addresses.
+   Usable pools, best first: the OCRAM tail (12 KB, proven), the DTCM gap above the
+   heap (4.9 KB, fast), the SDRAM top (25 KB, large but cached and slower), the ITCM
+   tail (1.2 KB, aligned access only), the DTCM gap after the audio pool (840 B).
+2. **Heap at startup.** A patch allocates its state from the firmware's heap in a
+   startup hook (as humanize does for its menu entries) and keeps one pointer in a
+   fixed slot. No free region needed, but it reduces the heap headroom, and a failed
+   allocation later in the stock code freezes the unit. Needs the headroom measured
+   first.
+
+Before any new region holds patch data, a diagnostic patch should confirm it on
+hardware: fill each candidate with a pattern at startup, and report how much of it is
+still untouched after heavy use (projects, sample loading and recording, rendering,
+export, MIDI, USB, the games). The same patch could show the heap break, which the
+debug screen leaves out.
