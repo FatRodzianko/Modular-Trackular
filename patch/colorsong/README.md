@@ -96,6 +96,13 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.json build/TrackerPlus_c10.ptf
 ```
 
+With Humanize in one firmware (`patch/all`; to choose your own set of patches, see
+"Choosing patches" in [docs/PATCHING.md](../../docs/PATCHING.md)):
+
+```bash
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT4.ptf
+```
+
 To build the patch code from source, you need the Arm GNU Toolchain
 (`arm-none-eabi-gcc` on `PATH`, or `ARM_GCC_BIN` set to its `bin` folder).
 `build.sh` writes `patch/colorsong/build/`, which the patcher then uses instead of

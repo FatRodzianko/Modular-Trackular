@@ -44,6 +44,10 @@ firmware from Polyend, check its SHA-256, run one Python command (no compiler
 needed), copy the result to `/Firmware` on the SD card, and install it through
 Config → Firmware. You can return to stock the same way.
 
+Each mod can be installed on its own, or several can be combined into one firmware.
+`patch/all` combines colorsong and Humanize, and you can make your own mix, including
+patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.md).
+
 ## Layout
 
 | Path | What |

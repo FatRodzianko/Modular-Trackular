@@ -109,7 +109,8 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/humanize/patch.json build/TrackerPlus_hz4.ptf
 ```
 
-Both mods in one firmware:
+With colorsong in one firmware (`patch/all`; to choose your own set of patches, see
+"Choosing patches" in [docs/PATCHING.md](../../docs/PATCHING.md)):
 
 ```bash
 python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT4.ptf

@@ -36,8 +36,9 @@ the compiled patch code in `patch/<name>/prebuilt/`, so this works out of the bo
 python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.json build/TrackerPlus_c10.ptf
 ```
 
-Use `patch/humanize/patch.json` for humanize alone, or `patch/all/patch.json` for
-colorsong and humanize in one firmware.
+Use `patch/humanize/patch.json` for Humanize alone, or `patch/all/patch.json` for
+colorsong and Humanize in one firmware (see "Choosing patches" below for your own
+mix).
 
 The patcher checks the stock image, checks the original bytes at every patched
 address, writes the new `.ptf`, reads it back, and prints its SHA-256. The output
@@ -53,6 +54,57 @@ must be byte-identical to these builds:
 **Name the output `TrackerPlus<anything>.ptf`.** Config's firmware list only shows
 files that start with `TrackerPlus` and end with `.ptf`. Keep names short: on the
 original Tracker, names longer than 31 characters showed garbage.
+
+### Choosing patches: one, several, or your own mix
+
+Each patch can be installed on its own, or several can go into one firmware:
+
+- **One patch:** use its own spec. `patch/colorsong/patch.json` gives colorsong only,
+  `patch/humanize/patch.json` Humanize only.
+- **Several patches:** use a bundle spec, which lists the patches to combine.
+  `patch/all/patch.json` is the bundle that ships (colorsong + Humanize):
+
+  ```json
+  "include": ["../colorsong/patch.json", "../humanize/patch.json"],
+  "version": "MT4",
+  ```
+
+To make your own mix, copy `patch/all/` to a new folder (for example `patch/mymix/`)
+and edit its `patch.json`:
+
+1. List the patches you want in `include`, as paths relative to the bundle's folder.
+   The order doesn't matter. Your own patches can be listed too.
+2. Change `name`, and set `version` to 1–3 characters that tell your build apart.
+   Config shows `1.2.0-<version>`; longer text doesn't show.
+3. Leave `stock_image_sha256` and `version_word` as they are.
+
+```bash
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/mymix/patch.json build/TrackerPlus_mymix.ptf
+```
+
+The patches in one firmware have to fit together:
+
+- **Flash:** each patch's code is linked to a fixed address (`base` in its
+  `patch.json`, the same as its `link.ld`), and the ranges must not overlap.
+  colorsong uses `0x601bab80`–`0x601bbfff` and Humanize `0x601bc000`–`0x601bcfff`, so
+  a new patch can start at `0x601bd000`.
+- **Hook sites:** two patches can't hook the same call or data word. If they both need
+  the same one, one patch has to call the other, which takes changes to their code.
+- **RAM:** each patch keeps its state at fixed addresses in its source code. The free
+  on-chip RAM is taken: colorsong uses `0x20205000`–`0x20207fbf` and Humanize
+  `0x20207fc0`–`0x20207fff`. A new patch has to use the firmware's heap (as Humanize
+  does for its menu entries) or another region that is proven unused and exists on
+  the device (FINDINGS sections 8 and 11).
+- **Firmware:** every patch must be for the same stock firmware
+  (`stock_image_sha256`).
+
+The patcher refuses to build when code ranges overlap, two patches hook the same site,
+a patch is for another firmware, or an original byte doesn't match. It **can't**
+detect RAM overlaps, or two patches that each work alone but disturb each other.
+
+A new combination is a firmware nobody has tested, and its SHA-256 isn't in the table
+above. Before installing it, run the emulator tests of every patch it contains against
+the combined `.ptf` (below), and keep the stock `.ptf` in `/Firmware`.
 
 ### Building the patch code yourself (optional)
 
@@ -77,6 +129,9 @@ python tools/emu/test_colorsong.py build/TrackerPlus_c10.ptf
 python tools/emu/test_rescan.py build/TrackerPlus_c10.ptf "path/to/<project A>" "path/to/<project B>"
 python tools/emu/test_humanize.py build/TrackerPlus_hz4.ptf
 ```
+
+Each test works on any firmware that contains its patch, so for a bundle run every
+contained patch's tests on the bundle's `.ptf`.
 
 The test projects are copies of project folders from the SD card (`Projects/...`).
 
@@ -128,3 +183,6 @@ details. A patch is:
   vtable slots with `"thumb": true`).
 - `tools/patch_ptf.py` checks everything, appends the code without gaps, and keeps the
   stock Intel HEX layout, so an unmodified image re-encodes to the exact stock file.
+- To combine it with other patches, give it its own flash range, hook sites and RAM,
+  and mark its version-text word with `"version": true` so a bundle can replace it
+  (see "Choosing patches" in section 2).
