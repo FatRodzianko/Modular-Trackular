@@ -179,3 +179,5 @@
 600cf6ec	btn_bind	(manager, index, flag, handler): kind 1
 600cf74c	btn_bind_kind3	(manager, index, arg): kind 3
 600cf53c	btn_clear	(manager, first, last)
+600e2c28	pat_record_button	r0 = 1 (pressed): toggles ed+0x254 (record mode), then pat_edit_mode_changed
+600e2a94	pat_edit_mode_changed	(patview): rebuild rows; redraw the bar via pat_show_page unless an overlay is open

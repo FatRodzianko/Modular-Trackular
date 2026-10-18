@@ -5,13 +5,15 @@
 Works with the humanize-only build and with bundles that include it.
 
 1. Button: runs the stock page-3 button binding (0x600e29a4) with a fake button
-   manager. Button 2 must be bound to a handler in the patch; the other buttons keep
-   their stock bindings.
+   manager. In record mode button 2 must be bound to a handler in the patch; outside
+   record mode it must stay unbound. The other buttons keep their stock bindings.
 2. Label: runs the stock page-3 label code (0x600e584c) with the display calls
-   stubbed and recorded. Button 2 must read "Humanize" and get Track Name's colors
-   and data; the other labels are unchanged.
+   stubbed and recorded. Button 2 must read "Humanize" and get Track Name's data, and
+   the active color set in record mode or the greyed-out one outside it. The other
+   labels are unchanged.
 3. Edit: presses the button (calls the bound handler) with a pattern in RAM and the
    editor state set up, through the stock selection, undo and changed-flag code.
+   Outside record mode a press must change nothing (no edit, no undo entry).
    Every step is checked against the rules:
      - steps without a note (empty, note off, cut, fade) are unchanged;
      - note and instrument never change, nor do other FX;
@@ -39,6 +41,9 @@ SEQ = 0x20017274                    # bytes 0..3: selection rectangle; +0x14: pa
 SEQ_PATTERN = SEQ + 0x14
 PATVIEW = 0x20021770                # Pattern screen
 ED = PATVIEW + 0x1000               # its editor state
+ED_RECORD = 0x254                   # record mode flag
+DISPLAY = 0x20027D64                # *(DISPLAY + 8) -> label color sets
+STYLE_ACTIVE, STYLE_GREY = 0x44, 0x54
 FM = 0x2001E488                     # file manager
 BUTTON_MANAGER_PTR = 0x200209E0
 PAGE3_BIND = 0x600E29A4
@@ -156,6 +161,9 @@ class Rig:
     def pattern(self) -> bytes:
         return bytes(self.m.uc.mem_read(self.buf, PATTERN_DATA_SIZE))
 
+    def record(self, on: bool) -> None:
+        self.m.w8(ED + ED_RECORD, 1 if on else 0)
+
     def editor(self, cursor_track: int, selection=None) -> None:
         m = self.m
         m.w8(ED + 0x1E4, cursor_track)
@@ -218,10 +226,14 @@ def main() -> int:
     m = r.m
 
     print("button binding (Pattern screen, page 3)")
+    r.record(False)
+    m.call(PAGE3_BIND, 0)
+    check(r.entry(2)[0] == 0, "outside record mode: button 2 stays unbound")
+    r.record(True)
     m.call(PAGE3_BIND, 0)
     kind, handler = r.entry(2)
     in_patch = 0x601BAB78 <= handler < 0x601C0000 and handler & 1
-    check(kind == 1 and bool(in_patch), f"button 2 bound to a patch handler ({kind}, {handler:#x})")
+    check(kind == 1 and bool(in_patch), f"record mode: button 2 bound to a patch handler ({kind}, {handler:#x})")
     for i, h in STOCK_HANDLERS.items():
         check(r.entry(i) == (1, h), f"button {i} keeps its stock handler {h:#x}")
     check(all(r.entry(i)[0] == 0 for i in range(3, 7)), "buttons 3..6 stay unbound")
@@ -233,16 +245,37 @@ def main() -> int:
     ctrls = list(range(20, 28))
     for i, c in enumerate(ctrls):
         m.w8(ED + 0x292 + i, c)
-    r.display.clear()
-    m.call(PAGE3_LABELS, PATVIEW)
-    texts = {c: m.cstr(p) for n, c, p in r.display if n == "text"}
-    colors = {c: p for n, c, p in r.display if n == "colors"}
-    data = {c: p for n, c, p in r.display if n == "data"}
-    check(texts.get(22) == "Humanize", f"button 2 text: {texts.get(22)!r}")
-    check(texts.get(20) == "Pattern" and texts.get(21) == "Track" and texts.get(27) == "More"
-          and all(texts.get(c) == "" for c in range(23, 27)), "other button texts unchanged")
-    check(22 in colors and colors[22] == colors.get(21), "button 2 gets Track Name's colors")
-    check(22 in data and data[22] == data.get(21), "button 2 gets Track Name's data")
+    styles = m.r32(DISPLAY + 8)
+    for rec in (True, False):
+        r.record(rec)
+        r.display.clear()
+        m.call(PAGE3_LABELS, PATVIEW)
+        texts = {c: m.cstr(p) for n, c, p in r.display if n == "text"}
+        colors = {c: p for n, c, p in r.display if n == "colors"}
+        data = {c: p for n, c, p in r.display if n == "data"}
+        mode = "record mode" if rec else "outside record mode"
+        check(texts.get(22) == "Humanize", f"{mode}: button 2 text {texts.get(22)!r}")
+        check(texts.get(20) == "Pattern" and texts.get(21) == "Track" and texts.get(27) == "More"
+              and all(texts.get(c) == "" for c in range(23, 27)), f"{mode}: other button texts unchanged")
+        want = styles + (STYLE_ACTIVE if rec else STYLE_GREY)
+        check(colors.get(22) == want and colors.get(21) == styles + STYLE_ACTIVE,
+              f"{mode}: button 2 colors {'active' if rec else 'greyed out'}, Track Name active")
+        check(22 in data and data[22] == data.get(21), f"{mode}: button 2 gets Track Name's data")
+
+    print("press outside record mode: nothing happens")
+    before = scenario_pattern()
+    r.load(before)
+    r.editor(cursor_track=0)
+    r.record(False)
+    m.w8(UNDO_STATE, 0)
+    m.w8(UNDO_STATE + 1, 0)
+    m.w8(CHANGED + 5, 0)
+    r.fill_rows = 0
+    m.call(handler)
+    check(r.pattern() == bytes(before), "pattern unchanged")
+    check(m.r32(UNDO_STATE) & 0xFFFF == 0 and m.r32(CHANGED + 5) & 0xFF == 0 and r.fill_rows == 0,
+          "no undo entry, not marked changed, grid not rebuilt")
+    r.record(True)
 
     print("humanize, no selection: the cursor's whole track")
     before = scenario_pattern()

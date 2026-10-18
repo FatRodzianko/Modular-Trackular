@@ -17,9 +17,9 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   Tested on hardware. See [patch/colorsong/README.md](patch/colorsong/README.md).
 - **humanize**: a Humanize button on the Pattern screen gives the notes in the
   selection (or the cursor's track) small random Micro-move and Volume/Velocity
-  FX, so programmed parts sound less mechanical. Undo reverts it. Tested in the
-  emulator, not yet on hardware. See [patch/humanize/README.md](patch/humanize/README.md).
-- **all**: colorsong and humanize in one firmware (version text `1.2.0-MT1`),
+  FX, so programmed parts sound less mechanical. Works in record mode, and Undo
+  reverts it. Tested on hardware. See [patch/humanize/README.md](patch/humanize/README.md).
+- **all**: colorsong and humanize in one firmware (version text `1.2.0-MT2`),
   from [patch/all/patch.json](patch/all/patch.json).
 - **versiontest**: the smallest possible mod (version text `1.2.0-MT0`), a harmless
   first check that your unit installs patched firmware. See

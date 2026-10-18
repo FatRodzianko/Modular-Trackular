@@ -760,10 +760,17 @@ The Pattern screen object is `patview` = `0x20021770`. Its editor state is `ed` 
 | 3 | `0x600e29a4` / `0x600e584c` | Pattern Name `0x600dfe64`, Track Name `0x600dfdd0`, buttons 2–6 unused, More |
 
 - Each label gets `disp_ctrl_set_text` (top line), `disp_ctrl_set_ptr38` (second
-  line), `disp_ctrl_set_colors` (a color set at `+0x44`, `+0x54` or `+0x64` of
-  `*(display+8)`) and `disp_ctrl_set_data` (`patview+0x12ac`, `+0x12cc` or `+0x12ec`),
-  then all 8 get style, value and refresh. Page 3 sets colors and data only for
-  buttons 0, 1 and 7; the unused buttons keep page 2's.
+  line), `disp_ctrl_set_colors` (a color set at `+0x24`..`+0x64` of `*(display+8)`)
+  and `disp_ctrl_set_data` (`patview+0x12ac`, `+0x12cc` or `+0x12ec`), then all 8 get
+  style, value and refresh. Page 3 sets colors and data only for buttons 0, 1 and 7;
+  the unused buttons keep page 2's.
+- **Record mode** is `ed+0x254`. The editing buttons only work in it: page 2 binds
+  its buttons only when it is set, and its labels use color set `+0x44` (active) or
+  `+0x54` (greyed out); page 1 does the same for Fill, Undo and Redo (`+0x24`/`+0x34`,
+  `+0x44`/`+0x54`). The record button (`pat_record_button`, `0x600e2c28`, acts when
+  r0 = 1) toggles it, and `pat_edit_mode_changed` (`0x600e2a94`, also called from the
+  other record-flag writer at `0x600c83fe`) rebuilds the rows and redraws the bar
+  through `pat_show_page`, unless an overlay is open (`ed+0x398`, `*(0x20020880+0x75)`).
 
 ### Selection and editing
 
@@ -790,6 +797,7 @@ The Pattern screen object is `patview` = `0x20021770`. Its editor state is `ed` 
 - Random numbers: `rand_range_q(lo, hi)` (ITCM `0x3af4`, veneer `0x600af0e8`) returns
   lo..hi − 1 from a Park–Miller state. The random fill and the random FX use it.
 
-`patch/humanize` binds page 3's button 2 and labels it "Humanize" (its README lists the
-hooks). Its handler follows the Invert sequence above, so stock Undo reverts it.
-Checked in the emulator only.
+`patch/humanize` binds page 3's button 2 in record mode and labels it "Humanize"
+(greyed out outside record mode; its README lists the hooks). Its handler follows
+the Invert sequence above, so stock Undo reverts it, including large edits. Tested
+on hardware; the record-mode check is tested in the emulator only.

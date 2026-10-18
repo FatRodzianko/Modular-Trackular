@@ -8,8 +8,13 @@
  *  - mt_hz_bind replaces the call that binds button 0 on page 3 (0x600e29ba): it binds
  *    button 0 as before, then button 2 to mt_hz_button.
  *  - mt_hz_label / mt_hz_colors / mt_hz_data replace three calls in page 3's label
- *    code (0x600e584c): button 2's text becomes "Humanize", and it gets the same
- *    colors and data as Track Name, so it looks like an active button.
+ *    code (0x600e584c): button 2's text becomes "Humanize", and it gets Track Name's
+ *    data and colors, so it looks like an active button.
+ *
+ * Like the stock editing buttons (Fill, Undo, Redo, page 2), Humanize only works in
+ * record mode: without it the button is left unbound and drawn in the grey color set.
+ * Toggling record redraws the current page (0x600e2a94 -> pat_show_page), which
+ * runs these hooks again.
  *
  * mt_hz_button does what the stock Invert button does around its edit: push the
  * pattern onto the undo ring (so Undo reverts it), turn the editor's selection into
@@ -31,7 +36,7 @@
 #include <stdint.h>
 
 #ifndef HUMANIZE_VERSION
-#define HUMANIZE_VERSION "hz1"
+#define HUMANIZE_VERSION "hz2"
 #endif
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */
@@ -54,7 +59,13 @@
 /* editor state (FW_ED + offset) */
 #define ED_CURSOR_TRACK     0x1E4u
 #define ED_SELECTION_MODE   0x1F4u          /* 2 = a selection is active */
+#define ED_RECORD           0x254u          /* record mode: editing buttons are active */
 #define ED_BUTTON_CTRL      0x292u          /* int8 control index of bottom-bar button 0..7 */
+
+/* display: *(display + 8) -> color sets for the bottom-bar labels */
+#define DISP_STYLES         8u
+#define STYLE_BUTTON        0x44u           /* active button (Track Name, page 2 in record mode) */
+#define STYLE_BUTTON_OFF    0x54u           /* greyed out (page 2 outside record mode) */
 
 /* pattern data: 0x1c-byte header, then 16 tracks of 0x301 bytes (last-step byte,
  * then 128 steps of note, instrument, fx1 type, fx1 value, fx2 type, fx2 value) */
@@ -127,8 +138,15 @@ static void humanize_step(uint8_t *step)
         add_fx(step, FX_VOLUME, clamp(HZ_VOLUME_CENTER + rnd(-HZ_HALF, HZ_HALF), 1, 100));
 }
 
+static int record_mode(void)
+{
+    return *(const volatile uint8_t *)(FW_ED + ED_RECORD) != 0;
+}
+
 void mt_hz_button(void)
 {
+    if (!record_mode())                         /* only bound in record mode; just in case */
+        return;
     ((obj_fn)FW_UNDO_PUSH)(FW_FM);
     ((void_fn)FW_SEL_TO_SEQ)();
 
@@ -170,11 +188,14 @@ static int hz_ctrl(void)
     return *(const volatile int8_t *)(FW_ED + ED_BUTTON_CTRL + HZ_BUTTON);
 }
 
-/* replaces "bl 0x600cf6ec" at 0x600e29ba (page 3: bind button 0 = Pattern Name) */
+/* replaces "bl 0x600cf6ec" at 0x600e29ba (page 3: bind button 0 = Pattern Name).
+ * The page's binding has just cleared buttons 0..6, so outside record mode button 2
+ * stays unbound. */
 void mt_hz_bind(void *manager, uint32_t index, uint32_t flag, void_fn handler)
 {
     ((bind_fn)FW_BIND_BUTTON)(manager, index, flag, handler);
-    ((bind_fn)FW_BIND_BUTTON)(manager, HZ_BUTTON, 1, mt_hz_button);
+    if (record_mode())
+        ((bind_fn)FW_BIND_BUTTON)(manager, HZ_BUTTON, 1, mt_hz_button);
 }
 
 /* replaces "bl disp_ctrl_set_text" at 0x600e5884 (page 3: button 2's empty text) */
@@ -184,11 +205,14 @@ void mt_hz_label(void *display, int ctrl, const void *text)
     ((ctrl_fn)FW_SET_TEXT)(display, ctrl, "Humanize");
 }
 
-/* replaces "bl disp_ctrl_set_colors" at 0x600e593c (page 3: Track Name's colors) */
+/* replaces "bl disp_ctrl_set_colors" at 0x600e593c (page 3: Track Name's colors).
+ * Button 2 gets the active set in record mode and the greyed-out set otherwise. */
 void mt_hz_colors(void *display, int ctrl, const void *colors)
 {
     ((ctrl_fn)FW_SET_COLORS)(display, ctrl, colors);
-    ((ctrl_fn)FW_SET_COLORS)(display, hz_ctrl(), colors);
+    const uint8_t *styles = *(const uint8_t *const *)((const uint8_t *)display + DISP_STYLES);
+    ((ctrl_fn)FW_SET_COLORS)(display, hz_ctrl(),
+                             styles + (record_mode() ? STYLE_BUTTON : STYLE_BUTTON_OFF));
 }
 
 /* replaces "bl disp_ctrl_set_data" at 0x600e5966 (page 3: Track Name's data) */
