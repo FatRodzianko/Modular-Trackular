@@ -819,13 +819,20 @@ items (`tools/emu/test_humanize.py` walks it).
 - **Item** (kind 2), `cfg_menu_item(node, parent, label, help, type, descriptor)`
   (`0x601183e8`): `+4` label, `+8` help text (shown by the editor), `+0xc` type,
   `+0x10` descriptor, `+0x14` value text buffer. Types: 1/2 number, descriptor
-  {value pointer, min, max, step, display offset}; 3/4 options, descriptor {value
-  pointer, count, names}; 5/6 text; 7 action (function pointer). The constructor
+  {value pointer, min, max, step, display offset}; 3 options, descriptor {value
+  pointer, count, names}; 4 options with an apply callback, descriptor {value
+  pointer, count, names, callback}; 5/6 text; 7 action (function pointer). The constructor
   registers every node with `atexit` (`0x600a3594`).
 - The number editor (`0x600cada0`, opened by `cfg_menu_open_editor` `0x601185d0`)
   lists min..max and stores the chosen **index** in the value byte, while the list
   shows value + display offset. Stock number items all use min 0: a 1..100 setting is
   stored as 0..99 with offset 1.
+- Apply: `cfg_menu_apply(screen, value)` (`0x60118658`, from the editor) stores the
+  choice in the selected item's value byte (numbers: value + min; options: if below
+  the count), calls a type 4 item's callback **without checking it**, and closes the
+  editor (`0x600cab60`). The stock callbacks apply the setting (Anti-aliasing
+  `0x600c6054`); Metronome State's (`0x600c6128`) is empty. A type 4 descriptor
+  without the callback word makes Apply jump into whatever follows it.
 - Navigation: the current folder is `*(0x20028180)`. `cfg_menu_select`
   (`0x60118928`) opens a child folder (any depth) or an item's editor (types 1..4) or
   runs an action (7); `cfg_menu_back` (`0x60118904`) goes to the parent, or returns
@@ -843,4 +850,4 @@ items (`tools/emu/test_humanize.py` walks it).
 "Humanize" folder with three number items and an Off/On item after the constructor's
 last item, in nodes from the firmware's heap, and keeps the values in its own RAM
 (`0x20207fc0`) and in `<project folder>/humanize.bin`, read and written from the
-Pattern and Config screens' update methods. Checked in the emulator only.
+Pattern and Config screens' update methods. Tested on hardware.

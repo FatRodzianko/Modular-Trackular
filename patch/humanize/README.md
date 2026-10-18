@@ -5,11 +5,11 @@ Pattern screen. Pressing it gives the notes in the selection small random change
 timing (Micro-move, `m`) and level (Volume/Velocity, `V`), so programmed parts sound
 less robotic. How much, and whether levels change at all, is set per project under
 Config → Project Settings → Humanize. Installed on its own, Config shows the firmware
-version as `1.2.0-hz3`. Together with colorsong ([`patch/all`](../all/patch.json)) it
-shows `1.2.0-MT3`.
+version as `1.2.0-hz4`. Together with colorsong ([`patch/all`](../all/patch.json)) it
+shows `1.2.0-MT4`.
 
-**Status:** the button and the edit are tested on hardware. The settings are tested in
-the emulator only.
+**Status:** tested on hardware, apart from the Volume/velocity item's Apply, which
+is tested in the emulator only.
 
 ## Using it
 
@@ -77,7 +77,7 @@ startup (`0x60118acc`); Project Settings is created with room for exactly its 10
 | `mt_hz_colors` | `bl disp_ctrl_set_colors` at `0x600e593c` | Track Name's colors; button 2 gets the active color set in record mode and the greyed-out one otherwise |
 | `mt_hz_data` | `bl disp_ctrl_set_data` at `0x600e5966` | Track Name's data, also given to button 2 |
 | `mt_hz_settings_folder` | `bl cfg_menu_folder` at `0x60118b00` | Creates Project Settings with room for 11 items instead of 10 |
-| `mt_hz_last_item` | the menu constructor's last `bl cfg_menu_item` (`0x601193e6`) | Adds the Humanize folder and its 4 items to Project Settings, as stock number and Off/On items |
+| `mt_hz_last_item` | the menu constructor's last `bl cfg_menu_item` (`0x601193e6`) | Adds the Humanize folder and its 4 items to Project Settings, as stock number and Off/On items (the Off/On item with an apply callback, which the menu calls unchecked) |
 | `mt_hz_pattern_update` | Pattern screen vtable slot `0x600403dc` (update `0x600e1f98`) | Loads `humanize.bin` when the project changes, saves it after a change, then runs the stock update |
 | `mt_hz_config_update` | Config screen vtable slot `0x6003b5f8` (update `0x600c6474`) | The same, while Config is open |
 
@@ -97,7 +97,7 @@ list index, so 1–100 is kept as 0–99 and shown + 1. The settings file is rea
 written from the two screens' update methods, where the stock code does its own file
 work, in the same way colorsong saves its colors: one 12-byte file (`HHZ1`, the 4
 values, a checksum), written only when a value has changed. The menu nodes come from
-the firmware's heap. The code is 2,340 bytes at `0x601bc000`, the first 4 KB flash
+the firmware's heap. The code is 2,348 bytes at `0x601bc000`, the first 4 KB flash
 sector after colorsong's code, so both fit in one firmware. Firmware addresses and
 structures are in [docs/FINDINGS.md](../../docs/FINDINGS.md) (sections 13 and 14).
 
@@ -107,13 +107,13 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/humanize/patch.json build/TrackerPlus_hz3.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/humanize/patch.json build/TrackerPlus_hz4.ptf
 ```
 
 Both mods in one firmware:
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT3.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT4.ptf
 ```
 
 To build the patch code from source, you need the Arm GNU Toolchain
@@ -130,7 +130,7 @@ patch/humanize/build.sh
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_humanize.py build/TrackerPlus_hz3.ptf
+python tools/emu/test_humanize.py build/TrackerPlus_hz4.ptf
 ```
 
 It runs the stock code with the patch in place:
@@ -142,19 +142,19 @@ It runs the stock code with the patch in place:
   every value of each window shows up over 300 presses, with the default settings and
   with others (range 20, Volume/velocity off, MIDI velocity 100, Sample volume 30).
 - **Config menu:** the stock menu constructor, then the stock select, back, value
-  display and editor code on the Humanize folder.
+  display, editor and Apply code on the Humanize folder and each of its items.
 - **Settings file:** the two update hooks with a fake SD card: defaults without a file,
   one write a while after a change, per-project values, a damaged file, and a new
   project's first save.
 
-The same test runs on `TrackerPlus_MT3.ptf`.
+The same test runs on `TrackerPlus_MT4.ptf`.
 
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-hz3 Build 1504` (or
-`1.2.0-MT3 Build 1504` for both mods).
+Config → Firmware → the patched file. Config should show `1.2.0-hz4 Build 1504` (or
+`1.2.0-MT4 Build 1504` for both mods).
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Humanized patterns keep their
 FX and play the same on stock firmware. Stock firmware ignores the `humanize.bin`

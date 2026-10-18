@@ -197,3 +197,5 @@
 600a3594	atexit_q	(object, destructor, dso)
 600c6474	scr_config_update	Config screen update (vtable 0x6003b5f0 slot +8)
 600e1f98	scr_pattern_update	Pattern screen update (vtable slot 0x600403dc)
+60118658	cfg_menu_apply	(screen, value): store into the selected item; type 4 calls desc[3] unchecked
+600cab60	cfg_menu_close_editor_q	

@@ -46,8 +46,8 @@ must be byte-identical to these builds:
 | Patch | Output file | Version text in Config | On hardware | Output SHA-256 |
 |---|---|---|---|---|
 | colorsong | `TrackerPlus_c10.ptf` | `1.2.0-c10` | tested | `5d82977eadf595b6a491b90c793dcd1bfc644cec74920a98897d86444e28cb4a` |
-| humanize | `TrackerPlus_hz3.ptf` | `1.2.0-hz3` | button tested, settings not yet | `f5b886cb22e1bb4a9104a99338cdbb625aa2d54fa12af6636505839e7cf00d97` |
-| all (colorsong + humanize) | `TrackerPlus_MT3.ptf` | `1.2.0-MT3` | button tested, settings not yet | `6026fa4dbac11c0f83df68addc84c41baaccaf892cc053079a0621f340119eeb` |
+| humanize | `TrackerPlus_hz4.ptf` | `1.2.0-hz4` | tested (Volume/velocity Apply: emulator) | `2a4185bcba6ca99948a3e21bfdfd86591838a968f70c7b9df945a185a6233d8e` |
+| all (colorsong + humanize) | `TrackerPlus_MT4.ptf` | `1.2.0-MT4` | tested (Volume/velocity Apply: emulator) | `7aac800f0b3279c530be37d4eba6fb0d9ac4a022090463258069eb60cc9c78d7` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 
 **Name the output `TrackerPlus<anything>.ptf`.** Config's firmware list only shows
@@ -75,7 +75,7 @@ python -m pip install unicorn capstone numpy
 python tools/emu/check_version.py build/TrackerPlus_c10.ptf          # -> '1.2.0-c10'
 python tools/emu/test_colorsong.py build/TrackerPlus_c10.ptf
 python tools/emu/test_rescan.py build/TrackerPlus_c10.ptf "path/to/<project A>" "path/to/<project B>"
-python tools/emu/test_humanize.py build/TrackerPlus_hz3.ptf
+python tools/emu/test_humanize.py build/TrackerPlus_hz4.ptf
 ```
 
 The test projects are copies of project folders from the SD card (`Projects/...`).

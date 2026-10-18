@@ -49,7 +49,7 @@
 #include <stdint.h>
 
 #ifndef HUMANIZE_VERSION
-#define HUMANIZE_VERSION "hz3"
+#define HUMANIZE_VERSION "hz4"
 #endif
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */
@@ -351,11 +351,18 @@ void mt_hz_data(void *display, int ctrl, const void *data)
 
 /* number item: value pointer, then min, max, step and display offset */
 struct menu_number { volatile uint8_t *value; uint8_t min, max, step, offset; };
-/* option item: value pointer, option count, option names */
-struct menu_options { volatile uint8_t *value; uint32_t count; const char *const *names; };
+/* option item (type 4): value pointer, option count, option names, and a callback that
+ * the menu's apply (cfg_menu_apply, 0x60118658) calls after storing the choice, without
+ * checking it for NULL. The stock ones apply the setting (Metronome State's is empty). */
+struct menu_options { volatile uint8_t *value; uint32_t count; const char *const *names; void_fn on_apply; };
+
+static void option_applied(void)            /* settings_tick sees the new value */
+{
+}
 
 static const struct menu_number range_desc = {&HZ->value[SET_RANGE], 0, 99, 1, 1};
-static const struct menu_options volume_desc = {&HZ->value[SET_VOLUME], 2, (const char *const *)FW_OFF_ON};
+static const struct menu_options volume_desc = {&HZ->value[SET_VOLUME], 2, (const char *const *)FW_OFF_ON,
+                                                option_applied};
 static const struct menu_number midi_desc = {&HZ->value[SET_MIDI], 0, 99, 1, 1};
 static const struct menu_number sample_desc = {&HZ->value[SET_SAMPLE], 0, 99, 1, 1};
 

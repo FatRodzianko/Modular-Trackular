@@ -19,9 +19,8 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   selection (or the cursor's track) small random Micro-move and Volume/Velocity
   FX, so programmed parts sound less mechanical. Works in record mode, and Undo
   reverts it. Range and default velocities are set per project under Config →
-  Project Settings → Humanize. The button is tested on hardware, the settings in the
-  emulator. See [patch/humanize/README.md](patch/humanize/README.md).
-- **all**: colorsong and humanize in one firmware (version text `1.2.0-MT3`),
+  Project Settings → Humanize. Tested on hardware. See [patch/humanize/README.md](patch/humanize/README.md).
+- **all**: colorsong and humanize in one firmware (version text `1.2.0-MT4`),
   from [patch/all/patch.json](patch/all/patch.json).
 - **versiontest**: the smallest possible mod (version text `1.2.0-MT0`), a harmless
   first check that your unit installs patched firmware. See

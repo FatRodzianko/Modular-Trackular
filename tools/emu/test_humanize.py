@@ -80,6 +80,7 @@ PROJECT_SETTINGS = 0x20028714
 MENU_CURRENT = 0x20028180           # -> the folder the Config screen shows
 MENU_SELECT, MENU_BACK = 0x60118928, 0x60118904
 MENU_FORMAT, MENU_REDRAW, MENU_EDITOR = 0x6011870C, 0x60118828, 0x601185D0
+MENU_APPLY, MENU_EDITOR_CLOSE = 0x60118658, 0x600CAB60   # (screen, value): store, callback, close
 OFF_ON = 0x60060B88
 PATTERN_UPDATE_SLOT, PATTERN_UPDATE = 0x600403DC, 0x600E1F98
 CONFIG_UPDATE_SLOT, CONFIG_UPDATE = 0x6003B5F8, 0x600C6474
@@ -501,6 +502,19 @@ def menu_checks(ptf: Path) -> None:
     m.w8(folder + 0x1C, 1)                               # Volume/velocity
     m.call(MENU_SELECT)
     check(editors[-1:] == [(4, "Volume/velocity", m.r32(items[1] + 0x10))], "select on Volume/velocity opens the option editor")
+    closed = []
+    m.stub_function(MENU_EDITOR_CLOSE, lambda mm: closed.append(1))
+    for i, (name, value) in enumerate((("Range", 19), ("Volume/velocity", 0), ("Volume/velocity", 1),
+                                       ("MIDI velocity", 99), ("Sample volume", 29))):
+        idx = [w[0] for w in want].index(name)
+        m.w8(folder + 0x1C, idx)
+        n = len(closed)
+        m.call(MENU_APPLY, 0, value, max_insns=2_000_000)  # the editor's Apply, stock code
+        check(m.uc.mem_read(HZ_VALUE + idx, 1)[0] == value and len(closed) == n + 1,
+              f"Apply on {name} ({value}): stored, editor closed")
+    opt = m.r32(items[1] + 0x10)
+    cb = m.r32(opt + 12)
+    check(0x601BAB78 <= cb < 0x601C0000 and cb & 1, f"Volume/velocity has an apply callback in the patch ({cb:#x})")
     back = m.call(MENU_BACK)
     check(back == 1 and m.r32(MENU_CURRENT) == ps, "back returns to Project Settings")
     back = m.call(MENU_BACK)
