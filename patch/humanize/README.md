@@ -8,8 +8,7 @@ Config → Project Settings → Humanize. Installed on its own, Config shows the
 version as `1.2.0-hz4`. Together with colorsong ([`patch/all`](../all/patch.json)) it
 shows `1.2.0-MT4`.
 
-**Status:** tested on hardware, apart from the Volume/velocity item's Apply, which
-is tested in the emulator only.
+**Status:** tested on hardware.
 
 ## Using it
 
