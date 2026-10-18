@@ -1,4 +1,5 @@
-/* colorsong is appended right after the stock 1.2.0 image (ends 0x601bab78). */
+/* Linked right after the stock 1.2.0 image (ends 0x601bab78), where colorsong lands
+ * alone or first; tools/patch_ptf.py moves it elsewhere with build/colorsong.rel. */
 MEMORY
 {
     PATCH (rx) : ORIGIN = 0x601BAB80, LENGTH = 16K

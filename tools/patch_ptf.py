@@ -2,17 +2,23 @@
 
 Usage: python tools/patch_ptf.py <stock.ptf> <patch.json> <out.ptf>
 
-A spec lists "bin"/"sym" (the patch build output; "prebuilt_bin"/"prebuilt_sym" are
-used when there is no local build), "branches" (Thumb-2 BL sites to retarget) and optional "words"
-(aligned 32-bit literals to replace with a symbol address; "thumb": true sets bit 0,
-for function pointers such as vtable entries).
+A spec lists "bin"/"sym"/"rel" (the patch build output: code, symbols and relocation
+table from tools/mkrel.py; "prebuilt_bin"/"prebuilt_sym"/"prebuilt_rel" are used when
+there is no local build), "branches" (Thumb-2 BL sites to retarget) and optional
+"words" (aligned 32-bit literals to replace with a symbol address; "thumb": true sets
+bit 0, for function pointers such as vtable entries).
+
+Placement: a patch goes right after the stock image, or right after the patch before
+it, 16-byte aligned. Its relocation table lists the words that hold its own
+addresses; they and its symbols are shifted to where it lands, so it can sit anywhere.
+A spec with a fixed "base" (and no relocation table) sits exactly there instead.
 
 A bundle spec combines several patches into one firmware: "include" lists their
-patch.json files (relative to the bundle's folder) and "version" gives the version
-text (Config shows 1.2.0-<version>, at most 3 characters). The included patches' own
-version-text words ("version": true) are dropped, and the bundle's text is appended
-after the last patch. Each patch keeps its own base address; their code ranges and
-hook sites must not overlap.
+patch.json files (relative to the bundle's folder), in the order they are placed, and
+"version" gives the version text (Config shows 1.2.0-<version>, at most 3 characters).
+The included patches' own version-text words ("version": true) are dropped, and the
+bundle's text is appended after the last patch. Hook sites must not overlap; RAM is
+not checked (each patch's RAM addresses are fixed in its code).
 
 - Refuses unless the stock image matches the SHA-256 in patch.json.
 - Every branch or word site is checked against its original bytes before it is rewritten
@@ -36,6 +42,7 @@ from ptf import Record, encode_ptf, read_ptf  # noqa: E402
 
 VERSION_PREFIX = b"%d.%d.%d-"
 VERSION_MAX = 3                     # "1.2.0-" + 3 characters: longer text doesn't show
+ALIGN = 16                          # where a patch may start (keeps 4-byte literal alignment)
 
 
 def thumb_bl(at: int, target: int) -> bytes:
@@ -61,21 +68,56 @@ def load_symbols(path: Path) -> dict[str, int]:
     return syms
 
 
-def load_patch(spec: dict, pdir: Path, in_bundle: bool) -> dict:
-    """One patch: its code blob, symbols and hook sites (words resolved to values)."""
-    bin_path, sym_path = pdir / spec["bin"], pdir / spec["sym"]
-    if not bin_path.exists() and "prebuilt_bin" in spec:
-        bin_path, sym_path = pdir / spec["prebuilt_bin"], pdir / spec["prebuilt_sym"]
-        print(f"no local build, using the prebuilt patch: {bin_path.relative_to(pdir.parent.parent)}")
-    syms = load_symbols(sym_path)
-    words = []
-    for wd in spec.get("words", []):
-        if in_bundle and wd.get("version"):
+def load_rel(path: Path) -> tuple[int, int, list[int]]:
+    """A relocation table from tools/mkrel.py: link base, size, word offsets."""
+    link = size = None
+    offsets = []
+    for line in path.read_text().splitlines():
+        parts = line.split()
+        if not parts:
             continue
-        value = syms[wd["to"]] | (1 if wd.get("thumb") else 0)
-        words.append((wd, value))
-    return {"name": spec["name"], "base": int(spec["base"], 16), "blob": bin_path.read_bytes(),
-            "syms": syms, "branches": spec["branches"], "words": words}
+        if parts[0] == "link":
+            link = int(parts[1], 0)
+        elif parts[0] == "size":
+            size = int(parts[1], 0)
+        else:
+            offsets.append(int(parts[0], 0))
+    if link is None or size is None:
+        sys.exit(f"{path}: not a relocation table")
+    return link, size, offsets
+
+
+def load_patch(spec: dict, pdir: Path, in_bundle: bool) -> dict:
+    """One patch: its code blob, symbols, relocation table and hook sites."""
+    files = {k: spec.get(k) for k in ("bin", "sym", "rel")}
+    if not (pdir / spec["bin"]).exists() and "prebuilt_bin" in spec:
+        files = {k: spec.get("prebuilt_" + k) for k in ("bin", "sym", "rel")}
+        print(f"no local build, using the prebuilt patch: {(pdir / files['bin']).relative_to(pdir.parent.parent)}")
+    blob = (pdir / files["bin"]).read_bytes()
+    syms = load_symbols(pdir / files["sym"])
+    pinned = int(spec["base"], 16) if "base" in spec else None
+    rel = load_rel(pdir / files["rel"]) if files["rel"] else None
+    if rel is None and pinned is None:
+        sys.exit(f"{spec['name']}: needs a relocation table (\"rel\") or a fixed \"base\"")
+    if rel and rel[1] != len(blob):
+        sys.exit(f"{spec['name']}: relocation table is for {rel[1]} bytes, the code is {len(blob)}")
+    words = [wd for wd in spec.get("words", []) if not (in_bundle and wd.get("version"))]
+    return {"name": spec["name"], "pinned": pinned, "link": rel[0] if rel else pinned,
+            "rel": rel[2] if rel else None, "blob": blob, "syms": syms,
+            "branches": spec["branches"], "words": words}
+
+
+def place(p: dict, base: int) -> None:
+    """Put patch p at `base`: shift its relocated words and its symbols."""
+    delta = base - p["link"]
+    if delta and p["rel"] is None:
+        sys.exit(f"{p['name']} is linked at {p['link']:#x} and has no relocation table to move it")
+    blob = bytearray(p["blob"])
+    for off in p["rel"] or []:
+        v = struct.unpack_from("<I", blob, off)[0]
+        struct.pack_into("<I", blob, off, (v + delta) & 0xFFFFFFFF)
+    p["base"], p["blob"] = base, bytes(blob)
+    p["syms"] = {k: v + delta for k, v in p["syms"].items()}
 
 
 def main() -> int:
@@ -103,16 +145,18 @@ def main() -> int:
         parts = [load_patch(spec, pdir, in_bundle=False)]
         version = None
 
-    # Code layout: each patch at its own base, in address order, after the stock image.
+    # Code layout: the patches in the order listed, each right after the one before
+    # (16-byte aligned), or at its fixed "base" if it has one.
     stock_end = ptf.base + len(ptf.image)
-    parts.sort(key=lambda p: p["base"])
     end = stock_end
     tail = bytearray()
     for p in parts:
-        if p["base"] < end:
-            sys.exit(f"{p['name']} at {p['base']:#x} overlaps what comes before it (ends {end:#x})")
-        tail += b"\xff" * (p["base"] - end) + p["blob"]
-        end = p["base"] + len(p["blob"])
+        base = p["pinned"] if p["pinned"] is not None else (end + ALIGN - 1) & ~(ALIGN - 1)
+        if base < end:
+            sys.exit(f"{p['name']} at {base:#x} overlaps what comes before it (ends {end:#x})")
+        place(p, base)
+        tail += b"\xff" * (base - end) + p["blob"]
+        end = base + len(p["blob"])
 
     image = bytearray(ptf.image)
     sites: dict[int, str] = {}
@@ -134,7 +178,8 @@ def main() -> int:
             image[off:off + 4] = new
             print(f"{at:#x}: bl -> {br['to']} @ {p['syms'][br['to']]:#x}  ({old.hex()} -> {new.hex()})  {br.get('note', '')}")
 
-    words = [(wd, value, p["name"]) for p in parts for wd, value in p["words"]]
+    words = [(wd, p["syms"][wd["to"]] | (1 if wd.get("thumb") else 0), p["name"])
+             for p in parts for wd in p["words"]]
     if version is not None:
         end = (end + 3) & ~3
         vaddr = end

@@ -47,9 +47,11 @@ shades. Rendered in the emulator with the firmware's own Song screen drawing cod
 
 ## How it works
 
-The patch code (4,149 bytes) is appended right after the stock image, at
-`0x601bab80`. Its state, a 12,208-byte table, lives in the free tail of the 32 KB
-on-chip OCRAM (`0x20205000`–`0x20207fff`), which nothing else in the firmware uses.
+The patch code (4,149 bytes) goes right after the stock image (`0x601bab80`), or
+after the patches listed before it in a bundle; the patcher moves its 6 address
+words to match (`prebuilt/colorsong.rel`). Its state, a 12,208-byte table, lives in
+the free tail of the 32 KB on-chip OCRAM (`0x20205000`–`0x20207fbf`), which nothing
+else in the firmware uses.
 Firmware addresses and structures are described in [docs/FINDINGS.md](../../docs/FINDINGS.md).
 
 | Hook | Where | What |
@@ -100,7 +102,7 @@ With Humanize in one firmware (`patch/all`; to choose your own set of patches, s
 "Choosing patches" in [docs/PATCHING.md](../../docs/PATCHING.md)):
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT4.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT5.ptf
 ```
 
 To build the patch code from source, you need the Arm GNU Toolchain

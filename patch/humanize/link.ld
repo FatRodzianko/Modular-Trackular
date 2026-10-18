@@ -1,5 +1,5 @@
-/* humanize starts at the first 4 KB flash sector after colorsong's code, so both fit
- * in one firmware (colorsong: 0x601bab80, under 5 KB). */
+/* Link address only: tools/patch_ptf.py places the code after the stock image or the
+ * patches listed before it, and moves it there with build/humanize.rel. */
 MEMORY
 {
     PATCH (rx) : ORIGIN = 0x601BC000, LENGTH = 4K

@@ -49,7 +49,7 @@
 #include <stdint.h>
 
 #ifndef HUMANIZE_VERSION
-#define HUMANIZE_VERSION "hz4"
+#define HUMANIZE_VERSION "hz5"
 #endif
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */

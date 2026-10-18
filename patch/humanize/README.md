@@ -5,8 +5,8 @@ Pattern screen. Pressing it gives the notes in the selection small random change
 timing (Micro-move, `m`) and level (Volume/Velocity, `V`), so programmed parts sound
 less robotic. How much, and whether levels change at all, is set per project under
 Config → Project Settings → Humanize. Installed on its own, Config shows the firmware
-version as `1.2.0-hz4`. Together with colorsong ([`patch/all`](../all/patch.json)) it
-shows `1.2.0-MT4`.
+version as `1.2.0-hz5`. Together with colorsong ([`patch/all`](../all/patch.json)) it
+shows `1.2.0-MT5`.
 
 **Status:** tested on hardware.
 
@@ -96,8 +96,9 @@ list index, so 1–100 is kept as 0–99 and shown + 1. The settings file is rea
 written from the two screens' update methods, where the stock code does its own file
 work, in the same way colorsong saves its colors: one 12-byte file (`HHZ1`, the 4
 values, a checksum), written only when a value has changed. The menu nodes come from
-the firmware's heap. The code is 2,348 bytes at `0x601bc000`, the first 4 KB flash
-sector after colorsong's code, so both fit in one firmware. Firmware addresses and
+the firmware's heap. The code is 2,348 bytes. The patcher places it after the stock
+image or after the patches listed before it, and moves its 20 address words to
+match (`prebuilt/humanize.rel`). Firmware addresses and
 structures are in [docs/FINDINGS.md](../../docs/FINDINGS.md) (sections 13 and 14).
 
 ## Build
@@ -106,14 +107,14 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/humanize/patch.json build/TrackerPlus_hz4.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/humanize/patch.json build/TrackerPlus_hz5.ptf
 ```
 
 With colorsong in one firmware (`patch/all`; to choose your own set of patches, see
 "Choosing patches" in [docs/PATCHING.md](../../docs/PATCHING.md)):
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT4.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT5.ptf
 ```
 
 To build the patch code from source, you need the Arm GNU Toolchain
@@ -130,7 +131,7 @@ patch/humanize/build.sh
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_humanize.py build/TrackerPlus_hz4.ptf
+python tools/emu/test_humanize.py build/TrackerPlus_hz5.ptf
 ```
 
 It runs the stock code with the patch in place:
@@ -147,14 +148,14 @@ It runs the stock code with the patch in place:
   one write a while after a change, per-project values, a damaged file, and a new
   project's first save.
 
-The same test runs on `TrackerPlus_MT4.ptf`.
+The same test runs on `TrackerPlus_MT5.ptf`.
 
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-hz4 Build 1504` (or
-`1.2.0-MT4 Build 1504` for both mods).
+Config → Firmware → the patched file. Config should show `1.2.0-hz5 Build 1504` (or
+`1.2.0-MT5 Build 1504` for both mods).
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Humanized patterns keep their
 FX and play the same on stock firmware. Stock firmware ignores the `humanize.bin`

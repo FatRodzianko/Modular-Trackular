@@ -20,7 +20,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   FX, so programmed parts sound less mechanical. Works in record mode, and Undo
   reverts it. Range and default velocities are set per project under Config →
   Project Settings → Humanize. Tested on hardware. See [patch/humanize/README.md](patch/humanize/README.md).
-- **all**: colorsong and humanize in one firmware (version text `1.2.0-MT4`),
+- **all**: colorsong and humanize in one firmware (version text `1.2.0-MT5`),
   from [patch/all/patch.json](patch/all/patch.json).
 - **versiontest**: the smallest possible mod (version text `1.2.0-MT0`), a harmless
   first check that your unit installs patched firmware. See
@@ -61,7 +61,9 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/all/` | Bundle spec: colorsong + humanize in one firmware |
 | `patch/versiontest/` | Version-text test patch |
 | `tools/ptf.py` | Read / convert / re-encode `.ptf` (Intel HEX), with a byte-exact round-trip check |
-| `tools/patch_ptf.py` | Apply a patch or bundle spec to a stock `.ptf` (stock hash + original-byte checks, gap-free append) |
+| `tools/patch_ptf.py` | Apply a patch or bundle spec to a stock `.ptf`: places the patches in the order listed and relocates them (stock hash + original-byte checks, gap-free append) |
+| `tools/mkrel.py` | Make a patch's relocation table from two links of its code (used by the build scripts) |
+| `tools/test_layout.py` | Check the patcher's placement and relocation for each patch alone and both bundle orders |
 | `tools/thumbdis.py` | Quick Thumb disassembly with literal-pool values and strings |
 | `tools/movw_refs.py` | Find literal and MOVW/MOVT references to an address |
 | `tools/vtables.py` | Find C++ vtables and list their method pointers |
