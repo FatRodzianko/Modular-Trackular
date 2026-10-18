@@ -301,7 +301,7 @@ and the startup copies, and calls functions directly. The display object at
   mapped as plain RAM. That's how the default style table pointer was found.
 - `tools/emu/song_grid.py <ptf> <project dir> <out.png>` loads the project's
   playlist, runs every used pattern through the stock `pattern_update_track_usage`,
-  and calls the stock `song_grid_draw`. For `User/acid camp` it produces the same grid
+  and calls the stock `song_grid_draw`. For a real project it produces the same grid
   layout and colors as the device (579 display-list words).
 
 ## 10. File system, project file, Song screen entry
@@ -324,7 +324,7 @@ and the startup copies, and calls functions directly. The display object at
   `0x600c2690`, 0x914 bytes): header, playlist RAM `0x202045c2` → file `+0x10`
   (0x100 bytes), then RAM `0x202046c4` → file `+0x110` (0x700 bytes). That block holds
   the track masks: `lo[p]` at file `0x318+p`, `hi[p]` at file `0x642+p`. Checked in the
-  emulator: for `acid camp` all 14 used patterns match what the stock
+  emulator: for a real project, all 14 used patterns match what the stock
   `pattern_update_track_usage` computes from the `.mtp` files. So masks are loaded
   with the project and never rebuilt by a scan.
 - **Project open copies patterns into Workspace** with `project_copy_patterns`

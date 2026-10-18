@@ -5,6 +5,13 @@ A patch for Polyend Tracker+ firmware 1.2.0. Each filled block on the Song scree
 material through a song at a glance. With the patch installed, Config shows the
 firmware version as `1.2.0-c10`.
 
+![The same song's Song screen on stock firmware (left) and with colorsong (right)](images/firmware_comparison.png)
+
+The same song on stock firmware (left) and with colorsong (right). Rows are song
+slots, columns are tracks. In the second track, the one-hit snare in row 2 and the
+main snare part in most other rows share the green family but get clearly different
+shades. Rendered in the emulator with the firmware's own Song screen drawing code.
+
 ## What it does
 
 - **Hue = instrument set.** Blocks that use the same set of instruments, e.g. {1} or
