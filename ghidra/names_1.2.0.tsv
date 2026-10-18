@@ -81,3 +81,71 @@
 60099854	fatfs_disk_read	drive 2 -> SD
 6009f680	sd_read_blocks	NXP SD_ReadBlocks: card lock (infinite wait), bounce buffer for unaligned
 6009de84	sdmmc_osa_lock_q	(lock, timeout) - called with 0xffffffff
+# Sequencer and FX timing (FINDINGS section 12). seq = 0x20017274; ITCM addresses are execution addresses.
+600959d4	dma0_dma16_irq	IRQ 0: eDMA handler for the audio-out DMA channel
+60091954	audio_dma_cb	eDMA callback: picks the ping-pong half, calls *(0x2000a804) = audio_out_cb
+600a1e48	audio_out_cb	platform audio callback: app object vtable +8 with 128 frames
+600aa7c8	app_audio_block	app 0x200170e0 vtable +8: midi_poll_input, seq_advance (bl at 0x600aa7f8), engine_block_update
+600303d4	audio_irq_disable	NVIC ICER0 = 1 (IRQ 0)
+600303c8	audio_irq_enable	NVIC ISER0 = 1 (IRQ 0)
+00003774	seq_advance	(seq, seconds): float us accumulator at 0x20017270; ext clock = 96 ticks per pulse
+000035e8	seq_tick	count-in, ++seq+0x10, every 12th tick: master micro + process/advance tracks 0..15
+00001de8	seq_master_micro	seq+0x2e 1..48, seq+0x30 master step, step-changed callback seq+0x6f0
+0000203c	seq_process_track	(seq, t) every micro-step: step copy (0x2170), FX switch (tbh 0x2686), delays, roll, arp, preload request
+000015c8	seq_record_live_note	live recording: writes m (FX1) and V (FX2) by recording options
+0000149c	seq_trigger_note	(seq, t, rec): sample voice note-on with FX, MIDI/synth note-on
+000011a4	seq_note_off_q	(seq, t, rec, mode)
+00001250	seq_play_from	(seq, step): note-offs, reset positions, playing = 1, MIDI start
+00000f50	seq_reset_positions	track steps to 0 (or last for backward mode)
+00000fd0	seq_set_track_step_q
+00001014	seq_step_ms	576 ticks in ms (125 at 120 BPM)
+00001084	seq_tick_period_us	312500 / bpm / 12; swing (s + 50) * 3125 / bpm / 12
+00001ed4	seq_ext_clock_tempo_q	external clock interval averaging, seq+0x7d4 BPM
+00000a7c	seq_send_midi_clock	0xF8 to the clock-out ports
+00000acc	midi_send_cc	(cc, value, channel, synth): ports by settings+0x2c, nothing while rendering
+00003824	fx_max	(seq, type)
+000038ac	fx_min	(seq, type, flag)
+00003910	fx_display_value	(seq, type, value): shown value (panning, micro-tune, tune, slice, tempo)
+00003958	seq_distance_to_next_note_q	(seq, t, step): roll look-ahead in the play buffer
+00003994	seq_track_muted_q	project +0x6e0 + t / +0xcf6 + (t & 7)
+00003af4	rand_range_q	(lo, hi): Park-Miller step
+00007030	song_next_pattern	playlist[pos + 1] or playlist[0]
+000041c8	engine_block_update	after seq_advance: tempo average, voice_block_update for the 8 players
+00006430	voice_block_update_q	per-block voice update (envelopes, LFO FX, automation)
+00006244	voice_apply_fx	(player, type, value, column): per-FX setters, masks IRQ 0
+00005c04	voice_note_on_q	(player, instrument, note, volume, fx1 type, fx1 value, fx2 type, fx2 value)
+00005070	synth_apply_fx_q	synth engine (instruments 64-66) FX / macros
+000046cc	voice_set_cutoff	(norm float, player): table lookup, coefficient into each filter object +0x1c
+0001f514	memcpy_small	byte-loop memcpy in ITCM (93 callers)
+600ad010	seq_advance_step	(seq, t) after micro 48: next step, wrap, pattern end on t = 15
+600acc68	seq_swap_pattern_buffers	swaps seq+0x14/+0x18, clears roll/arp/tempo override
+600acd90	seq_stop
+600ace98	seq_commit_track_pattern_q	performance mode per-track pattern switch
+600ac5a8	seq_track_note_off_q	(seq, t, x)
+600ad4b0	seq_is_rendering	seq+0x7dc
+600ad570	seq_load_preload_buffer	(seq, buf): CRC, copy 0x3030 bytes into *(seq+0x18)
+600c3970	song_advance_position	project+0x6c1 += 1, wraps at an empty playlist slot (returns 0)
+600bc938	fm_request_pattern_load	(fm 0x2001e488, pattern): sets file-manager state 0xe; the main loop loads it
+600c1e1c	fm_preload_pattern_step	reads Workspace/patterns/pattern_NN.mtp into 0x83f58bb4, then seq_load_preload_buffer
+600c1ec8	fm_state_pattern_preload_q	sub-states: save current pattern if edited, load, done
+600ab808	midi_set_ports	(jack, usb): *(0x200171c4) = jack, *(0x200171c0) = USB
+600ab89c	midi_poll_input	start of every audio block
+600ab944	midi_send_program_change	CC FX with CC number 0x80
+600ab9b8	midi_send_channel_pressure	CC FX with CC number 0x81
+600aba2c	midi_send_poly_pressure	CC FX with CC number 0x82
+600abad0	midi_send_pitchbend_q	M FX on MIDI instruments
+600abb44	seq_note_on_out_q	(note, velocity, channel, synth)
+600abbe8	seq_note_off_out_q
+600a2804	din_midi_init	LPUART5 0x40194000
+600a28d8	din_midi_send_cc	3 bytes, no running status
+600a08e4	serial_tx_byte	512-byte TX ring + non-blocking LPUART transfer; no full-ring check
+600af0f8	seq_change_selection_fx_value	(selection, column, delta): encoder edit; min hard-coded, max fx_max
+600aef38	seq_randomize_selection_fx_q
+600afb48	fx_value_text	(seq, buf, size, type, value, compact): "%3i" / "%i" by default
+600afdc8	fx_value_text_cell	pattern grid wrapper (4-byte buffer)
+600df3a0	patview_fill_rows_q	pattern grid row texts
+600e01c8	patfill_change_value_q	Fill popup value change (uses fx_min / fx_max)
+600e3e30	patfill_show_from_q	Fill popup "from" value text
+600e4038	patfill_show_to_q	Fill popup "to" value text
+600bb098	voice_fx_filter_cutoff	FX 27/28/29: player+0x30 = normalized cutoff, +0x34 = type
+600bb020	voice_update_cutoff_q	applies player+0x30 through voice_set_cutoff (or the automation path)

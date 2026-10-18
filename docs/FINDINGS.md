@@ -303,6 +303,9 @@ and the startup copies, and calls functions directly. The display object at
   playlist, runs every used pattern through the stock `pattern_update_track_usage`,
   and calls the stock `song_grid_draw`. For a real project it produces the same grid
   layout and colors as the device (579 display-list words).
+- `tools/emu/seq_timing.py <ptf>` plays constructed patterns through the stock
+  `seq_tick` with logging fake MIDI ports and prints when each note, CC, preload request
+  and buffer swap happens (section 12).
 
 ## 10. File system, project file, Song screen entry
 
@@ -361,3 +364,373 @@ into the caller's buffer for requests of 512 bytes or more at a sector boundary,
 otherwise copies from the file's own sector buffer (`FIL+0x50`). Rule for patches:
 only do SD I/O where the stock code does, keep requests small, and spread work over
 update calls. (Not proven necessary, but it costs nothing.)
+
+## 12. Sequencer and FX timing
+
+The sequencer object is at `0x20017274` (`seq` below). Its time-critical code is in ITCM
+(copied from flash at boot, section 2); step advance, song handling and FX editing are in
+flash around `0x600aa000`–`0x600b0000`. It follows the original Tracker closely (the
+OpenTracker behavioural model matches it nearly function for function), with 16 tracks.
+`tools/emu/seq_timing.py` runs it in the emulator.
+
+### Where it runs
+
+All of it runs in the audio interrupt, once per 128-frame block (about 2.9 ms):
+
+| Function | Address | What it does |
+|---|---|---|
+| `dma0_dma16_irq` | `0x600959d4` | IRQ 0: NXP eDMA handler for the audio-out DMA channel |
+| `audio_dma_cb` | `0x60091954` | picks the free half of the ping-pong buffer, calls `*(0x2000a804)` |
+| `audio_out_cb` | `0x600a1e48` | calls the app object's vtable `+8` with 128 frames |
+| `app_audio_block` | `0x600aa7c8` | app object `0x200170e0` (vtable `0x6003871c`): `midi_poll_input`, then `bl seq_advance` at `0x600aa7f8` with frames / 44122.65 seconds, then `engine_block_update` |
+| `seq_advance` | ITCM `0x3774` | internal clock: adds the elapsed µs to a float at `0x20017270` and runs `seq_tick` while it holds a whole tick period. External clock: 96 ticks per received MIDI clock pulse |
+| `seq_tick` | ITCM `0x35e8` | count-in, else `++seq+0x10`; every 12th tick one micro-step |
+
+A micro-step is `seq_master_micro` (ITCM `0x1de8`), then for t = 0..15:
+`seq_process_track(seq, t)` (ITCM `0x203c`), `micro++`, and past 48 micro = 1 and
+`seq_advance_step(seq, t)` (`0x600ad010`).
+
+- **Same grid as the original Tracker:** 12 ticks per micro-step, 48 micro-steps per
+  step, 576 ticks per step. `seq_tick_period_us` (ITCM `0x1084`) = 312500 / bpm / 12
+  (217.0 µs at 120 BPM). With swing on it is (s + 50) × 3125 / bpm / 12, with s and
+  100 − s alternating per step. `seq_step_ms` (ITCM `0x1014`) = 125 ms at 120 BPM. Tempo
+  source: Tempo FX override (`seq+0x58`/`+0x5c`), external clock BPM (`+0x7d4`) or the
+  project tempo (`0x20204774`).
+- **The real resolution is the audio block.** All ticks due in a block are processed in
+  one burst at its start: about 13 ticks (1.1 micro-steps) per block at 120 BPM, 2.8
+  micro-steps at 300 BPM. MIDI goes out immediately, sample voices start with the next
+  rendered block. With an external clock each pulse runs 8 micro-steps at once.
+- **Cost** (emulator): 22 instructions for a tick without a micro-step; about 2,900 per
+  micro-step with all 16 tracks busy (MIDI notes, a CC on every step, Micro-move on every
+  other step), 9,100 at the worst step start.
+
+### Sequencer object
+
+| `seq` offset | Meaning |
+|---|---|
+| `+0x10` | tick counter |
+| `+0x14` / `+0x18` | play pattern buffer / preload buffer (`.mtp` layout, section 6) |
+| `+0x1c` / `+0x1d` | song mode / performance mode |
+| `+0x1e`–`+0x24` | selection playback: once / loop, first and last step (q) |
+| `+0x26` / `+0x28` / `+0x29` | queued pattern number / queue active / queued pattern requested |
+| `+0x2a` / `+0x2b` | playing / recording |
+| `+0x2e` / `+0x30` | master micro-step 1..48 / master step |
+| `+0x32` / `+0x33` | Break FX pending / pattern end (set when track 15 wraps) |
+| `+0x36`, `+0x38` | pattern length override (−1 = none), per-track lengths (performance mode) |
+| `+0x58` / `+0x59` / `+0x5c` | Tempo FX override on / stop at step end (TSTP) / override BPM (float) |
+| `+0x60` / `+0x61` / `+0x64` | swing on / swing phase / swing % (float) |
+| `+0x68 + 0x68·t` | track t, 0x68 bytes (next table) |
+| `+0x6e8` / `+0x6ec` / `+0x6f0` | callbacks: pattern end, pattern advanced, step changed (q) |
+| `+0x6f4` / `+0x6f8` / `+0x6fc` | count-in: step, active, callback |
+| `+0x700` / `+0x704` / `+0x70e` | external clock: pending pulses, leftover, sync correction |
+| `+0x7d4` | external clock BPM (float) |
+| `+0x7dc` | rendering (export); MIDI out is suppressed (`seq_is_rendering` `0x600ad4b0`) |
+
+Track t, at `seq + 0x68·t + offset` (the code's own addressing):
+
+| Offset | Meaning |
+|---|---|
+| `+0x68`–`+0x6e` | last triggered record: note, instrument, FX1 type, FX1 value, FX2 type, FX2 value, volume |
+| `+0x6f`–`+0x75` | work record of the current step, same layout (volume `0xff` = none). Filled from the pattern at micro-step 1 |
+| `+0x76`–`+0x7c` | record used by roll and arp retriggers |
+| `+0x7d` | track enabled |
+| `+0x7f` / `+0x80` | triggered / gate open (note-off pending) (q) |
+| `+0x86` / `+0x88` | micro-step 1..48 / current step |
+| `+0x8a` | steps played since the loop start (random and table play modes) |
+| `+0x8c` / `+0x8e` | performance FX injected into an empty FX column |
+| `+0x90` / `+0x92` | micro-steps since the trigger / limit |
+| `+0x94` / `+0x96` | gate counter / gate length (q FX: v × 47 / 100; −1 = none) |
+| `+0x98` | Chance failed this step |
+| `+0x9a`–`+0xa3` / `+0xa4`–`+0xae` | roll state / arp state |
+| `+0xb0` / `+0xb1` / `+0xb4` | performance transpose on / amount / velocity offset |
+| `+0xb8` / `+0xb9` | performance step repeat / play mode (0 forward, 1 backward, 2 random, ≥ 3 pattern tables) |
+| `+0xbc` | queued per-track pattern (performance mode; −1 = none) |
+| `+0xc0` / `+0xc1` | delayed note pending / its record captured |
+| `+0xc2` / `+0xc4` | delay / counter, in micro-steps |
+| `+0xc6`–`+0xcc` | delayed record |
+
+Other state it uses: settings `0x2002061c` (`+0x26` clock in, `+0x27` clock out, `+0x29`
+transport out, `+0x2c` MIDI out: 0 off, 1 USB, 2 jack, 3 both; `+0xce` recording
+options); project `0x20204000` (`+0x5c2` playlist, `+0x6c1` song position, `+0x6c8`
+current pattern, mute flags `+0x6e0 + t` and `+0xcf6 + (t & 7)`, MIDI instruments at
+`+0xaa0 + 0x10·channel` with `+3`–`+8` = CC numbers for FX a–f and `+9` = MIDI delay);
+8 sample players of 0x848 bytes at `0x2001a138`; audio engine `0x20017b08`.
+
+### Step advance, pattern end, song mode
+
+`seq_advance_step(seq, t)` (`0x600ad010`) runs right after track t's micro-step 48:
+
+- The last step index is track 0's length byte in the play buffer, or `seq+0x36`, or the
+  track's own length in performance mode; a looping selection narrows it.
+- Forward: step + 1, and past the last step (or with Break pending) back to the loop
+  start. Backward, random and table modes (performance mode, `+0xb9`; tables at
+  `0x600ad3d0`) choose the next step here. A queued per-track pattern (`+0xbc`) switches
+  when its track wraps.
+- Track 15 also toggles the swing phase, handles TSTP, and if it wrapped ends the
+  pattern: a queued pattern leaves song mode and switches; song mode calls
+  `song_advance_position` (`0x600c3970`, wraps at the first empty playlist slot); both
+  then `seq_reset_positions` (ITCM `0xf50`) and `seq_swap_pattern_buffers` (`0x600acc68`:
+  swaps `+0x14`/`+0x18`, clears roll, arp and the Tempo FX override, sets the current
+  pattern number). In pattern mode each track has already wrapped on its own.
+
+**The next pattern is loaded asynchronously.** In `seq_process_track`, track 0 at
+micro-step 1 of the last step calls `fm_request_pattern_load(0x2001e488, n)`
+(`0x600bc938`) with `song_next_pattern()` (ITCM `0x7030`) in song mode, or with `+0x26`
+for a queued pattern (and sets `+0x29`). That only sets file-manager state (`+0x12c` =
+pattern, `+0x13d`/`+0x13f` = 0xe). The main loop then saves the current pattern if it was
+edited, reads `Workspace/patterns/pattern_NN.mtp` (0x3030 bytes) into SDRAM `0x83f58bb4`
+(`fm_preload_pattern_step` `0x600c1e1c`) and copies it into the preload buffer
+(`seq_load_preload_buffer` `0x600ad570`). Nothing waits for that: the buffers are swapped
+after micro-step 48 of the last step either way. In the emulator the request comes at
+micro-step 1 of the last step and the swap 47 micro-steps later. So the next pattern's
+data exists only during the last step, and only once the SD read is done.
+
+### Per-track step processing and the FX switch
+
+`seq_process_track(seq, t)` (ITCM `0x203c`), every micro-step, for every track:
+
+1. At micro-step 1, copy the 6-byte step from `*(seq+0x14) + 0x1d + 0x301·t + 6·step`
+   into the work record (`memcpy_small` ITCM `0x1f514`, called at ITCM `0x2170`), inject
+   performance FX, clear the volume.
+2. Counters: since-trigger, gate (note-off when it reaches the gate length), delay
+   counter, arp. Track 0 also sends MIDI clock (`seq_send_midi_clock` ITCM `0xa7c`: 0xF8
+   every 8 micro-steps, 6 per step, when clock out is on) and makes the preload request
+   above (compares at ITCM `0x23b4` and `0x2578`, request through the veneer at
+   `0x1fa70`).
+3. Disabled or muted (`seq_track_muted_q` ITCM `0x3994`): stop here.
+4. At micro-step 1: Random FX value pre-pass (16), MIDI-instrument delay ((b + 1) × 45 /
+   100 + 1 micro-steps), Chance pre-pass (4), then the FX pass, FX2 first, then FX1:
+   `tbh` at ITCM `0x2686` on type − 1 for types 1..37 (higher types take the default).
+   Cases: 1 Off `0x2dde`, 2 Micro-move `0x2d80`, 7 Random volume `0x2d30`, 8–12 and 37
+   CC a–f `0x26d8`, 13 Break `0x2eda`, 15 Tempo `0x2e42`, 17 Swing `0x2f10`, 18 Volume
+   `0x2e96`, 20 Gate `0x2d0e`, 34 Micro-tune (MIDI pitch bend) `0x2c66`. On a step
+   without a note the default forwards the FX to the sounding voice (`voice_apply_fx`,
+   tracks 0–7) or to the synth engine (instruments 64–66, `synth_apply_fx_q` ITCM
+   `0x5070`). A second pass handles Roll (3), Random note (5), Random instrument (6) and
+   Arp (21).
+5. A note (unless delayed) goes to `seq_trigger_note` (ITCM `0x149c`). Instruments 0–47
+   on tracks 0–7 → `voice_note_on_q(player, instrument, note, volume, FX1, FX2)` (ITCM
+   `0x5c04`): both FX travel with the note-on. Instruments 48–63 (MIDI channels 1–16) and
+   64–66 (synths) → `seq_note_on_out_q` (`0x600abb44`). The work record becomes the last
+   record.
+6. Every micro-step: delayed-note check, roll retriggers, arp, performance step repeat.
+
+FX type ids (the UI list order maps to ids through the 43-byte table at `0x60039ca4`;
+names at `0x6003bd88`). Stored ranges from `fx_min`/`fx_max`, shown values from
+`fx_display_value`, run in the emulator:
+
+| id | FX | stored | id | FX | stored |
+|---|---|---|---|---|---|
+| 1 | ! Off | 0 | 22 | p Position | 0–100 |
+| 2 | m Micro-move | 0–100 | 23 | g Volume LFO | 0–23 |
+| 3 | R Roll | 0–53 | 24 | h Panning LFO | 0–28 |
+| 4 | C Chance | 0–100 | 25 | S Slice | 0–47 (shown 1–48) |
+| 5 | n Random note | 0–100 | 26 | r Reverse | 0–1 |
+| 6 | i Random instrument | 0–47 | 27 / 28 / 29 | L / H / B filter cutoff | 0–100 |
+| 7 | v Random volume | 0–100 | 30 | s Delay send | 0–100 |
+| 8–12 | a–e CC A–E / Macro 1–5 | 0–127 | 31 | P Panning | 0–100 (shown −50..50) |
+| 13 | x Break pattern | 1 | 32 | t Reverb send | 0–100 |
+| 14 | 0 MIDI Chord | 0–29 | 33 | l Finetune LFO | 0–28 |
+| 15 | T Tempo | 4–200 (shown ×2; 4 = TSTP) | 34 | M Micro-tune / pitch bend | 0–198 (shown −99..99) |
+| 16 | x Random FX value | 0–255 | 35 / 36 | j Filter LFO / k Position LFO | 0–28 |
+| 17 | I Swing | 25–75 | 37 | f CC F / Macro 6 | 0–127 |
+| 18 | V Volume / velocity | 0–100 | 38 | D Overdrive | 0–100 |
+| 19 | G Glide | 0–100 | 39 | E Bit depth | 4–16 |
+| 20 | q Gate length | 0–100 | 40 | U Tune | 0–48 (shown −24..24) |
+| 21 | A Arp | 0–33 | 41 / 42 | F Slide up / J Slide down | 0–255 |
+
+### Micro-move
+
+Case 2 (ITCM `0x2d80`): delay d = 1 + (m + 1) × 47 / 100 + MIDI delay, capped at 96
+micro-steps. It sets `+0xc0` = 1, `+0xc1` = 0, `+0xc2` = d, `+0xc4` = 0; later in the
+same call the work record is captured into `+0xc6` (`+0xc1` = 1) instead of being
+played. Every following call first increments `+0xc4`; when it equals `+0xc2`, the
+record is copied back into the work record and goes through normal note handling
+(note-off of the previous MIDI note, trigger, gate, last record). The step's other FX
+(CC, volume and so on) still act at the step start.
+
+Emulator, MIDI instrument on track 0:
+
+| Step FX | Note sent at |
+|---|---|
+| none | micro-step 1 |
+| m 0 | micro-step 2 (1 late) |
+| m 50 | micro-step 25 (24 late) |
+| m 97 | micro-step 48 (47 late) |
+| m 100 | micro-step 1 of the next step (48 late) |
+
+- m 0 still delays by one micro-step; m 99 and m 100 both give 48.
+- **While a delayed note is pending, the note of a new step is dropped.** At the next
+  step start the pending record is still captured, so the new note is ignored and the
+  delayed one fires in its place. In the emulator, m 100 on step 4 followed by a plain
+  note on step 5 sends only the step-4 note (at step 5's start); the step-5 note never
+  goes out. The same happens when a MIDI-instrument delay pushes a note past the next
+  step start. Not checked on hardware.
+- Live recording with Microtiming writes FX1 = m, (master micro-step − 1) × 100 / 47
+  clamped by `fx_min`/`fx_max`; with Velocity, FX2 = V (`seq_record_live_note` ITCM
+  `0x15c8`, Micro-move store at `0x1b26`).
+
+### MIDI out
+
+- `midi_send_cc(cc, value, channel, synth)` (ITCM `0xacc`): synth → engine. Otherwise
+  nothing while rendering, else by `settings+0x2c` to the USB port object
+  `*(0x200171c0)` and/or the jack port object `*(0x200171c4)`, vtable `+0x0c`. The ports
+  are set at init by `midi_set_ports` (`0x600ab808`) from the platform object
+  `0x2000bedc` (`+0x320` USB, `+0x338` jack).
+- Port vtable (jack class `0x60038478`, USB class `0x600384e8`): `+0x08` realtime byte,
+  `+0x0c` CC, `+0x10` program change, `+0x14` channel pressure, `+0x20` note on, `+0x24`
+  note off.
+- CC FX need a MIDI instrument on the step. CC number = the MIDI instrument's byte
+  `+3 + letter`; values 0x80/0x81/0x82 there mean program change / channel pressure /
+  poly pressure (`0x600ab944`, `0x600ab9b8`, `0x600aba2c`). M (34) sends pitch bend
+  (`midi_send_pitchbend_q` `0x600abad0`). A CC is sent once, at micro-step 1, with or
+  without a note (emulator: CC steps 6 and 7 at their micro-step 1), and never again
+  during the step.
+- The jack is LPUART5 (`0x40194000`, set up by `din_midi_init` `0x600a2804`).
+  `din_midi_send_cc` (`0x600a28d8`) writes status, number and value (3 bytes, no
+  running status) with `serial_tx_byte` (`0x600a08e4`): a 512-byte ring drained by
+  non-blocking LPUART transfers, **with no check for a full ring** (the write index just
+  wraps). At 31,250 baud the jack carries 3,125 bytes/s, about 1,040 CCs/s in total; the
+  ring holds about 160 ms of data.
+- MIDI input is polled at the start of every audio block (`midi_poll_input` `0x600ab89c`).
+
+### Voice FX and existing per-block updates
+
+- `voice_apply_fx(player, type, value, column)` (ITCM `0x6244`) calls per-FX setters in
+  `0x600b8000`–`0x600bb200` and remembers type and value per column
+  (`player+0x791`/`+0x793`). It masks IRQ 0 while it works (`audio_irq_disable`
+  `0x600303d4` / `audio_irq_enable` `0x600303c8`, NVIC bit 0), because the main loop
+  calls it too.
+- Filter cutoff (27/28/29): `voice_fx_filter_cutoff` (`0x600bb098`) stores
+  (v − min) / (max − min) as a float at `player+0x30` and the filter type at `+0x34`,
+  then `voice_update_cutoff_q` (`0x600bb020`) → `voice_set_cutoff` (ITCM `0x46cc`): a
+  table lookup and a fixed-point coefficient written into each filter object of the
+  voice. It takes effect at once, without smoothing.
+- `engine_block_update` (ITCM `0x41c8`) runs right after `seq_advance` in the same
+  interrupt: a 4-block tempo average, then `voice_block_update_q` (ITCM `0x6430`) for the
+  8 players (envelopes, LFO FX, automation).
+- What already moves between steps: roll, arp, gate, delayed notes and step repeat
+  (sequencer, per micro-step); envelopes, tempo-synced LFO FX (g h j k l), glide and
+  slides (voices, per block). No FX value is interpolated, and no CC is sent between
+  step starts.
+
+### FX value entry and display
+
+- `fx_max(seq, type)` ITCM `0x3824`, `fx_min(seq, type, flag)` ITCM `0x38ac`,
+  `fx_display_value(seq, type, v)` ITCM `0x3910`. Micro-move is 0..100 with no offset.
+- `seq_change_selection_fx_value(selection, column, delta)` (`0x600af0f8`) is the
+  encoder edit for a cell or a selection (called from `0x600e0ac0` and `0x600d47e0`).
+  It clamps value + delta to [min, `fx_max`], with min hard-coded (Break 1, Tempo, Swing
+  25, Bit depth 4, otherwise 0), not taken from `fx_min`.
+- Other writers of FX values: the Fill popup (`0x600e01c8`, from/to `0x600e3e30` /
+  `0x600e4038`, which use `fx_min`/`fx_max`), random fill (`0x600aef38`, `0x600af8e8`),
+  `0x600af4f0`, `0x600af6a8`, and live recording (above).
+- `fx_value_text(seq, buf, size, type, value, compact)` (`0x600afb48`) has its own text
+  for Off, Roll, Break, Chord, Tempo, Arp, the LFOs and Reverse, offsets for Slice,
+  Panning, Micro-tune and Tune, and `"%3i"` (`"%i"` when compact) for everything else,
+  Micro-move included. The pattern grid (`patview_fill_rows_q` `0x600df3a0`) calls it
+  through `0x600afdc8` with a 4-byte buffer, so a value cell has 3 characters: "-99"
+  fits, "-100" does not.
+
+### Feasibility
+
+#### Negative Micro-move
+
+Plan that reuses the stock delayed-note code:
+
+1. **Value and UI.** Keep FX type 2 and store negative values in a range the stock code
+   never writes (for example 101..199 for −1..−99). Hook
+   `seq_change_selection_fx_value` (signed arithmetic for type 2), `fx_max`/`fx_min` for
+   the Fill popup and random fill, and `fx_value_text` (signed text). Stopping at −99
+   loses nothing: mirroring the stock formula, −99 already means a whole step (48
+   micro-steps) early, just as +99 and +100 both mean 48 late, and it fits the
+   3-character cell. Optionally live recording (ITCM `0x15c8`) could record late hits as
+   negative m on the next step.
+2. **Keep the stock code from delaying them.** Case 2 (ITCM `0x2d80`) would turn
+   101..199 into a 48–95 micro-step delay. Either patch the case to skip values above 100
+   or clear the type in the work record at the step copy (step 5).
+3. **Look ahead.** When track t starts step k (the copy at ITCM `0x2170`), read step
+   k + 1 in play order. If it has a note with m < 0, arm a per-track slot (patch RAM) to
+   fire at micro-step 49 − a, where a = 1..48 is the advance.
+4. **Fire.** Right before `seq_process_track(seq, t)` at that micro-step, borrow the
+   stock slot: write the record of step k + 1 into `+0xc6`, set `+0xc0` and `+0xc1` to 1,
+   `+0xc2` = 1 and `+0xc4` = 0. The stock code then fires it in that same call with all
+   its normal note handling. If the stock slot is busy (a delayed note of step k is
+   pending), fire it some other way or drop it (a design choice).
+5. **Skip it at its own step.** At step k + 1's copy, empty the work record's note (the
+   step's FX still run and act on the sounding voice) and clear type 2.
+
+Hook points. ITCM code is copied from flash at boot, so these patches change the copy
+source (`0x6018d6ec + address − 8`), something no patch here has done yet. ITCM can't
+`bl` to patch code in flash (out of range), and all 192 ITCM long-call veneers
+(`0x1f530`–`0x1fb28`) are in use, none duplicated. One way: point the literal of the
+veneer at ITCM `0x1f818` (→ `seq_advance_step`, used only from `0x1e82` and `0x3742`)
+at a flash shim that dispatches on LR. Return addresses `0x1e86`/`0x3746` go on to
+`seq_advance_step`; the new callers go to patch code. Then rewrite two ITCM BLs to
+`bl 0x1f818`: `0x2170` (step copy) and `0x372a` (`seq_process_track`, per track per
+micro-step). `tools/patch_ptf.py` would need ITCM-aware BL and word patches.
+
+Boundaries and limits:
+
+- Pattern loop, last step: look ahead to the loop start in the same buffer. Fine.
+- Song mode, queued pattern, Break FX: step 0 of the next pattern is in the preload
+  buffer only once the main loop has finished the SD read, which starts at micro-step 1
+  of the last step. A negative m on a pattern's first step needs the preload requested
+  earlier (the last-step compares at ITCM `0x23b4` and `0x2578`); otherwise play such
+  notes on time.
+- An advance of a full step (a = 48) fires at micro-step 1 of step k, together with
+  step k's own note; on one track only one of them can sound.
+- Random and table play modes pick the next step at advance time: no look-ahead, ignore
+  negative m. Backward: look at k − 1.
+- Starting playback: a note before the first played step can't happen; play it on time.
+- External clock: early notes are quantized like everything else (8 micro-steps per
+  pulse).
+- Stock firmware with such a project shows 101..199 and plays those notes late (up to
+  the 96 micro-step cap). No crash expected.
+- Patch RAM: about 16 × 8 bytes. colorsong already uses 12,208 of the 12,468 free OCRAM
+  bytes, so a build with both needs a RAM plan.
+
+#### FX interpolation between steps
+
+The simplest hook touches no ITCM code: retarget the flash `bl` at `0x600aa7f8`
+(`app_audio_block` → `seq_advance`) to a function that calls `seq_advance` and then runs
+a ramp pass, once per block (about 345 times a second), in the same interrupt, after
+all of the block's ticks. Per track and FX column:
+
+- Start value: the current step's FX value, which the stock code has just sent or
+  applied at micro-step 1. Target: the next step's value of the same FX (next step
+  only, or the next step that has that FX, holding through empty steps: a design
+  choice). Position: (micro − 1 + fraction of the tick accumulator) / 48.
+- **MIDI CC (a–f on MIDI instruments).** Send through `midi_send_cc` (ITCM `0xacc`, a
+  long call) so the MIDI-out setting and rendering are respected. Only when the 7-bit
+  value changes, and rate-limited for the jack: for example at most one ramp CC per
+  track every 4 micro-steps, a global cap per block, and none while the jack ring is
+  more than half full. Stock already sends the notes, plus 6 clock bytes per step when
+  clock out is on. USB has no such limit (its buffering is not mapped).
+- **Pitch bend** (M on MIDI instruments) could ramp the same way, in 14 bits
+  (`0x600abad0`).
+- **Sample voices (tracks 0–7).** Call the stock setters with interpolated values:
+  `voice_apply_fx`, or for filters write the float at `player+0x30` and call
+  `voice_update_cutoff_q`, which gives finer steps than the 0..100 FX value. Filter
+  ramps per block are probably smooth enough; volume may zipper. Cost per call not
+  measured.
+- **Synth instruments (64–66).** Macro FX go to the synth engine (`synth_apply_fx_q`);
+  same idea, not mapped further.
+- At a pattern boundary the next pattern's values exist only after the preload (above);
+  hold the value through the last step if it isn't loaded.
+- Opt-in: interpolating every FX would change how existing songs sound, so it needs a
+  switch (a project setting, a step marker or a global option). Not decided.
+
+#### Risks and unknowns
+
+- Everything runs in the audio interrupt: no SD access, no allocation, bounded work
+  per block. Stock costs about 3,000 instructions per micro-step; a ramp pass over 32
+  columns is of the same order. Measure patched builds in the emulator first.
+- An overfull jack ring corrupts MIDI output silently, so the CC limiter has to be
+  conservative.
+- `voice_apply_fx` and the setters are written for once-per-step calls; per-block calls
+  are untested for cost and clicks.
+- The stock pending-delay quirk (a pending delayed note drops the next step's note)
+  interacts with negative Micro-move; the patch should keep or fix it on purpose.
+- Nothing in this section has been checked on hardware. Checked in the emulator:
+  Micro-move timing, CC send timing, preload request and buffer swap.
