@@ -22,6 +22,9 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   Project Settings → Humanize. Tested on hardware. See [patch/humanize/README.md](patch/humanize/README.md).
 - **all**: colorsong and humanize in one firmware (version text `1.2.0-MT5`),
   from [patch/all/patch.json](patch/all/patch.json).
+- **ramdiag**: a diagnostic, installed on its own, that checks on the device which
+  RAM regions stay untouched in use and how far the heap grows, to find room for
+  future patches. See [patch/ramdiag/README.md](patch/ramdiag/README.md).
 - **versiontest**: the smallest possible mod (version text `1.2.0-MT0`), a harmless
   first check that your unit installs patched firmware. See
   [patch/versiontest/README.md](patch/versiontest/README.md).
@@ -60,6 +63,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/colorsong/` | Colored Song blocks: C + assembly shim, linker script, build script, patch spec, prebuilt binary |
 | `patch/humanize/` | Humanize button: C, linker script, build script, patch spec, prebuilt binary |
 | `patch/all/` | Bundle spec: colorsong + humanize in one firmware |
+| `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
 | `tools/ptf.py` | Read / convert / re-encode `.ptf` (Intel HEX), with a byte-exact round-trip check |
 | `tools/patch_ptf.py` | Apply a patch or bundle spec to a stock `.ptf`: places the patches in the order listed and relocates them (stock hash + original-byte checks, gap-free append) |
@@ -74,6 +78,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/fakefs.py` | Fake SD card behind the firmware's file system object (read and write) |
 | `tools/emu/song_grid.py`, `render_project.py` | Render a project's Song grid with the firmware's own drawing code |
 | `tools/emu/test_colorsong.py`, `test_rescan.py` | colorsong rule and scenario tests on the patched firmware |
+| `tools/emu/test_ramdiag.py` | ramdiag menu, fill, scan and report tests on the patched firmware |
 | `tools/emu/test_humanize.py` | humanize button, edit-rule, Config menu and settings-file tests on the patched firmware |
 | `tools/emu/seq_timing.py` | Run the stock sequencer on test patterns and print the MIDI it sends, with timing |
 | `tools/emu/check_version.py` | Print the version text a `.ptf` would show |

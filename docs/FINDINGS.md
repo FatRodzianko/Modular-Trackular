@@ -924,8 +924,8 @@ rendering and export, USB storage, the sample editor, performance mode, the game
    allocation later in the stock code freezes the unit. Needs the headroom measured
    first.
 
-Before any new region holds patch data, a diagnostic patch should confirm it on
-hardware: fill each candidate with a pattern at startup, and report how much of it is
-still untouched after heavy use (projects, sample loading and recording, rendering,
-export, MIDI, USB, the games). The same patch could show the heap break, which the
-debug screen leaves out.
+Before any new region holds patch data, it should be confirmed on hardware.
+`patch/ramdiag` does that: once the Pattern screen runs, it fills each candidate with
+an address pattern, then reports how much of it is still untouched after heavy use,
+and the heap's high-water mark (the newlib break, which the debug screen leaves out),
+in Config and in `ramdiag.txt`.
