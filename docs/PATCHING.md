@@ -47,8 +47,8 @@ must be byte-identical to these builds:
 | Patch | Output file | Version text in Config | On hardware | Output SHA-256 |
 |---|---|---|---|---|
 | colorsong | `TrackerPlus_c10.ptf` | `1.2.0-c10` | tested | `5d82977eadf595b6a491b90c793dcd1bfc644cec74920a98897d86444e28cb4a` |
-| humanize | `TrackerPlus_hz5.ptf` | `1.2.0-hz5` | not yet | `58722f49ccc6cecc2ffa93ac4e649a9364f596e7464d93d44925793908096b54` |
-| all (colorsong + humanize) | `TrackerPlus_MT5.ptf` | `1.2.0-MT5` | not yet | `b1753f2988901eb388649ae4d15cb4baa7b533b1592b11b22ff64c60d31b3b8b` |
+| humanize | `TrackerPlus_hz5.ptf` | `1.2.0-hz5` | tested | `58722f49ccc6cecc2ffa93ac4e649a9364f596e7464d93d44925793908096b54` |
+| all (colorsong + humanize) | `TrackerPlus_MT5.ptf` | `1.2.0-MT5` | tested | `b1753f2988901eb388649ae4d15cb4baa7b533b1592b11b22ff64c60d31b3b8b` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 
 **Name the output `TrackerPlus<anything>.ptf`.** Config's firmware list only shows
@@ -88,7 +88,8 @@ The patches in one firmware have to fit together:
   the order listed, each right after the one before (16-byte aligned), and moves
   each one's code to where it lands, using the relocation table its build makes
   (`prebuilt/<name>.rel`). Listing `["../humanize/patch.json",
-  "../colorsong/patch.json"]` puts Humanize first. A patch whose spec has a fixed
+  "../colorsong/patch.json"]` puts Humanize first (both orders are tested on
+  hardware). A patch whose spec has a fixed
   `base` and no relocation table (like versiontest) stays exactly there, and must not
   overlap what comes before it.
 - **Hook sites:** two patches can't hook the same call or data word. If they both need
