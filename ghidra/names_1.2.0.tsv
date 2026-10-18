@@ -181,3 +181,19 @@
 600cf53c	btn_clear	(manager, first, last)
 600e2c28	pat_record_button	r0 = 1 (pressed): toggles ed+0x254 (record mode), then pat_edit_mode_changed
 600e2a94	pat_edit_mode_changed	(patview): rebuild rows; redraw the bar via pat_show_page unless an overlay is open
+# Config menu (FINDINGS section 14)
+60118acc	cfg_menu_build	static constructor: builds the Config menu tree (FINDINGS section 14)
+60118394	cfg_menu_folder	(node, parent, label, capacity): folder node, kind 1
+601183e8	cfg_menu_item	(node, parent, label, help, type, descriptor): item node, kind 2
+601185d0	cfg_menu_open_editor	(screen, type, label, help, descriptor): number or option editor
+6011870c	cfg_menu_format_values	(folder): value texts of its items
+601187a8	cfg_menu_draw_folder	(screen): the current folder's list; header Back when nested
+60118828	cfg_menu_redraw	(screen): root list and current folder
+601188dc	cfg_menu_show	(screen): from the Config screen's start
+60118904	cfg_menu_back	(): current = parent; 0 at a root category
+60118928	cfg_menu_select	(): open a child folder, an item's editor, or run an action
+601189cc	cfg_menu_encoder	(screen, column, delta): move the selection or edit
+600cada0	cfg_number_editor	(screen, value, min, max, step, offset): lists min..max, stores the index
+600a3594	atexit_q	(object, destructor, dso)
+600c6474	scr_config_update	Config screen update (vtable 0x6003b5f0 slot +8)
+600e1f98	scr_pattern_update	Pattern screen update (vtable slot 0x600403dc)

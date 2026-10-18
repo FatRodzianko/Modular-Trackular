@@ -24,7 +24,9 @@ CFLAGS=(-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -Os -std=c11
 "$ARM_GCC_BIN/arm-none-eabi-gcc" -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 \
     -nostdlib -nostartfiles -T "$HERE/link.ld" -Wl,--gc-sections \
     -Wl,--undefined=mt_hz_bind -Wl,--undefined=mt_hz_label -Wl,--undefined=mt_hz_colors \
-    -Wl,--undefined=mt_hz_data -Wl,--undefined=mt_version_fmt -Wl,-Map="$OUT/humanize.map" \
+    -Wl,--undefined=mt_hz_data -Wl,--undefined=mt_version_fmt \
+    -Wl,--undefined=mt_hz_settings_folder -Wl,--undefined=mt_hz_last_item \
+    -Wl,--undefined=mt_hz_pattern_update -Wl,--undefined=mt_hz_config_update -Wl,-Map="$OUT/humanize.map" \
     "$OUT/humanize.o" -o "$OUT/humanize.elf"
 "$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary "$OUT/humanize.elf" "$OUT/humanize.bin"
 "$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/humanize.elf" | grep -E ' [TtRr] ' > "$OUT/humanize.sym"

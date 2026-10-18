@@ -244,7 +244,7 @@ sweep, per region:
 | Flash after image end `0x601bab78` | Only the GCC crtstuff end-of-image symbol (`0x600908a4`, `0x600908c8`). No self-check of the image | **Patch code goes here**, appended with no gap |
 | Flash `0x601b1594`–`0x601bab78` | 0x95e4 bytes, mostly zeros, inside the image and not in the copy tables | Leave alone (may be referenced const data) |
 | DTCM `0x2002fbe4`–`0x20053000` | `_end` / heap start used by the allocator; the stack sits above | Heap, not free |
-| OCRAM `0x20204f4c`–`0x20207fff` (tail of the 32 KB bank) | No address constants, no MOVW/MOVT | **Patch RAM goes here** (colorsong: `0x20205000`, 12,208 bytes) |
+| OCRAM `0x20204f4c`–`0x20207fff` (tail of the 32 KB bank) | No address constants, no MOVW/MOVT | **Patch RAM goes here**: colorsong `0x20205000`–`0x20207fbf` (12,208 bytes used), humanize settings `0x20207fc0`–`0x20207fff` |
 | `0x20208000`–`0x202fffff` | Doesn't exist on this unit (reserved address space) | **Never use.** An access to `0x20280000` froze the unit (section 11) |
 | SDRAM `0x80000000`–`0x83ffffff` | Sample memory and buffers all the way to `0x83ff5bf0` | Not free |
 
@@ -800,4 +800,47 @@ The Pattern screen object is `patview` = `0x20021770`. Its editor state is `ed` 
 `patch/humanize` binds page 3's button 2 in record mode and labels it "Humanize"
 (greyed out outside record mode; its README lists the hooks). Its handler follows
 the Invert sequence above, so stock Undo reverts it, including large edits. Tested
-on hardware; the record-mode check is tested in the emulator only.
+on hardware. Its settings use the Config menu (section 14).
+
+## 14. Config menu (`patch/humanize` settings)
+
+The Config screen (vtable `0x6003b5f0`, update method `0x600c6474` in slot
+`0x6003b5f8`) shows a tree of statically allocated nodes that `cfg_menu_build`
+(`0x60118acc`, a static constructor) builds at startup. Run in the emulator, it gives
+root → Project Settings, General, MIDI, USB, Metronome, Firmware, Info, each with its
+items (`tools/emu/test_humanize.py` walks it).
+
+- **Folder** (kind 1), `cfg_menu_folder(node, parent, label, capacity)`
+  (`0x60118394`): `+0` kind, `+4` parent, `+8` capacity, `+0xc` child array, `+0x10`
+  child labels, `+0x14` value texts, `+0x18` label, `+0x1c` selected child, `+0x1d`
+  child count, `+0x1e` index in the parent. The arrays are allocated with the
+  capacity; a child past it is counted but not stored. Root holds 7 and Project
+  Settings 10, both full.
+- **Item** (kind 2), `cfg_menu_item(node, parent, label, help, type, descriptor)`
+  (`0x601183e8`): `+4` label, `+8` help text (shown by the editor), `+0xc` type,
+  `+0x10` descriptor, `+0x14` value text buffer. Types: 1/2 number, descriptor
+  {value pointer, min, max, step, display offset}; 3/4 options, descriptor {value
+  pointer, count, names}; 5/6 text; 7 action (function pointer). The constructor
+  registers every node with `atexit` (`0x600a3594`).
+- The number editor (`0x600cada0`, opened by `cfg_menu_open_editor` `0x601185d0`)
+  lists min..max and stores the chosen **index** in the value byte, while the list
+  shows value + display offset. Stock number items all use min 0: a 1..100 setting is
+  stored as 0..99 with offset 1.
+- Navigation: the current folder is `*(0x20028180)`. `cfg_menu_select`
+  (`0x60118928`) opens a child folder (any depth) or an item's editor (types 1..4) or
+  runs an action (7); `cfg_menu_back` (`0x60118904`) goes to the parent, or returns
+  0 at a root category; `cfg_menu_redraw` (`0x60118828`) draws the root list and the
+  current folder, whose header reads "Back" when its parent isn't the root.
+  `cfg_menu_format_values` (`0x6011870c`) fills a folder's value texts ("%d" of
+  value + offset, or the option name).
+- Project Settings values are bytes in the project struct (`0x202046c9`,
+  `0x20204aac`, `0x20204bb4`, …), saved in `project.mt`. Ghidra's references can't
+  show which struct bytes are free: arrays are only referenced at their first byte,
+  and one "unreferenced" range (`0x20204bbf`–`0x20204bf7`) holds data in real
+  project files. `ghidra/scripts/RefsInRange.java` lists the references to a range.
+
+`patch/humanize` creates Project Settings with room for 11 items, appends a
+"Humanize" folder with three number items and an Off/On item after the constructor's
+last item, in nodes from the firmware's heap, and keeps the values in its own RAM
+(`0x20207fc0`) and in `<project folder>/humanize.bin`, read and written from the
+Pattern and Config screens' update methods. Checked in the emulator only.

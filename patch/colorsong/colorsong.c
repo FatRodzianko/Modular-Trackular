@@ -107,7 +107,7 @@ static uint32_t counted_fx(uint32_t type)
  * and freezes the device. Normal cacheable memory (MPU region 7).
  */
 #define FP_BASE         0x20205000u
-#define FP_LIMIT        0x20208000u     /* end of the 32 KB OCRAM bank */
+#define FP_LIMIT        0x20207FC0u     /* the last 64 bytes of the 32 KB OCRAM bank are humanize's */
 #define FP_MAGIC 0x48534F4Cu        /* "LOSH": a table in the current layout */
 #define FP_SCAN_DONE 0xFFu
 

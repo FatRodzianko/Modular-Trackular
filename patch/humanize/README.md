@@ -3,10 +3,13 @@
 A patch for Polyend Tracker+ firmware 1.2.0. It adds a **Humanize** button to the
 Pattern screen. Pressing it gives the notes in the selection small random changes in
 timing (Micro-move, `m`) and level (Volume/Velocity, `V`), so programmed parts sound
-less robotic. Installed on its own, Config shows the firmware version as `1.2.0-hz2`.
-Together with colorsong ([`patch/all`](../all/patch.json)) it shows `1.2.0-MT2`.
+less robotic. How much, and whether levels change at all, is set per project under
+Config → Project Settings → Humanize. Installed on its own, Config shows the firmware
+version as `1.2.0-hz3`. Together with colorsong ([`patch/all`](../all/patch.json)) it
+shows `1.2.0-MT3`.
 
-**Status:** tested on hardware. The record-mode check is tested in the emulator only.
+**Status:** the button and the edit are tested on hardware. The settings are tested in
+the emulator only.
 
 ## Using it
 
@@ -20,31 +23,52 @@ Together with colorsong ([`patch/all`](../all/patch.json)) it shows `1.2.0-MT2`.
 4. Press **Humanize**. Press it again for more variation. **Undo** (on the first page)
    reverts it, even for large selections.
 
+## Settings
+
+Config → Project Settings → **Humanize**:
+
+| Setting | Values | Default | What it does |
+|---|---|---|---|
+| Range | 1–100 | 10 | How far values move (R below) |
+| Volume/velocity | On / Off | On | Off: Volume/Velocity FX are neither changed nor added |
+| MIDI velocity | 1–100 | 50 | Center for a new V on MIDI and synth instruments |
+| Sample volume | 1–100 | 50 | Center for a new V on sample instruments (1–48) |
+
+Without a V FX, a note plays as if it had V 50 (for MIDI that is the note velocity),
+which is why both defaults are 50. Raise MIDI velocity for velocity-sensitive gear.
+
+Each project keeps its own settings, saved as `humanize.bin` in the project folder a
+moment after you change one. A project without that file uses the defaults. A new
+project keeps the settings you gave it when it is first saved.
+
 ## What it does
 
-For every step with a note (empty steps, note off, cut and fade are left alone):
+With range R, for every step with a note (empty steps, note off, cut and fade are left
+alone):
 
-- An existing **Volume/Velocity** FX moves by a random −5..+5 and stays within 1..100.
-  A `V 0` (a deliberately silent note) stays 0.
-- An existing **Micro-move** FX moves by a random −5..+5 and stays within 0..100.
+- An existing **Micro-move** FX gets a random value in a window of R around it
+  (R = 10: 45..55 around 50), within 0..100.
+- An existing **Volume/Velocity** FX the same, within 1..100. A `V 0` (a deliberately
+  silent note) stays 0.
 - If the step has no Micro-move, one is added in the first free FX slot, with a random
-  value of 0..10.
-- If the step has no Volume/Velocity, one is then added in a free FX slot, with a
-  random value of 45..55.
+  value of 0..R.
+- If the step has no Volume/Velocity, one is then added in a free FX slot, in a window
+  of R around MIDI velocity (MIDI channels and synths) or Sample volume (samples).
+- Near a limit the window slides to keep its width: with R = 10, a V of 98 or a center
+  of 100 gives 90..100, and a Micro-move of 1 gives 0..10.
 - A step with no free FX slot keeps its FX. With one free slot and neither FX, the slot
   gets the Micro-move.
 
-Notes, instruments and all other FX never change. The amount is fixed: changes of up
-to ±5, new Micro-move up to 10. Micro-move only delays a note (0..100 % of a step), so
-humanized notes move later, never earlier.
-
-The result is ordinary FX data in the pattern: it is saved with the project, and stock
-firmware plays it the same way.
+Notes, instruments and all other FX never change. Micro-move only delays a note (0..100
+% of a step), so humanized notes move later, never earlier. The result is ordinary FX
+data in the pattern: it is saved with the project, and stock firmware plays it the
+same way.
 
 ## How it works
 
 The Pattern screen's bottom bar has three pages of 8 buttons, and buttons 2–6 of the
-third page are unused. The patch binds button 2 and gives it a label:
+third page are unused. The Config menu is a tree of folder and item nodes built at
+startup (`0x60118acc`); Project Settings is created with room for exactly its 10 items.
 
 | Hook | Where | What |
 |---|---|---|
@@ -52,6 +76,10 @@ third page are unused. The patch binds button 2 and gives it a label:
 | `mt_hz_label` | `bl disp_ctrl_set_text` at `0x600e5884` (page 3 labels) | Button 2's empty text becomes "Humanize" |
 | `mt_hz_colors` | `bl disp_ctrl_set_colors` at `0x600e593c` | Track Name's colors; button 2 gets the active color set in record mode and the greyed-out one otherwise |
 | `mt_hz_data` | `bl disp_ctrl_set_data` at `0x600e5966` | Track Name's data, also given to button 2 |
+| `mt_hz_settings_folder` | `bl cfg_menu_folder` at `0x60118b00` | Creates Project Settings with room for 11 items instead of 10 |
+| `mt_hz_last_item` | the menu constructor's last `bl cfg_menu_item` (`0x601193e6`) | Adds the Humanize folder and its 4 items to Project Settings, as stock number and Off/On items |
+| `mt_hz_pattern_update` | Pattern screen vtable slot `0x600403dc` (update `0x600e1f98`) | Loads `humanize.bin` when the project changes, saves it after a change, then runs the stock update |
+| `mt_hz_config_update` | Config screen vtable slot `0x6003b5f8` (update `0x600c6474`) | The same, while Config is open |
 
 Like the stock editing buttons (Fill, Undo, Redo and the second page), Humanize only
 works in record mode. Toggling record redraws the current page of the bar, which runs
@@ -61,10 +89,17 @@ the hooks again, so the button turns active or grey right away.
 onto the undo ring (so Undo reverts it), turns the editor's selection into the
 sequencer's step/track rectangle, edits the steps, rebuilds the grid rows and marks the
 pattern changed (so it gets saved). Random numbers come from the firmware's own
-generator, the one its random FX use. The code is 590 bytes at `0x601bc000`, the first
-4 KB flash sector after colorsong's code, so both fit in one firmware. It uses no RAM
-of its own. Firmware addresses and structures are in
-[docs/FINDINGS.md](../../docs/FINDINGS.md) (section 13).
+generator, the one its random FX use.
+
+The settings live in the last 64 bytes of on-chip RAM (`0x20207fc0`), next to
+colorsong's table. The menu items edit them directly; the stock number editor stores a
+list index, so 1–100 is kept as 0–99 and shown + 1. The settings file is read and
+written from the two screens' update methods, where the stock code does its own file
+work, in the same way colorsong saves its colors: one 12-byte file (`HHZ1`, the 4
+values, a checksum), written only when a value has changed. The menu nodes come from
+the firmware's heap. The code is 2,340 bytes at `0x601bc000`, the first 4 KB flash
+sector after colorsong's code, so both fit in one firmware. Firmware addresses and
+structures are in [docs/FINDINGS.md](../../docs/FINDINGS.md) (sections 13 and 14).
 
 ## Build
 
@@ -72,13 +107,13 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/humanize/patch.json build/TrackerPlus_hz2.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/humanize/patch.json build/TrackerPlus_hz3.ptf
 ```
 
 Both mods in one firmware:
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT2.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT3.ptf
 ```
 
 To build the patch code from source, you need the Arm GNU Toolchain
@@ -95,30 +130,37 @@ patch/humanize/build.sh
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_humanize.py build/TrackerPlus_hz2.ptf
+python tools/emu/test_humanize.py build/TrackerPlus_hz3.ptf
 ```
 
-It runs the stock page-3 code with the patch in place and checks that button 2 is
-bound and active in record mode, unbound and greyed out outside it, and that the
-other buttons keep their stock bindings and labels. A press outside record mode
-must change nothing. Then
-it presses the button on a test pattern, through the stock selection, undo and
-changed-flag code, and checks every rule above on every step: with and without a
-selection, steps without notes, full and partly full FX slots, values near the limits
-and `V 0`. It also checks that the undo ring holds the original pattern, and that 300
-presses produce every value in each range. The same test runs on `TrackerPlus_MT2.ptf`.
+It runs the stock code with the patch in place:
+
+- **Button:** the page-3 binding and labels, in and outside record mode.
+- **Edit:** presses on test patterns through the stock selection, undo and
+  changed-flag code, checking every rule above on every step (with and without a
+  selection, full and partly full FX slots, values near the limits, `V 0`), and that
+  every value of each window shows up over 300 presses, with the default settings and
+  with others (range 20, Volume/velocity off, MIDI velocity 100, Sample volume 30).
+- **Config menu:** the stock menu constructor, then the stock select, back, value
+  display and editor code on the Humanize folder.
+- **Settings file:** the two update hooks with a fake SD card: defaults without a file,
+  one write a while after a change, per-project values, a damaged file, and a new
+  project's first save.
+
+The same test runs on `TrackerPlus_MT3.ptf`.
 
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-hz2 Build 1504` (or
-`1.2.0-MT2 Build 1504` for both mods).
+Config → Firmware → the patched file. Config should show `1.2.0-hz3 Build 1504` (or
+`1.2.0-MT3 Build 1504` for both mods).
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Humanized patterns keep their
-FX and play the same on stock firmware.
+FX and play the same on stock firmware. Stock firmware ignores the `humanize.bin`
+files; you can delete them.
 
 If the unit freezes, pull the power, boot, and revert through Config. If it doesn't
-boot, put only the stock `TrackerPlus_1.2.0.ptf` in `/Firmware` (from a computer),
-power on with the card in, and press the pinhole button next to the USB-C port. The
-bootloader reinstalls the stock firmware.
+boot, or Config itself doesn't work, put only the stock `TrackerPlus_1.2.0.ptf` in
+`/Firmware` (from a computer), power on with the card in, and press the pinhole button
+next to the USB-C port. The bootloader reinstalls the stock firmware.
