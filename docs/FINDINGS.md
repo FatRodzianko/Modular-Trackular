@@ -893,6 +893,21 @@ the Config screen shows, once a second (`cfg_debug_info`, `0x600cb548`):
 - **max stack**: the deepest stack use since boot (`stack_max_used_q`, `0x6010c268`),
   out of 20,480 bytes.
 
+Measured on stock 1.2.0 (no patches), one session:
+
+| After | free heap | max stack | CPU max |
+|---|---|---|---|
+| Power-on | 69,848 B | 7,057 B | 42 % |
+| Playing a project, loading samples (large loops), recording and loading a 12 s sample | 68,092 B | 7,129 B | 47 % |
+| A pattern with Synth 1–3 on every step, two FX sending random values to their macros | 68,092 B | 7,129 B | 60 % |
+| Loading and playing several projects, then back | 67,816 B | 8,033 B | 61 % |
+
+So about 12.4 KB of the stack was never used, which keeps a stack overflow well away
+from the DTCM gap above the heap limit, and at least ~67.8 KB of the heap stayed free
+(the real headroom is that plus whatever the heap hasn't grown into). Heap use hardly
+changes after power-on, so most allocations happen at startup. Not yet measured:
+rendering and export, USB storage, the sample editor, performance mode, the games.
+
 ### Options for patch RAM
 
 1. **Fixed regions, assigned by the patcher.** A patch states how much RAM it needs;
