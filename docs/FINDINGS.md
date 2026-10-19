@@ -929,10 +929,10 @@ fills each with an address pattern, then reports how much of it is still untouch
 and the heap's high-water mark (the newlib break, which the debug screen leaves out),
 in Config and in `ramdiag.txt`.
 
-Result of one session on stock 1.2.0 + ramdiag (5.6 minutes: playing patterns,
-loading and copying samples, recording from the radio, rendering 128 steps of
-Synth 1–3 modulating on every step and loading the result, entering and leaving USB
-storage mode):
+Result of one session on stock 1.2.0 + ramdiag (5.6 minutes: playing patterns with
+MIDI notes, loading and copying samples, sample editing including a timestretch,
+recording from the radio, rendering 128 steps of Synth 1–3 modulating on every step
+and loading the result, entering and leaving USB storage mode):
 
 | Region | Untouched |
 |---|---|
@@ -947,5 +947,7 @@ not: rendering drives it to its limit (free heap fell from about 68 KB to about 
 and stayed there), so it has no room to grow, and a failed allocation freezes the
 unit. Patch RAM should come from the fixed regions, not the heap; even small startup
 allocations (humanize's menu entries, a few hundred bytes) take from a thin margin.
-Max stack was 8,033 B again; CPU peaked at 88 % while rendering. Not covered yet: the
-sample editor, performance mode, MIDI-heavy use, the games.
+Max stack was 8,033 B again; CPU peaked at 88 % while rendering. Not covered yet:
+performance mode and the games. The games run on a built-in NES emulator; if their
+buffers (and any fast-RAM code) are used only while a game runs, disabling the games
+could free more. Unchecked.
