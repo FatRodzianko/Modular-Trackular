@@ -3,7 +3,7 @@
   python tools/test_layout.py <stock TrackerPlus_1.2.0.ptf> [out dir]
 
 Builds, from the repository's patch specs (local builds if present, else prebuilt):
-  - colorsong alone, humanize alone, interpolate alone, ramdiag alone,
+  - colorsong alone, humanize alone, interpolate alone, freeverb alone, ramdiag alone,
   - versiontest alone (pinned base; byte-identical to MT0),
   - patch/all (colorsong, humanize, interpolate),
   - the same patches the other way round (interpolate, humanize, colorsong),
@@ -149,8 +149,8 @@ def main() -> int:
     stock = Path(sys.argv[1])
     outdir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(tempfile.mkdtemp())
     outdir.mkdir(parents=True, exist_ok=True)
-    cs, hz, vt, rd, ip = (ROOT / "patch" / n / "patch.json"
-                          for n in ("colorsong", "humanize", "versiontest", "ramdiag", "interpolate"))
+    cs, hz, vt, rd, ip, fv = (ROOT / "patch" / n / "patch.json"
+                              for n in ("colorsong", "humanize", "versiontest", "ramdiag", "interpolate", "freeverb"))
     all_spec = ROOT / "patch" / "all" / "patch.json"
     rev = json.loads(all_spec.read_text())
     rev.update(name="all-reversed", include=[str(ip), str(hz), str(cs)], version="MTR")
@@ -174,6 +174,7 @@ def main() -> int:
             ("versiontest alone (fixed base)", vt, [vt], None, MT0_SHA),
             ("humanize alone", hz, [hz], None, None),
             ("interpolate alone", ip, [ip], None, None),
+            ("freeverb alone", fv, [fv], None, None),
             ("ramdiag alone", rd, [rd], None, None),
             ("patch/all: colorsong, humanize, interpolate", all_spec, [cs, hz, ip],
              json.loads(all_spec.read_text())["version"], None),

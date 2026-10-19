@@ -1,0 +1,5 @@
+601c04e8 t allpass_len
+601c04d8 t comb_len
+601c0188 t fv_process
+601c0000 T mt_fv_update
+601c04f0 T mt_version_fmt

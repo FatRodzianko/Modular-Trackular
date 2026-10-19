@@ -1241,7 +1241,17 @@ writable `0x600305d4`. There are 182 objects, all built by the static constructo
 | Bypass | `+0x2d` | `+0x80` |
 
 The reverb's float settings sit at object `+0x50`..`+0x80` (defaults 0.5, 0.8, 0.1,
-0.7, 0.625, 0.2, 5.0). Which Master page parameter writes which field isn't mapped
+0.7, 0.625, 0.2, 5.0).
+
+**The stock reverb is (derived from) Mutable Instruments' reverb.** Its taps in the
+16K-sample ring buffer sit at `0x95`, `0x97`, `0x16c`, `0x16e`, `0x2ac`, `0x2ae`, `0x4bc`,
+`0x4be`, `0xd43`, `0xd45`, `0x17c6`: exactly the delay-line boundaries of the reverb in
+Mutable Instruments' Rings, Elements and Beads (`dsp/fx/reverb.h`, MIT): input allpasses
+of 150, 214, 319 and 527 samples, then loop allpasses of 2182 and 2690, laid out one after
+another by MI's `FxEngine`. Its default diffusion 0.625 and damping 0.7 are that
+reverb's `Init()` values, and like it, it stores 16-bit samples, processes in float and
+modulates taps with an LFO. So swapping in one of MI's reverbs would change little; a
+swap that sounds different needs a different algorithm. Which Master page parameter writes which field isn't mapped
 yet; the page labels are Size, Damping, Predelay and Diffusion for the reverb and
 PingPong, Sync, Rate, Time, Feedback and Filter for the delay (manual 10.3, 10.4).
 
@@ -1267,6 +1277,14 @@ setting, as for FX Interpolation). This keeps everything else as it is:
 - **Testing:** the emulator has both objects, so a replacement can be fed test blocks
   through the real block helpers and its output written to a WAV file for listening,
   before it goes near hardware.
+
+`patch/freeverb` does this for the reverb: Freeverb (public domain) in place of the
+stock reverb, reading Size (`+0x54`), Damping (`+0x5c` = 1 - damping), Diffusion
+(`+0x58`, the setter clamps it to 0..0.85) and Predelay (`+0x6c`, 0..5000 samples) as
+the Master Reverb setters (`0x600b3618`, `0x600b3628`, `0x600b3660`, `0x600b3640`)
+store them, and mixing its return like the stock reverb: send + (wet - send) * amount
+(`+0x4c`, 0.8). The project keeps the knobs as floats 0..1 at `0x202049cc` (Size),
+`0x202049d0` (Damping), `0x202049d4` (Predelay) and `0x202049d8` (Diffusion).
 
 Open-source algorithms with licenses that fit (MIT or public domain) include Freeverb,
 the Dattorro plate, CloudSeed, and the reverbs and delays in Mutable Instruments'
