@@ -47,8 +47,8 @@ must be byte-identical to these builds:
 | Patch | Output file | Version text in Config | On hardware | Output SHA-256 |
 |---|---|---|---|---|
 | colorsong | `TrackerPlus_c11.ptf` | `1.2.0-c11` | tested | `cc9119abe627d994ba6010bfe0db59129e3f494611dbc8c1e5c68fcf0653ebc6` |
-| humanize | `TrackerPlus_hz7.ptf` | `1.2.0-hz7` | not yet | `d74c3fe62ed3feb16bca6ca046b9ed5ea62f85de61a74f02bc36bd82b343b17c` |
-| all (colorsong + humanize) | `TrackerPlus_MT7.ptf` | `1.2.0-MT7` | not yet | `0397f2ba91b0f6e41cc56b068c64c83b79e48898dcf702cfd7f25c6035ad6b4e` |
+| humanize | `TrackerPlus_hz7.ptf` | `1.2.0-hz7` | tested | `d74c3fe62ed3feb16bca6ca046b9ed5ea62f85de61a74f02bc36bd82b343b17c` |
+| all (colorsong + humanize) | `TrackerPlus_MT7.ptf` | `1.2.0-MT7` | tested | `0397f2ba91b0f6e41cc56b068c64c83b79e48898dcf702cfd7f25c6035ad6b4e` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 
