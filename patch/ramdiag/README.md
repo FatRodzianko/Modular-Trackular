@@ -10,7 +10,8 @@ It's a tool, not a feature: install it on its own on top of stock firmware, run 
 test session, then go back to your usual firmware. It can't be combined with humanize
 (both hook the same places).
 
-**Status:** tested in the emulator only, not yet on hardware.
+**Status:** tested on hardware. The results of the first session are in FINDINGS
+section 15.
 
 ## What it checks
 

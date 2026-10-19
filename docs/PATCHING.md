@@ -49,7 +49,7 @@ must be byte-identical to these builds:
 | colorsong | `TrackerPlus_c10.ptf` | `1.2.0-c10` | tested | `5d82977eadf595b6a491b90c793dcd1bfc644cec74920a98897d86444e28cb4a` |
 | humanize | `TrackerPlus_hz5.ptf` | `1.2.0-hz5` | tested | `58722f49ccc6cecc2ffa93ac4e649a9364f596e7464d93d44925793908096b54` |
 | all (colorsong + humanize) | `TrackerPlus_MT5.ptf` | `1.2.0-MT5` | tested | `b1753f2988901eb388649ae4d15cb4baa7b533b1592b11b22ff64c60d31b3b8b` |
-| ramdiag (diagnostic, on its own) | `TrackerPlus_RD1.ptf` | `1.2.0-RD1` | not yet | `ab238ea32b68cdea8b316a110eb238909ea4805dac0b1ca9d7d450c256472b67` |
+| ramdiag (diagnostic, on its own) | `TrackerPlus_RD1.ptf` | `1.2.0-RD1` | tested | `ab238ea32b68cdea8b316a110eb238909ea4805dac0b1ca9d7d450c256472b67` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 
 **Name the output `TrackerPlus<anything>.ptf`.** Config's firmware list only shows

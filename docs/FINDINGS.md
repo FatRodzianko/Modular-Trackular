@@ -924,8 +924,28 @@ rendering and export, USB storage, the sample editor, performance mode, the game
    allocation later in the stock code freezes the unit. Needs the headroom measured
    first.
 
-Before any new region holds patch data, it should be confirmed on hardware.
-`patch/ramdiag` does that: once the Pattern screen runs, it fills each candidate with
-an address pattern, then reports how much of it is still untouched after heavy use,
+`patch/ramdiag` checks the candidates on hardware: once the Pattern screen runs, it
+fills each with an address pattern, then reports how much of it is still untouched,
 and the heap's high-water mark (the newlib break, which the debug screen leaves out),
 in Config and in `ramdiag.txt`.
+
+Result of one session on stock 1.2.0 + ramdiag (5.6 minutes: playing patterns,
+loading and copying samples, recording from the radio, rendering 128 steps of
+Synth 1–3 modulating on every step and loading the result, entering and leaving USB
+storage mode):
+
+| Region | Untouched |
+|---|---|
+| DTCM above the heap limit | 5,016 of 5,016 B |
+| SDRAM top | 25,616 of 25,616 B |
+| ITCM tail | 1,224 of 1,224 B |
+| DTCM after the audio pool | 840 of 840 B |
+| Heap | break `0x20051c5c`: grew to 12 bytes below its limit; 42,468 B free inside |
+
+So all four regions (32,696 bytes) look free, next to the OCRAM tail. The heap does
+not: rendering drives it to its limit (free heap fell from about 68 KB to about 42 KB
+and stayed there), so it has no room to grow, and a failed allocation freezes the
+unit. Patch RAM should come from the fixed regions, not the heap; even small startup
+allocations (humanize's menu entries, a few hundred bytes) take from a thin margin.
+Max stack was 8,033 B again; CPU peaked at 88 % while rendering. Not covered yet: the
+sample editor, performance mode, MIDI-heavy use, the games.
