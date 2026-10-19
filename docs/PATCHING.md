@@ -36,8 +36,8 @@ the compiled patch code in `patch/<name>/prebuilt/`, so this works out of the bo
 python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.json build/TrackerPlus_c11.ptf
 ```
 
-Use `patch/humanize/patch.json` for Humanize alone, or `patch/all/patch.json` for
-colorsong and Humanize in one firmware (see "Choosing patches" below for your own
+Use `patch/humanize/patch.json` for Humanize alone, `patch/interpolate/patch.json` for
+interpolate alone, or `patch/all/patch.json` for all three in one firmware (see "Choosing patches" below for your own
 mix).
 
 The patcher checks the stock image, checks the original bytes at every patched
@@ -47,8 +47,9 @@ must be byte-identical to these builds:
 | Patch | Output file | Version text in Config | On hardware | Output SHA-256 |
 |---|---|---|---|---|
 | colorsong | `TrackerPlus_c11.ptf` | `1.2.0-c11` | tested | `cc9119abe627d994ba6010bfe0db59129e3f494611dbc8c1e5c68fcf0653ebc6` |
-| humanize | `TrackerPlus_hz7.ptf` | `1.2.0-hz7` | tested | `d74c3fe62ed3feb16bca6ca046b9ed5ea62f85de61a74f02bc36bd82b343b17c` |
-| all (colorsong + humanize) | `TrackerPlus_MT7.ptf` | `1.2.0-MT7` | tested | `0397f2ba91b0f6e41cc56b068c64c83b79e48898dcf702cfd7f25c6035ad6b4e` |
+| humanize | `TrackerPlus_hz8.ptf` | `1.2.0-hz8` | not yet | `ec3c30fda0d186299e39cce2be48031303f3bc0583fd1e8803600b500bf4b46f` |
+| interpolate | `TrackerPlus_ip5.ptf` | `1.2.0-ip5` | not yet | `f3d98eb18f5852dc718d41ba9311e813d056d1ab5b37b1252e87cf0341c0942a` |
+| all (colorsong + humanize + interpolate) | `TrackerPlus_MTC.ptf` | `1.2.0-MTC` | tested | `5609dff165918fa6668385622eda3b97318dcf9909bab8bbcf760f2d06971a6a` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 
@@ -61,13 +62,15 @@ original Tracker, names longer than 31 characters showed garbage.
 Each patch can be installed on its own, or several can go into one firmware:
 
 - **One patch:** use its own spec. `patch/colorsong/patch.json` gives colorsong only,
-  `patch/humanize/patch.json` Humanize only.
+  `patch/humanize/patch.json` Humanize only, `patch/interpolate/patch.json`
+  interpolate only.
 - **Several patches:** use a bundle spec, which lists the patches to combine.
-  `patch/all/patch.json` is the bundle that ships (colorsong + Humanize):
+  `patch/all/patch.json` is the bundle that ships (colorsong + Humanize +
+  interpolate):
 
   ```json
-  "include": ["../colorsong/patch.json", "../humanize/patch.json"],
-  "version": "MT7",
+  "include": ["../colorsong/patch.json", "../humanize/patch.json", "../interpolate/patch.json"],
+  "version": "MTC",
   ```
 
 To make your own mix, copy `patch/all/` to a new folder (for example `patch/mymix/`)
@@ -88,13 +91,19 @@ The patches in one firmware have to fit together:
 - **Flash: handled for you.** The patcher puts the patches after the stock image in
   the order listed, each right after the one before (16-byte aligned), and moves
   each one's code to where it lands, using the relocation table its build makes
-  (`prebuilt/<name>.rel`). Listing `["../humanize/patch.json",
-  "../colorsong/patch.json"]` puts Humanize first (`tools/test_layout.py` checks
-  both orders). A patch whose spec has a fixed
+  (`prebuilt/<name>.rel`). Listing `["../interpolate/patch.json",
+  "../humanize/patch.json", "../colorsong/patch.json"]` puts them the other way round
+  (`tools/test_layout.py` checks both orders). A patch whose spec has a fixed
   `base` and no relocation table (like versiontest) stays exactly there, and must not
   overlap what comes before it.
-- **Hook sites:** two patches can't hook the same call or data word. If they both need
-  the same one, one patch has to call the other, which takes changes to their code.
+- **Hook sites: shared ones must be chained.** Two patches can hook the same call or
+  data word only if both chain it: the hook names a `next` word in the patch, which
+  the patcher fills with what the site pointed to before (the stock function, or the
+  hook of the patch listed before it), and the patch calls through that word instead
+  of calling the stock function. The last patch listed runs first. Humanize and
+  interpolate chain the Project Settings menu and the Pattern and Config update
+  methods this way, so both appear in Config. Sites only one patch needs can stay
+  plain.
 - **RAM: handled for you.** Each patch's state variables are one block (its
   `.mt_ram` section). The patcher hands the blocks out from the free RAM regions
   below, in the order the patches are listed: each block goes into the first region
@@ -116,8 +125,8 @@ The patches in one firmware have to fit together:
 - **Firmware:** every patch must be for the same stock firmware
   (`stock_image_sha256`).
 
-The patcher refuses to build when code ranges overlap, two patches hook the same site,
-a patch is for another firmware, an original byte doesn't match, the RAM runs out, or
+The patcher refuses to build when code ranges overlap, two patches hook the same site
+without both chaining it, a patch is for another firmware, an original byte doesn't match, the RAM runs out, or
 a bundle includes a patch marked `standalone` (the ramdiag diagnostic). It **can't**
 detect two patches that each work alone but disturb each other.
 
@@ -148,7 +157,8 @@ python -m pip install unicorn capstone numpy
 python tools/emu/check_version.py build/TrackerPlus_c11.ptf          # -> '1.2.0-c11'
 python tools/emu/test_colorsong.py build/TrackerPlus_c11.ptf
 python tools/emu/test_rescan.py build/TrackerPlus_c11.ptf "path/to/<project A>" "path/to/<project B>"
-python tools/emu/test_humanize.py build/TrackerPlus_hz7.ptf
+python tools/emu/test_humanize.py build/TrackerPlus_hz8.ptf
+python tools/emu/test_interpolate.py build/TrackerPlus_ip5.ptf
 ```
 
 Each test works on any firmware that contains its patch, so for a bundle run every
@@ -157,10 +167,12 @@ went from the `.map.json` the patcher wrote next to the `.ptf`, so keep the two
 together.
 
 `tools/test_layout.py` checks the patcher's placement without the emulator. It builds
-each patch alone, `patch/all`, and the same two patches in the other order, and
-checks that each patch's code and RAM sit where they should (RAM in a region the
-patch may use, no two blocks overlapping), that exactly the words in its relocation
-table moved, and that every hook points into it:
+each patch alone, `patch/all`, the same patches in the other order, and two patches
+on the same chained sites, and checks that each patch's code and RAM sit where they
+should (RAM in a region the patch may use, no two blocks overlapping), that exactly the
+words in its relocation table moved, that each chain word holds what its site pointed
+to before, and that every hooked site points at the last patch that hooks it. It also
+checks that a shared site that isn't chained by both patches is refused:
 
 ```bash
 python tools/test_layout.py path/to/TrackerPlus_1.2.0.ptf build/layout
@@ -222,6 +234,10 @@ details. A patch is:
   their `prebuilt_` copies), Thumb-2 `BL` sites to retarget (with their original
   bytes), and data words to replace (literal pools, vtable slots with
   `"thumb": true`). Instead of a relocation table, a spec can give a fixed `base`.
+  A hook other patches may share gets `"next": "<symbol>"`: a 4-byte word in the
+  patch, linked as 0, that the patch calls through instead of the original
+  (`const volatile uint32_t` in C, so the compiler reads it; see Humanize's
+  `CHAIN_WORD`).
   Optional RAM settings:
   - `"ram_startup": true` when the state is used before `main` (for example from the
     Config menu constructor, as Humanize does). The patch then never gets
@@ -231,5 +247,6 @@ details. A patch is:
   - `"standalone": true` for a patch that must not be combined with others.
 - `tools/patch_ptf.py` checks everything, appends the code without gaps, and keeps the
   stock Intel HEX layout, so an unmodified image re-encodes to the exact stock file.
-- To combine it with other patches, give it its own hook sites, and mark its version-text word with `"version": true` so a bundle can replace it
-  (see "Choosing patches" in section 2).
+- To combine it with other patches, give it its own hook sites or chain the shared
+  ones, and mark its version-text word with `"version": true` so a bundle can
+  replace it (see "Choosing patches" in section 2).

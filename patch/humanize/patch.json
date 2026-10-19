@@ -39,12 +39,14 @@
       "at": "0x60118B00",
       "old": "fff748fc",
       "to": "mt_hz_settings_folder",
+      "next": "mt_hz_next_folder",
       "note": "Config menu constructor: Project Settings folder, room for 10 items -> 11"
     },
     {
       "at": "0x601193E6",
       "old": "fef7ffff",
       "to": "mt_hz_last_item",
+      "next": "mt_hz_next_last_item",
       "note": "Config menu constructor: last item (Licenses); then adds the Humanize folder and its items"
     }
   ],
@@ -53,6 +55,7 @@
       "at": "0x600403DC",
       "old": "991f0e60",
       "to": "mt_hz_pattern_update",
+      "next": "mt_hz_next_pattern_update",
       "thumb": true,
       "note": "Pattern screen vtable: update method 0x600e1f99 -> mt_hz_pattern_update (settings file load/save)"
     },
@@ -60,6 +63,7 @@
       "at": "0x6003B5F8",
       "old": "75640c60",
       "to": "mt_hz_config_update",
+      "next": "mt_hz_next_config_update",
       "thumb": true,
       "note": "Config screen vtable: update method 0x600c6475 -> mt_hz_config_update (settings file load/save)"
     },
@@ -68,7 +72,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-hz7"
+      "note": "version text 1.2.0-hz8"
     }
   ]
 }

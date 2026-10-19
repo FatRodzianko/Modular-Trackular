@@ -3,11 +3,14 @@
   python tools/test_layout.py <stock TrackerPlus_1.2.0.ptf> [out dir]
 
 Builds, from the repository's patch specs (local builds if present, else prebuilt):
-  - colorsong alone, humanize alone, ramdiag alone,
+  - colorsong alone, humanize alone, interpolate alone, ramdiag alone,
   - versiontest alone (pinned base; byte-identical to MT0),
-  - patch/all (colorsong, then humanize),
-  - the same two patches the other way round (humanize, then colorsong),
-and checks that a bundle with ramdiag (standalone) is refused.
+  - patch/all (colorsong, humanize, interpolate),
+  - the same patches the other way round (interpolate, humanize, colorsong),
+  - humanize and a copy of it that hooks only its chained sites (two patches on the
+    same four sites),
+and checks that a bundle with ramdiag (standalone) is refused, and so is one where a
+shared site isn't chained by both patches.
 For each output it reads the image back and its .map.json, and checks:
   - the patches sit in the listed order, each right after the one before (16-byte
     aligned), or at its fixed base; the gaps are 0xFF;
@@ -16,7 +19,9 @@ For each output it reads the image back and its .map.json, and checks:
     blocks overlap;
   - each patch's bytes equal its .bin, except the words its relocation table lists,
     which equal the .bin's value plus the code move or the RAM move, exactly;
-  - every hook (BL site or word) points at its symbol plus the move;
+  - each chain word ("next") holds what its site pointed to before that patch: the
+    stock target or the hook of the patch before it;
+  - every hooked site (BL or word) points at the hook of the last patch that hooks it;
   - the version text is the bundle's (or the patch's own when alone).
 The emulator tests (tools/emu/test_*.py) then check that the firmware works.
 """
@@ -32,7 +37,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-from patch_ptf import RAM_DEFAULT_ORDER, RAM_REGIONS, load_rel, load_symbols  # noqa: E402
+from patch_ptf import RAM_DEFAULT_ORDER, RAM_REGIONS, bl_target, load_rel, load_symbols  # noqa: E402
 from ptf import read_ptf  # noqa: E402
 
 MT0_SHA = "f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff"
@@ -45,17 +50,6 @@ def check(ok: bool, what: str) -> None:
     print(("  PASS  " if ok else "  FAIL  ") + what)
     if not ok:
         failures.append(what)
-
-
-def bl_target(image: bytes, base: int, at: int) -> int:
-    hw1, hw2 = struct.unpack_from("<HH", image, at - base)
-    s = (hw1 >> 10) & 1
-    j1, j2 = (hw2 >> 13) & 1, (hw2 >> 11) & 1
-    i1, i2 = ~(j1 ^ s) & 1, ~(j2 ^ s) & 1
-    off = (s << 24) | (i1 << 23) | (i2 << 22) | ((hw1 & 0x3FF) << 12) | ((hw2 & 0x7FF) << 1)
-    if s:
-        off -= 1 << 25
-    return at + 4 + off
 
 
 def patch_files(spec_path: Path) -> dict:
@@ -78,13 +72,14 @@ def build(stock: Path, spec: Path, out: Path) -> bool:
     return r.returncode == 0
 
 
-def verify(label: str, out: Path, specs: list[Path], version: str | None) -> None:
+def verify(label: str, out: Path, specs: list[Path], version: str | None, stock: bytes) -> None:
     print(label)
     ptf = read_ptf(out)
     img, base0 = bytes(ptf.image), ptf.base
     layout = {q["name"]: q for q in json.loads(out.with_suffix(".map.json").read_text())["patches"]}
     end = STOCK_END
     ram_blocks = []
+    hooked: dict[int, tuple[str, int, str]] = {}    # site -> (kind, what it points to, patch)
     for sp in specs:
         p = patch_files(sp)
         spec, blob, rel = p["spec"], p["blob"], p["rel"]
@@ -114,15 +109,32 @@ def verify(label: str, out: Path, specs: list[Path], version: str | None) -> Non
             for off in offs:
                 v = struct.unpack_from("<I", blob, off)[0]
                 struct.pack_into("<I", want, off, (v + d) & 0xFFFFFFFF)
+        syms = {k: v + delta for k, v in p["syms"].items()}
+        chained = 0
+        for kind, hook in [("bl", br) for br in spec["branches"]] + \
+                [("word", w) for w in spec.get("words", []) if not (version and w.get("version"))]:
+            at = int(hook["at"], 16)
+            if at in hooked:
+                before = hooked[at][1]
+            elif kind == "bl":
+                before = bl_target(stock, base0, at)
+            else:
+                before = struct.unpack_from("<I", stock, at - base0)[0]
+            if "next" in hook:
+                struct.pack_into("<I", want, syms[hook["next"]] - base, before | 1 if kind == "bl" else before)
+                chained += 1
+            target = syms[hook["to"]] | (1 if kind == "word" and hook.get("thumb") else 0)
+            hooked[at] = (kind, target, name)
         check(got == bytes(want), f"{name}: code at {base:#x} (moved {delta:+#x}), {len(offsets)} code words "
-              f"and {len(ram_offsets)} RAM words (moved {ram_delta:+#x}) relocated, all other bytes as built")
-        hooks_ok = all(bl_target(img, base0, int(br["at"], 16)) == p["syms"][br["to"]] + delta
-                       for br in spec["branches"])
-        words_ok = all(struct.unpack_from("<I", img, int(w["at"], 16) - base0)[0]
-                       == (p["syms"][w["to"]] + delta) | (1 if w.get("thumb") else 0)
-                       for w in spec.get("words", []) if not (version and w.get("version")))
-        check(hooks_ok and words_ok, f"{name}: {len(spec['branches'])} calls and its words point into it")
+              f"and {len(ram_offsets)} RAM words (moved {ram_delta:+#x}) relocated, {chained} chain words "
+              f"filled, all other bytes as built")
         end = base + len(blob)
+    sites_ok = all((bl_target(img, base0, at) if kind == "bl" else struct.unpack_from("<I", img, at - base0)[0])
+                   == target for at, (kind, target, _) in hooked.items())
+    shared = sum(1 for at in hooked if sum(1 for sp in specs for h in
+                                           patch_files(sp)["spec"]["branches"] + patch_files(sp)["spec"].get("words", [])
+                                           if int(h["at"], 16) == at) > 1)
+    check(sites_ok, f"all {len(hooked)} hooked sites point at the last patch's hook ({shared} shared)")
     ram_blocks.sort()
     check(all(a[1] <= b[0] for a, b in zip(ram_blocks, ram_blocks[1:])), "no two patches' RAM overlaps")
     vptr = struct.unpack_from("<I", img, 0x600CBF9C - base0)[0]
@@ -137,25 +149,41 @@ def main() -> int:
     stock = Path(sys.argv[1])
     outdir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(tempfile.mkdtemp())
     outdir.mkdir(parents=True, exist_ok=True)
-    cs, hz, vt, rd = (ROOT / "patch" / n / "patch.json" for n in ("colorsong", "humanize", "versiontest", "ramdiag"))
+    cs, hz, vt, rd, ip = (ROOT / "patch" / n / "patch.json"
+                          for n in ("colorsong", "humanize", "versiontest", "ramdiag", "interpolate"))
     all_spec = ROOT / "patch" / "all" / "patch.json"
     rev = json.loads(all_spec.read_text())
-    rev.update(name="all-reversed", include=[str(hz), str(cs)], version="MTR")
+    rev.update(name="all-reversed", include=[str(ip), str(hz), str(cs)], version="MTR")
     rev_spec = outdir / "reversed.json"
     rev_spec.write_text(json.dumps(rev, indent=2))
+    hz_spec = json.loads(hz.read_text())
+    copy = dict(hz_spec, name="humanize-copy",
+                branches=[b for b in hz_spec["branches"] if "next" in b],
+                words=[w for w in hz_spec["words"] if "next" in w])
+    for k in ("bin", "sym", "rel", "prebuilt_bin", "prebuilt_sym", "prebuilt_rel"):
+        copy[k] = str((hz.parent / hz_spec[k]).resolve())
+    copy_spec = outdir / "humanize-copy.json"
+    copy_spec.write_text(json.dumps(copy, indent=2))
+    chain = dict(rev, name="chain", include=[str(hz), str(copy_spec.resolve())], version="CHN")
+    chain_spec = outdir / "chain.json"
+    chain_spec.write_text(json.dumps(chain, indent=2))
+    stock_img = bytes(read_ptf(stock).image)
 
     for label, spec, specs, version, sha in (
             ("colorsong alone", cs, [cs], None, None),
             ("versiontest alone (fixed base)", vt, [vt], None, MT0_SHA),
             ("humanize alone", hz, [hz], None, None),
+            ("interpolate alone", ip, [ip], None, None),
             ("ramdiag alone", rd, [rd], None, None),
-            ("patch/all: colorsong, then humanize", all_spec, [cs, hz], json.loads(all_spec.read_text())["version"], None),
-            ("reversed: humanize, then colorsong", rev_spec, [hz, cs], "MTR", None)):
-        out = outdir / f"{spec.parent.name if spec != rev_spec else 'reversed'}.ptf"
+            ("patch/all: colorsong, humanize, interpolate", all_spec, [cs, hz, ip],
+             json.loads(all_spec.read_text())["version"], None),
+            ("reversed: interpolate, humanize, colorsong", rev_spec, [ip, hz, cs], "MTR", None),
+            ("chained: humanize, then a copy on its four shared sites", chain_spec, [hz, copy_spec], "CHN", None)):
+        out = outdir / f"{spec.stem if spec.parent == outdir else spec.parent.name}.ptf"
         if not build(stock, spec, out):
             check(False, f"{label}: patch_ptf failed")
             continue
-        verify(label, out, specs, version)
+        verify(label, out, specs, version, stock_img)
         if sha:
             got = hashlib.sha256(out.read_bytes()).hexdigest()
             check(got == sha, f"{label}: byte-identical to the hardware-tested build")
@@ -166,6 +194,17 @@ def main() -> int:
     r = subprocess.run([sys.executable, "-I", str(ROOT / "tools" / "patch_ptf.py"), str(stock), str(bad_spec),
                         str(outdir / "with-ramdiag.ptf")], capture_output=True, text=True)
     check(r.returncode != 0 and "standalone" in (r.stdout + r.stderr), "refused: ramdiag is standalone")
+    print("a shared site not chained by both patches")
+    unchained = dict(copy, name="humanize-unchained",
+                     words=[{k: v for k, v in w.items() if k != "next"} for w in copy["words"]])
+    un_spec = outdir / "humanize-unchained.json"
+    un_spec.write_text(json.dumps(unchained, indent=2))
+    bad = dict(rev, name="unchained", include=[str(hz), str(un_spec.resolve())], version="BAD")
+    bad_spec = outdir / "unchained.json"
+    bad_spec.write_text(json.dumps(bad, indent=2))
+    r = subprocess.run([sys.executable, "-I", str(ROOT / "tools" / "patch_ptf.py"), str(stock), str(bad_spec),
+                        str(outdir / "unchained.ptf")], capture_output=True, text=True)
+    check(r.returncode != 0 and "not chained by both" in (r.stdout + r.stderr), "refused: a shared site isn't chained")
     print(f"outputs in {outdir}")
     print(f"{len(failures)} failure(s)")
     return 1 if failures else 0

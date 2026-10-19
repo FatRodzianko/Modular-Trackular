@@ -28,7 +28,14 @@ A bundle spec combines several patches into one firmware: "include" lists their
 patch.json files (relative to the bundle's folder), in the order they are placed, and
 "version" gives the version text (Config shows 1.2.0-<version>, at most 3 characters).
 The included patches' own version-text words ("version": true) are dropped, and the
-bundle's text is appended after the last patch. Hook sites must not overlap.
+bundle's text is appended after the last patch.
+
+Chained hooks: a branch or word with "next": "<symbol>" names a 4-byte word in the
+patch (linked as 0) that the patcher fills with what the site pointed to before: the
+stock target (Thumb bit set) or the hook of the patch listed before it. The patch
+calls through that word instead of calling the stock function itself. Several patches
+can hook the same site this way; the last one listed runs first. A site hooked by more
+than one patch must be chained by all of them, otherwise the patcher refuses.
 
 - Refuses unless the stock image matches the SHA-256 in patch.json.
 - Every branch or word site is checked against its original bytes before it is rewritten
@@ -79,6 +86,18 @@ def thumb_bl(at: int, target: int) -> bytes:
     hw1 = 0xF000 | (s << 10) | imm10
     hw2 = 0xD000 | (j1 << 13) | (j2 << 11) | imm11
     return struct.pack("<HH", hw1, hw2)
+
+
+def bl_target(image: bytes, base: int, at: int) -> int:
+    """Where the Thumb-2 BL at `at` goes (image starts at `base`)."""
+    hw1, hw2 = struct.unpack_from("<HH", image, at - base)
+    s = (hw1 >> 10) & 1
+    j1, j2 = (hw2 >> 13) & 1, (hw2 >> 11) & 1
+    i1, i2 = ~(j1 ^ s) & 1, ~(j2 ^ s) & 1
+    off = (s << 24) | (i1 << 23) | (i2 << 22) | ((hw1 & 0x3FF) << 12) | ((hw2 & 0x7FF) << 1)
+    if s:
+        off -= 1 << 25
+    return at + 4 + off
 
 
 def load_symbols(path: Path) -> dict[str, int]:
@@ -159,6 +178,20 @@ def assign_ram(parts: list[dict]) -> None:
             sys.exit(f"{p['name']}: no free RAM region has {p['ram_size']} bytes left ({left})")
 
 
+def set_next(p: dict, symbol: str, value: int) -> None:
+    """Fill patch p's chain word `symbol` (placed, linked as 0) with `value`."""
+    if symbol not in p["syms"]:
+        sys.exit(f"{p['name']}: no symbol {symbol!r} for \"next\"")
+    off = p["syms"][symbol] - p["base"]
+    blob = bytearray(p["blob"])
+    if off & 3 or not 0 <= off <= len(blob) - 4 or struct.unpack_from("<I", blob, off)[0] != 0:
+        sys.exit(f"{p['name']}: {symbol} is not an aligned zero word in the patch code")
+    if off in (p["rel"] or []) or off in p["ram_rel"]:
+        sys.exit(f"{p['name']}: {symbol} is in the relocation table")
+    struct.pack_into("<I", blob, off, value)
+    p["blob"] = bytes(blob)
+
+
 def place(p: dict, base: int) -> None:
     """Put patch p at `base`: shift its relocated words and its symbols."""
     delta = base - p["link"]
@@ -206,57 +239,78 @@ def main() -> int:
     # (16-byte aligned), or at its fixed "base" if it has one.
     stock_end = ptf.base + len(ptf.image)
     end = stock_end
-    tail = bytearray()
     for p in parts:
         base = p["pinned"] if p["pinned"] is not None else (end + ALIGN - 1) & ~(ALIGN - 1)
         if base < end:
             sys.exit(f"{p['name']} at {base:#x} overlaps what comes before it (ends {end:#x})")
         place(p, base)
-        tail += b"\xff" * (base - end) + p["blob"]
         end = base + len(p["blob"])
 
+    stock = bytes(ptf.image)
     image = bytearray(ptf.image)
-    sites: dict[int, str] = {}
+    sites: dict[int, tuple[str, bool]] = {}
 
-    def claim(at: int, who: str) -> int:
+    def claim(at: int, who: str, chained: bool) -> int:
         if at in sites:
-            sys.exit(f"{at:#x}: patched by both {sites[at]} and {who}")
-        sites[at] = who
+            first, first_chained = sites[at]
+            if not (first_chained and chained):
+                sys.exit(f"{at:#x}: patched by both {first} and {who}, and not chained by both (\"next\")")
+        sites[at] = (who, chained)
         return at - ptf.base
 
     for p in parts:
         for br in p["branches"]:
             at = int(br["at"], 16)
-            off = claim(at, p["name"])
+            off = claim(at, p["name"], "next" in br)
             old = bytes.fromhex(br["old"])
-            if image[off:off + 4] != old:
-                sys.exit(f"{at:#x}: expected {old.hex()}, found {image[off:off + 4].hex()}")
+            if stock[off:off + 4] != old:
+                sys.exit(f"{at:#x}: expected {old.hex()}, found {stock[off:off + 4].hex()}")
+            before = bl_target(image, ptf.base, at)
             new = thumb_bl(at, p["syms"][br["to"]])
             image[off:off + 4] = new
-            print(f"{at:#x}: bl -> {br['to']} @ {p['syms'][br['to']]:#x}  ({old.hex()} -> {new.hex()})  {br.get('note', '')}")
+            chain = ""
+            if "next" in br:
+                set_next(p, br["next"], before | 1)
+                chain = f", {br['next']} -> {before:#x}"
+            print(f"{at:#x}: bl -> {br['to']} @ {p['syms'][br['to']]:#x}  ({old.hex()} -> {new.hex()}{chain})  {br.get('note', '')}")
 
-    words = [(wd, p["syms"][wd["to"]] | (1 if wd.get("thumb") else 0), p["name"])
+    words = [(wd, p["syms"][wd["to"]] | (1 if wd.get("thumb") else 0), p)
              for p in parts for wd in p["words"]]
     if version is not None:
         end = (end + 3) & ~3
         vaddr = end
         text = VERSION_PREFIX + version + b"\0"
-        tail += b"\xff" * (vaddr - stock_end - len(tail)) + text
+        version_text = (vaddr, text)
         end = vaddr + len(text)
         vw = spec["version_word"]
         words.append(({"at": vw["at"], "old": vw["old"], "to": "version text",
-                       "note": f"1.2.0-{version.decode()}"}, vaddr, spec["name"]))
+                       "note": f"1.2.0-{version.decode()}"}, vaddr, {"name": spec["name"]}))
 
-    for wd, value, who in words:
+    for wd, value, p in words:
         at = int(wd["at"], 16)
-        off = claim(at, who)
+        off = claim(at, p["name"], "next" in wd)
         old = bytes.fromhex(wd["old"])
-        if at & 3 or image[off:off + 4] != old:
-            sys.exit(f"{at:#x}: expected aligned word {old.hex()}, found {image[off:off + 4].hex()}")
+        if at & 3 or stock[off:off + 4] != old:
+            sys.exit(f"{at:#x}: expected aligned word {old.hex()}, found {stock[off:off + 4].hex()}")
+        before = struct.unpack_from("<I", image, off)[0]
         new = struct.pack("<I", value)
         image[off:off + 4] = new
+        chain = ""
+        if "next" in wd:
+            set_next(p, wd["next"], before)
+            chain = f", {wd['next']} -> {before:#x}"
         shown = value & ~1 if wd.get("thumb") else value
-        print(f"{at:#x}: word -> {wd['to']} @ {shown:#x}  ({old.hex()} -> {new.hex()})  {wd.get('note', '')}")
+        print(f"{at:#x}: word -> {wd['to']} @ {shown:#x}  ({old.hex()} -> {new.hex()}{chain})  {wd.get('note', '')}")
+
+    # The patches' code (with their chain words filled), after the stock image.
+    tail = bytearray()
+    end = stock_end
+    for p in parts:
+        tail += b"\xff" * (p["base"] - end) + p["blob"]
+        end = p["base"] + len(p["blob"])
+    if version is not None:
+        vaddr, text = version_text
+        tail += b"\xff" * (vaddr - stock_end - len(tail)) + text
 
     patched = ptf
     patched.image = image                         # same length as stock; records re-encoded

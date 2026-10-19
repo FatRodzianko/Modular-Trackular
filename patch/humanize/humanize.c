@@ -46,11 +46,17 @@
  * same way colorsong saves its colors. A project without the file gets the defaults;
  * a new project keeps the values it had before its first save. A file from an earlier
  * version (one range for both) gives both ranges that value.
+ *
+ * Shared hooks. Other patches can hook the Project Settings folder, the constructor's
+ * last item and the two update methods too, so these four hooks don't call the stock
+ * functions directly: they call through chain words (mt_hz_next_*) that
+ * tools/patch_ptf.py fills with what the site pointed to before, the stock function or
+ * another patch's hook.
  */
 #include <stdint.h>
 
 #ifndef HUMANIZE_VERSION
-#define HUMANIZE_VERSION "hz7"
+#define HUMANIZE_VERSION "hz8"
 #endif
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */
@@ -76,8 +82,6 @@
 #define FW_MENU_ITEM        0x601183E9u     /* (node, parent, label, help, type, descriptor) */
 #define FW_MALLOC           0x600A3589u     /* (size) */
 #define FW_SNPRINTF         0x6016712Du
-#define FW_PATTERN_UPDATE   0x600E1F99u     /* Pattern screen update (vtable slot 0x600403dc) */
-#define FW_CONFIG_UPDATE    0x600C6475u     /* Config screen update (vtable slot 0x6003b5f8) */
 #define FW_OFF_ON           0x60060B88u     /* option names {"Off", "On"} */
 
 /* editor state (FW_ED + offset) */
@@ -134,6 +138,14 @@ typedef int (*snprintf_fn)(char *buf, uint32_t size, const char *fmt, ...);
 typedef void (*update_fn)(void *screen, void *a1, void *a2, void *a3);
 
 void mt_hz_button(void);
+
+/* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
+ * compiler must read them, not assume the 0 they are linked with. */
+#define CHAIN_WORD(name) const volatile uint32_t name __attribute__((used)) = 0
+CHAIN_WORD(mt_hz_next_folder);              /* Project Settings: cfg_menu_folder 0x60118395 */
+CHAIN_WORD(mt_hz_next_last_item);           /* last item: cfg_menu_item 0x601183e9 */
+CHAIN_WORD(mt_hz_next_pattern_update);      /* Pattern screen update 0x600e1f99 */
+CHAIN_WORD(mt_hz_next_config_update);       /* Config screen update 0x600c6475 */
 
 /* ---- settings ------------------------------------------------------------------ */
 
@@ -372,17 +384,18 @@ static const struct menu_number volume_range_desc = {&HZ->value[SET_VOLUME_RANGE
 static const struct menu_number midi_desc = {&HZ->value[SET_MIDI], 0, 99, 1, 1};
 static const struct menu_number sample_desc = {&HZ->value[SET_SAMPLE], 0, 99, 1, 1};
 
-/* replaces "bl 0x60118394" at 0x60118b00: Project Settings, 10 items -> 11 */
+/* replaces "bl 0x60118394" at 0x60118b00 (chained): Project Settings gets room for one
+ * more item */
 void *mt_hz_settings_folder(void *node, void *parent, const char *label, uint32_t capacity)
 {
-    return ((folder_fn)FW_MENU_FOLDER)(node, parent, label, capacity + 1);
+    return ((folder_fn)mt_hz_next_folder)(node, parent, label, capacity + 1);
 }
 
-/* replaces the constructor's last "bl 0x601183e8" (Licenses) at 0x601193e6 */
+/* replaces the constructor's last "bl 0x601183e8" (Licenses) at 0x601193e6 (chained) */
 void *mt_hz_last_item(void *node, void *parent, const char *label, const char *help,
                       uint32_t type, const void *descriptor)
 {
-    void *r = ((item_fn)FW_MENU_ITEM)(node, parent, label, help, type, descriptor);
+    void *r = ((item_fn)mt_hz_next_last_item)(node, parent, label, help, type, descriptor);
     hz_init_if_needed();
     malloc_fn alloc = (malloc_fn)FW_MALLOC;
     void *folder = alloc(MENU_FOLDER_SIZE);
@@ -580,18 +593,18 @@ static void settings_tick(void)
     settings_save();
 }
 
-/* Pattern screen vtable slot 0x600403dc (update method 0x600e1f99) */
+/* Pattern screen vtable slot 0x600403dc (update method 0x600e1f99; chained) */
 void mt_hz_pattern_update(void *screen, void *a1, void *a2, void *a3)
 {
     settings_tick();
-    ((update_fn)FW_PATTERN_UPDATE)(screen, a1, a2, a3);
+    ((update_fn)mt_hz_next_pattern_update)(screen, a1, a2, a3);
 }
 
-/* Config screen vtable slot 0x6003b5f8 (update method 0x600c6475) */
+/* Config screen vtable slot 0x6003b5f8 (update method 0x600c6475; chained) */
 void mt_hz_config_update(void *screen, void *a1, void *a2, void *a3)
 {
     settings_tick();
-    ((update_fn)FW_CONFIG_UPDATE)(screen, a1, a2, a3);
+    ((update_fn)mt_hz_next_config_update)(screen, a1, a2, a3);
 }
 
 /* ---- version text: Config shows 1.2.0-<HUMANIZE_VERSION> ------------------------ */

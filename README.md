@@ -20,8 +20,13 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   FX, so programmed parts sound less mechanical. Works in record mode, and Undo
   reverts it. Timing and volume ranges and default velocities are set per project under Config →
   Project Settings → Humanize. Tested on hardware. See [patch/humanize/README.md](patch/humanize/README.md).
-- **all**: colorsong and humanize in one firmware (version text `1.2.0-MT7`),
-  from [patch/all/patch.json](patch/all/patch.json).
+- **interpolate**: a CC FX on a MIDI track, or a Macro on a synth (S1–S3), ramps
+  smoothly to the next step with the same FX instead of jumping there, with the MIDI
+  rate capped so notes always get through. MIDI and synths each have their own
+  per-project setting under Config → Project Settings → FX Interpolation (both Off by
+  default). Tested on hardware. See [patch/interpolate/README.md](patch/interpolate/README.md).
+- **all**: colorsong, humanize and interpolate in one firmware (version text
+  `1.2.0-MTC`), from [patch/all/patch.json](patch/all/patch.json).
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
   future patches. See [patch/ramdiag/README.md](patch/ramdiag/README.md).
@@ -63,13 +68,14 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `ghidra/scripts/` | Ghidra scripts: memory map setup, vtable functions, names, index export, decompile, callers, references in a range (byte by byte, or summarized for large ranges), whole-program reference graph |
 | `patch/colorsong/` | Colored Song blocks: C + assembly shim, linker script, build script, patch spec, prebuilt binary |
 | `patch/humanize/` | Humanize button: C, linker script, build script, patch spec, prebuilt binary |
-| `patch/all/` | Bundle spec: colorsong + humanize in one firmware |
+| `patch/interpolate/` | CC and Macro ramps between steps |
+| `patch/all/` | Bundle spec: colorsong + humanize + interpolate in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
 | `tools/ptf.py` | Read / convert / re-encode `.ptf` (Intel HEX), with a byte-exact round-trip check |
 | `tools/patch_ptf.py` | Apply a patch or bundle spec to a stock `.ptf`: places the patches in the order listed, assigns their RAM and relocates them (stock hash + original-byte checks, gap-free append) |
 | `tools/mkrel.py` | Make a patch's relocation table (code and RAM addresses) from three links of it (used by the build scripts) |
-| `tools/test_layout.py` | Check the patcher's code and RAM placement and relocation for each patch alone and both bundle orders |
+| `tools/test_layout.py` | Check the patcher's code and RAM placement, relocation and hook chains for each patch alone and both bundle orders |
 | `tools/thumbdis.py` | Quick Thumb disassembly with literal-pool values and strings |
 | `tools/movw_refs.py` | Find literal and MOVW/MOVT references to an address |
 | `tools/vtables.py` | Find C++ vtables and list their method pointers |
@@ -81,6 +87,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/test_colorsong.py`, `test_rescan.py` | colorsong rule and scenario tests on the patched firmware |
 | `tools/emu/test_ramdiag.py` | ramdiag menu, fill, scan and report tests on the patched firmware |
 | `tools/emu/test_humanize.py` | humanize button, edit-rule, Config menu and settings-file tests on the patched firmware |
+| `tools/emu/test_interpolate.py` | interpolate ramp, MIDI-rate, cost, Config menu and settings-file tests, through the real audio block |
 | `tools/emu/seq_timing.py` | Run the stock sequencer on test patterns and print the MIDI it sends, with timing |
 | `tools/emu/check_version.py` | Print the version text a `.ptf` would show |
 | `tools/emu/layout.py` | Read where the patcher put each patch's RAM (`<firmware>.map.json`), for the tests |

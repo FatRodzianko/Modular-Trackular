@@ -735,6 +735,57 @@ all of the block's ticks. Per track and FX column:
 - Nothing in this section has been checked on hardware. Checked in the emulator:
   Micro-move timing, CC send timing, preload request and buffer swap.
 
+#### Implemented: `patch/interpolate` (MIDI CCs and synth Macros)
+
+The plan above, for CC a-f on MIDI channel instruments and Macros on the synths, behind
+two per-project Off/On items in a Project Settings folder, FX Interpolation (MIDI CC,
+Synths). Details found on the
+way:
+
+- `app_audio_block` passes `seq` in r0 and the block length in seconds in s0 (hard-float
+  ABI) to `seq_advance` through the veneer at `0x600aa858`, and ignores the result, so
+  a C hook `void f(void *seq, float s)` can call it and then do its own work.
+- The CC case (ITCM `0x26d8`) calls `midi_send_cc(cc, value, channel, 0)` at `0x3264`
+  with channel 1..16 (instrument - 47). The CC number for letter L on channel c is the
+  byte at `0x20204ab3 + 0x10 * (c - 1) + L`; 0x80-0x82 there mean program change,
+  channel pressure and poly pressure.
+- `seq_track_muted_q(seq, track)` (ITCM `0x3994`) ignores its first argument.
+- The jack's send ring object is `*(0x2000c69c)` (`din_midi_send_cc` loads it from
+  `0x2000c648 + 0x54`): `+0` write index, `+4` start of what hasn't gone out yet, `+8`
+  the 512-byte buffer, `+0x3c` busy flag. `serial_tx_byte` (`0x600a08e4`) stores the
+  byte and advances the write index without comparing it to the read side.
+- In normal (not performance) mode the step advance uses `seq+0x36` (int16) as the last
+  step when it is >= 0, otherwise track 0's length byte; a looping selection narrows it.
+- In the audio block a track's `+0x88` is its current step and `+0x86` the next
+  micro-step to process; the stock CC goes out while `+0x86` is still 1.
+- The Pattern screen's Preview (`pat_preview_button_q` `0x600e2b18`) copies the
+  selection into `seq[0..3]` and calls `seq_play_selection(seq, loop)` (`0x600ac3d0`,
+  loop = 0 from Preview): it copies the selection to `+0x20`..`+0x23` (first step, first
+  track, last step, last track), puts every track on the first step at micro-step 1,
+  clears every track's enabled flag `+0x7d` and sets it again for the selected tracks,
+  then sets `+0x1e` = 1 (selection playback), `+0x1f` = loop, song mode off and playing
+  on. The ramp pass at first skipped selection playback; now it ramps there too, and
+  the enabled flag keeps the unselected tracks quiet.
+- Synths (instruments 64-66): at micro-step 1 the FX pass asks ITCM `0x3c30` (engine,
+  type) whether the synth takes an FX type: Off (1), CC/Macro a-f (8-12, 37), delay
+  send (30), panning (31) and reverb send (32). Those go to `synth_apply_fx_q(engine
+  0x20017b08, type, value, column, synth 0..2)` (ITCM `0x5070`; column 0 = FX1, 1 =
+  FX2), with or without a note. It records the column's type, looks the FX type up in a
+  std::map at `0x20017ad8` (FX type -> parameter), scales the value from
+  `fx_min`..`fx_max` to the parameter's float range (table `0x6003aa8c`), and stores it
+  as a pending parameter with a dirty bit (`engine + 0x692 + synth`), inside an IRQ-off
+  section. Off (1) resets the column's parameter (`0x4ec8`). Synth note-on and note-off
+  go out through `0x600abb44` / `0x600abbe8`.
+- The render loop (`0x600bc220`, tail-called from the render state machine at
+  `0x600bc38e`) runs `seq_advance` (its own veneer at `0x600bc2d8`, called at
+  `0x600bc27a`) 69 times per call, interleaved with the engine's rendering and file
+  writes; MIDI is muted then (`seq_is_rendering`).
+
+Cost: a look-up through the whole pattern for all 16 tracks at once (they change step
+together) took 555,000 instructions in one block; moving ramps along incrementally and
+doing at most 2 full look-ups per block brought the worst block to 23,670. Not checked
+on hardware yet.
+
 ## 13. Pattern screen: bottom bar, selection, undo (`patch/humanize`)
 
 The Pattern screen object is `patview` = `0x20021770`. Its editor state is `ed` =

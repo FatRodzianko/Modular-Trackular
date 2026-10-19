@@ -34,7 +34,8 @@ Works with the humanize-only build and with bundles that include it.
    volume range 4 and the other way round, Volume/velocity off, MIDI velocity 100 for
    MIDI and synth instruments, sample volume 30).
 5. Config menu: runs the stock menu constructor (0x60118acc). Project Settings must
-   hold its 10 stock items and then a "Humanize" folder with Timing range,
+   hold its 10 stock items and then (after any other patch's entries listed before
+   it) a "Humanize" folder with Timing range,
    Volume/velocity, Volume range, MIDI velocity and Sample volume, set up as stock
    number and option items on the patch's settings, which start at their defaults
    (10, On, 10, 50, 50).
@@ -504,12 +505,14 @@ def menu_checks(ptf: Path) -> None:
     labels = [m.cstr(m.r32(k + (0x18 if m.r32(k) & 0xFF == 1 else 4))) for k in kids]
     stock = ["Performance presets", "Pattern divider", "Notes scale", "Root note", "Notes layout",
              "Anti-aliasing", "Limiter mode", "Sends mode", "Extra headroom", "Snap to zero"]
-    check(cap == 11 and count == 11, f"Project Settings: room for 11, holds {count}")
+    check(cap == count and count >= 11, f"Project Settings: room for {cap}, holds {count}")
     check(labels[:10] == stock, "the 10 stock items are unchanged, in order")
-    if count < 11:
+    if "Humanize" not in labels[10:]:
+        check(False, f"a Humanize folder after the stock items ({labels[10:]})")
         return
-    folder = kids[10]
-    check(m.r32(folder) & 0xFF == 1 and labels[10] == "Humanize", f"item 11 is the folder {labels[10]!r}")
+    at = labels.index("Humanize", 10)
+    folder = kids[at]
+    check(m.r32(folder) & 0xFF == 1, f"item {at + 1} is the folder 'Humanize' (after {labels[10:at]})")
     fcap, fcount = m.r32(folder + 8) & 0xFF, m.r32(folder + 0x1C) >> 8 & 0xFF
     items = [m.r32(m.r32(folder + 0xC) + 4 * i) for i in range(min(fcap, fcount))]
     want = [("Timing range", 2, HZ_VALUE), ("Volume/velocity", 4, HZ_VALUE + 1),
@@ -531,15 +534,15 @@ def menu_checks(ptf: Path) -> None:
     m.stub_function(MENU_REDRAW, lambda mm: redraws.append(mm.r32(MENU_CURRENT)))
     m.stub_function(MENU_EDITOR, lambda mm: editors.append((mm.arg(1), mm.cstr(mm.arg(2)), mm.arg(4))))
     m.w32(MENU_CURRENT, ps)
-    m.w8(ps + 0x1C, 10)                                  # Project Settings: the Humanize entry
+    m.w8(ps + 0x1C, at)                                  # Project Settings: the Humanize entry
     m.call(MENU_SELECT)
     check(m.r32(MENU_CURRENT) == folder and redraws[-1:] == [folder], "select opens the Humanize folder")
     m.call(MENU_FORMAT, folder)
     texts = [m.cstr(m.r32(m.r32(folder + 0x14) + 4 * i)) for i in range(len(items))]
     check(texts == ["10", "On", "10", "50", "50"], f"values shown: {texts}")
     m.call(MENU_FORMAT, ps)
-    ps_texts = [m.cstr(m.r32(m.r32(ps + 0x14) + 4 * i)) for i in range(11)]
-    check(ps_texts[10] == "" and all(ps_texts[:10]), "Project Settings list: stock values, no value for the folder")
+    ps_texts = [m.cstr(m.r32(m.r32(ps + 0x14) + 4 * i)) for i in range(count)]
+    check(ps_texts[at] == "" and all(ps_texts[:10]), "Project Settings list: stock values, no value for the folder")
     m.w8(folder + 0x1C, 0)                               # Timing range
     m.call(MENU_SELECT)
     check(editors[-1:] == [(2, "Timing range", m.r32(items[0] + 0x10))],
