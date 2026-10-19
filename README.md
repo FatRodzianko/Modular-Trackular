@@ -18,9 +18,9 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
 - **humanize**: a Humanize button on the Pattern screen gives the notes in the
   selection (or the cursor's track) small random Micro-move and Volume/Velocity
   FX, so programmed parts sound less mechanical. Works in record mode, and Undo
-  reverts it. Range and default velocities are set per project under Config →
+  reverts it. Timing and volume ranges and default velocities are set per project under Config →
   Project Settings → Humanize. Tested on hardware. See [patch/humanize/README.md](patch/humanize/README.md).
-- **all**: colorsong and humanize in one firmware (version text `1.2.0-MT6`),
+- **all**: colorsong and humanize in one firmware (version text `1.2.0-MT7`),
   from [patch/all/patch.json](patch/all/patch.json).
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for

@@ -103,7 +103,7 @@ With Humanize in one firmware (`patch/all`; to choose your own set of patches, s
 "Choosing patches" in [docs/PATCHING.md](../../docs/PATCHING.md)):
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT6.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT7.ptf
 ```
 
 To build the patch code from source, you need the Arm GNU Toolchain

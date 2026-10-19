@@ -14,14 +14,14 @@ Works with the humanize-only build and with bundles that include it.
 3. Edit: presses the button (calls the bound handler) with a pattern in RAM and the
    editor state set up, through the stock selection, undo and changed-flag code.
    Outside record mode a press must change nothing (no edit, no undo entry).
-   Every step is checked against the rules, for range R:
+   Every step is checked against the rules, for timing range T and volume range R:
      - steps without a note (empty, note off, cut, fade) are unchanged;
      - note and instrument never change, nor do other FX;
      - an existing V gets a value in the window of R around it within 1..100 (V 0
-       stays 0), an existing m the same within 0..100. A window is v - R/2 ..
-       v - R/2 + R, slid to stay inside the limits;
-     - a missing m goes into the first free slot as 0..R, then a missing V into a
-       free slot, in the window around the default for the step's instrument
+       stays 0), an existing m one in the window of T around it within 0..100. A
+       window is v - R/2 .. v - R/2 + R, slid to stay inside the limits;
+     - a missing m goes into the first free slot as 0..T, then a missing V into a
+       free slot, in the window of R around the default for the step's instrument
        (samples 0..47, MIDI and synths from 48);
      - with Volume/velocity off, V FX are neither changed nor added;
      - nothing outside the selection (or, without a selection, outside the cursor's
@@ -30,21 +30,25 @@ Works with the humanize-only build and with bundles that include it.
    and the grid rows are rebuilt once.
 4. Ranges: 300 presses on a fresh pattern each time; every value of each window must
    show up, with the default settings (new m 0..10, V and m 45..55 from 50, 90..100
-   from 98, 0..10 from 1) and with others (range 20, Volume/velocity off, MIDI
-   velocity 100 for MIDI and synth instruments, sample volume 30).
+   from 98, 0..10 from 1) and with others (both ranges 20, timing range 20 with
+   volume range 4 and the other way round, Volume/velocity off, MIDI velocity 100 for
+   MIDI and synth instruments, sample volume 30).
 5. Config menu: runs the stock menu constructor (0x60118acc). Project Settings must
-   hold its 10 stock items and then a "Humanize" folder with Range, Volume/velocity,
-   MIDI velocity and Sample volume, set up as stock number and option items on the
-   patch's settings, which start at their defaults (10, On, 50, 50).
+   hold its 10 stock items and then a "Humanize" folder with Timing range,
+   Volume/velocity, Volume range, MIDI velocity and Sample volume, set up as stock
+   number and option items on the patch's settings, which start at their defaults
+   (10, On, 10, 50, 50).
 6. Settings file: drives the Pattern and Config screen update hooks with a fake SD
    card. A project without humanize.bin gets the defaults and no file is written; a
    changed value is written once, a while later; another project gets its own values;
-   coming back loads the saved ones; a damaged file gives the defaults; a project
+   coming back loads the saved ones; a damaged file gives the defaults; a file from
+   an earlier version (HHZ1, one range) gives both ranges its range; a project
    without a name writes nothing and keeps its values when it is first saved. The
    stock update methods run on every call.
 """
 from __future__ import annotations
 
+import struct
 import sys
 from pathlib import Path
 
@@ -72,9 +76,9 @@ UNDO_SLOT = 0x3030
 CUR_PATTERN = 0x202046C8
 CHANGED = FM + 0x4CA                # + pattern number
 STOCK_HANDLERS = {0: 0x600DFE65, 1: 0x600DFDD1, 7: 0x600E2A45}
-HZ = 0                              # humanize state (magic, session, value[4], ...): from the .map.json
+HZ = 0                              # humanize state (magic, session, value[5], ...): from the .map.json
 HZ_MAGIC = 0x5A48544D
-HZ_VALUE = 0                        # HZ + 8: range-1, volume (0 Off / 1 On), MIDI-1, sample-1
+HZ_VALUE = 0                        # HZ + 8: timing-1, volume (0 Off / 1 On), MIDI-1, sample-1, volume range-1
 MENU_CTOR = 0x60118ACC
 ATEXIT = 0x600A3594
 PROJECT_SETTINGS = 0x20028714
@@ -85,7 +89,8 @@ MENU_APPLY, MENU_EDITOR_CLOSE = 0x60118658, 0x600CAB60   # (screen, value): stor
 OFF_ON = 0x60060B88
 PATTERN_UPDATE_SLOT, PATTERN_UPDATE = 0x600403DC, 0x600E1F98
 CONFIG_UPDATE_SLOT, CONFIG_UPDATE = 0x6003B5F8, 0x600C6474
-FILE_MAGIC = b"HHZ1"
+FILE_MAGIC, OLD_MAGIC = b"HHZ2", b"HHZ1"
+DEFAULT_VALUES = bytes([9, 1, 49, 49, 9])
 SAVE_DELAY = 25
 DISPLAY_CALLS = {0x60101D5C: "text", 0x60101D74: "text2", 0x60101DA4: "colors",
                  0x60101DF8: "data", 0x60101D8C: "value", 0x60101CAC: "style",
@@ -103,6 +108,13 @@ def check(ok: bool, what: str) -> None:
     print(("  PASS  " if ok else "  FAIL  ") + what)
     if not ok:
         failures.append(what)
+
+
+def fnv1a(data: bytes) -> int:
+    h = 2166136261
+    for b in data:
+        h = (h ^ b) * 16777619 & 0xFFFFFFFF
+    return h
 
 
 def new_pattern(last_step: int) -> bytearray:
@@ -126,8 +138,9 @@ def step(d: bytes, t: int, s: int) -> bytes:
 
 
 class Params:
-    def __init__(self, range_=10, volume=True, midi=50, sample=50):
-        self.range, self.volume, self.midi, self.sample = range_, volume, midi, sample
+    def __init__(self, timing=10, volume_range=10, volume=True, midi=50, sample=50):
+        self.timing, self.volume_range = timing, volume_range
+        self.volume, self.midi, self.sample = volume, midi, sample
 
 
 DEFAULTS = Params()
@@ -165,11 +178,11 @@ def rule_error(before: bytes, after: bytes, p: Params = DEFAULTS) -> str | None:
                 return "V changed type"
             if (vb == 0 or not p.volume) and va != vb:
                 return f"V {vb} changed to {va}"
-            lo, hi = window(vb, p.range, 1, 100)
+            lo, hi = window(vb, p.volume_range, 1, 100)
             if vb and p.volume and not lo <= va <= hi:
                 return f"V {vb} -> {va}, window {lo}..{hi}"
         elif tb == FX_M:
-            lo, hi = window(vb, p.range, 0, 100)
+            lo, hi = window(vb, p.timing, 0, 100)
             if ta != FX_M or not lo <= va <= hi:
                 return f"m {vb} -> {ta}:{va}, window {lo}..{hi}"
         elif tb != 0:
@@ -177,7 +190,7 @@ def rule_error(before: bytes, after: bytes, p: Params = DEFAULTS) -> str | None:
                 return f"other FX {tb}:{vb} changed"
         elif adds:
             kind = adds.pop(0)
-            lo, hi = (0, p.range) if kind == FX_M else window(v_base, p.range, 1, 100)
+            lo, hi = (0, p.timing) if kind == FX_M else window(v_base, p.volume_range, 1, 100)
             if ta != kind or not lo <= va <= hi:
                 return f"free slot got {ta}:{va}, expected {'m' if kind == FX_M else 'V'} {lo}..{hi}"
         elif (ta, va) != (tb, vb):
@@ -218,7 +231,8 @@ class Rig:
 
     def settings(self, p: Params) -> None:
         self.m.w32(HZ, HZ_MAGIC)
-        self.m.write(HZ_VALUE, bytes([p.range - 1, int(p.volume), p.midi - 1, p.sample - 1]))
+        self.m.write(HZ_VALUE, bytes([p.timing - 1, int(p.volume), p.midi - 1, p.sample - 1,
+                                      p.volume_range - 1]))
 
     def record(self, on: bool) -> None:
         self.m.w8(ED + ED_RECORD, 1 if on else 0)
@@ -409,8 +423,11 @@ def main() -> int:
         got = seen[name]
         check(got == set(want), f"{name}: {min(got)}..{max(got)}, {len(got)} values (window slides)")
 
-    print("settings: range 20, Volume/velocity off, MIDI velocity 100, sample volume 30")
-    for p, label in ((Params(range_=20), "range 20"), (Params(volume=False), "Volume/velocity off"),
+    print("settings: ranges, Volume/velocity off, MIDI velocity 100, sample volume 30")
+    for p, label in ((Params(timing=20, volume_range=20), "both ranges 20"),
+                     (Params(timing=20, volume_range=4), "timing 20, volume 4"),
+                     (Params(timing=4, volume_range=20), "timing 4, volume 20"),
+                     (Params(volume=False), "Volume/velocity off"),
                      (Params(midi=100, sample=30), "MIDI 100, sample 30")):
         r.settings(p)
         before = scenario_pattern()
@@ -426,7 +443,7 @@ def main() -> int:
     put(base, 1, 0, 48, ins=48)                           # MIDI channel 1
     put(base, 2, 0, 48, ins=64)                           # synth 1
     seen = {k: set() for k in ("new m", "V from 50", "sample V", "MIDI V", "synth V")}
-    r.settings(Params(range_=20, midi=100, sample=30))
+    r.settings(Params(timing=20, volume_range=20, midi=100, sample=30))
     r.editor(cursor_track=0, selection=((0, 0), (2, 1)))
     for _ in range(300):
         r.load(base)
@@ -441,6 +458,28 @@ def main() -> int:
                        ("MIDI V", range(80, 101)), ("synth V", range(80, 101))):
         got = seen[name]
         check(got == set(want), f"range 20: {name}: {min(got)}..{max(got)}, {len(got)} values")
+    for timing, vrange, want in ((20, 4, {"new m": range(0, 21), "m from 50": range(40, 61),
+                                          "V from 50": range(48, 53), "new V": range(28, 33)}),
+                                 (4, 20, {"new m": range(0, 5), "m from 50": range(48, 53),
+                                          "V from 50": range(40, 61), "new V": range(20, 41)})):
+        r.settings(Params(timing=timing, volume_range=vrange, sample=30))
+        r.editor(cursor_track=0)
+        two = new_pattern(1)
+        put(two, 0, 0, 48)
+        put(two, 0, 1, 48, (FX_M, 50), (FX_V, 50))
+        seen = {k: set() for k in want}
+        for _ in range(300):
+            r.load(two)
+            m.call(handler)
+            pt = r.pattern()
+            seen["new m"].add(step(pt, 0, 0)[3])
+            seen["new V"].add(step(pt, 0, 0)[5])
+            seen["m from 50"].add(step(pt, 0, 1)[3])
+            seen["V from 50"].add(step(pt, 0, 1)[5])
+        for name, w in want.items():
+            got = seen[name]
+            check(got == set(w), f"timing range {timing}, volume range {vrange}: {name}: "
+                  f"{min(got)}..{max(got)}, {len(got)} values")
     r.settings(Params(volume=False))
     r.load(base)
     m.call(handler)
@@ -473,8 +512,9 @@ def menu_checks(ptf: Path) -> None:
     check(m.r32(folder) & 0xFF == 1 and labels[10] == "Humanize", f"item 11 is the folder {labels[10]!r}")
     fcap, fcount = m.r32(folder + 8) & 0xFF, m.r32(folder + 0x1C) >> 8 & 0xFF
     items = [m.r32(m.r32(folder + 0xC) + 4 * i) for i in range(min(fcap, fcount))]
-    want = [("Range", 2, HZ_VALUE), ("Volume/velocity", 4, HZ_VALUE + 1),
-            ("MIDI velocity", 2, HZ_VALUE + 2), ("Sample volume", 2, HZ_VALUE + 3)]
+    want = [("Timing range", 2, HZ_VALUE), ("Volume/velocity", 4, HZ_VALUE + 1),
+            ("Volume range", 2, HZ_VALUE + 4), ("MIDI velocity", 2, HZ_VALUE + 2),
+            ("Sample volume", 2, HZ_VALUE + 3)]
     got = [(m.cstr(m.r32(i + 4)), m.r32(i + 0xC) & 0xFF, m.r32(m.r32(i + 0x10))) for i in items]
     check(got == want, f"its items: {[g[0] for g in got]}, on the patch's settings")
     numbers_ok = all(bytes(m.uc.mem_read(m.r32(i + 0x10) + 4, 4)) == bytes([0, 99, 1, 1])
@@ -483,8 +523,8 @@ def menu_checks(ptf: Path) -> None:
     opt = m.r32(items[1] + 0x10) if len(items) > 1 else 0
     check(opt and m.r32(opt + 4) & 0xFF == 2 and m.r32(opt + 8) == OFF_ON, "Volume/velocity: the stock Off/On list")
     check(all(m.cstr(m.r32(i + 8)) for i in items), "every item has help text")
-    check(bytes(m.uc.mem_read(HZ_VALUE, 4)) == bytes([9, 1, 49, 49]) and m.r32(HZ) == HZ_MAGIC,
-          "settings start at the defaults (10, On, 50, 50)")
+    check(bytes(m.uc.mem_read(HZ_VALUE, 5)) == DEFAULT_VALUES and m.r32(HZ) == HZ_MAGIC,
+          "settings start at the defaults (10, On, 50, 50, volume range 10)")
 
     print("Config menu navigation, with the stock code")
     redraws, editors = [], []
@@ -496,25 +536,30 @@ def menu_checks(ptf: Path) -> None:
     check(m.r32(MENU_CURRENT) == folder and redraws[-1:] == [folder], "select opens the Humanize folder")
     m.call(MENU_FORMAT, folder)
     texts = [m.cstr(m.r32(m.r32(folder + 0x14) + 4 * i)) for i in range(len(items))]
-    check(texts == ["10", "On", "50", "50"], f"values shown: {texts}")
+    check(texts == ["10", "On", "10", "50", "50"], f"values shown: {texts}")
     m.call(MENU_FORMAT, ps)
     ps_texts = [m.cstr(m.r32(m.r32(ps + 0x14) + 4 * i)) for i in range(11)]
     check(ps_texts[10] == "" and all(ps_texts[:10]), "Project Settings list: stock values, no value for the folder")
-    m.w8(folder + 0x1C, 0)                               # Range
+    m.w8(folder + 0x1C, 0)                               # Timing range
     m.call(MENU_SELECT)
-    check(editors[-1:] == [(2, "Range", m.r32(items[0] + 0x10))], "select on Range opens the stock number editor")
+    check(editors[-1:] == [(2, "Timing range", m.r32(items[0] + 0x10))],
+          "select on Timing range opens the stock number editor")
+    m.w8(folder + 0x1C, 2)                               # Volume range
+    m.call(MENU_SELECT)
+    check(editors[-1:] == [(2, "Volume range", m.r32(items[2] + 0x10))],
+          "select on Volume range opens the stock number editor")
     m.w8(folder + 0x1C, 1)                               # Volume/velocity
     m.call(MENU_SELECT)
     check(editors[-1:] == [(4, "Volume/velocity", m.r32(items[1] + 0x10))], "select on Volume/velocity opens the option editor")
     closed = []
     m.stub_function(MENU_EDITOR_CLOSE, lambda mm: closed.append(1))
-    for i, (name, value) in enumerate((("Range", 19), ("Volume/velocity", 0), ("Volume/velocity", 1),
-                                       ("MIDI velocity", 99), ("Sample volume", 29))):
+    for name, value in (("Timing range", 19), ("Volume/velocity", 0), ("Volume/velocity", 1),
+                        ("Volume range", 3), ("MIDI velocity", 99), ("Sample volume", 29)):
         idx = [w[0] for w in want].index(name)
         m.w8(folder + 0x1C, idx)
         n = len(closed)
         m.call(MENU_APPLY, 0, value, max_insns=2_000_000)  # the editor's Apply, stock code
-        check(m.uc.mem_read(HZ_VALUE + idx, 1)[0] == value and len(closed) == n + 1,
+        check(m.uc.mem_read(want[idx][2], 1)[0] == value and len(closed) == n + 1,
               f"Apply on {name} ({value}): stored, editor closed")
     opt = m.r32(items[1] + 0x10)
     cb = m.r32(opt + 12)
@@ -545,53 +590,72 @@ def file_checks(ptf: Path) -> None:
             m.call(hook or pat_hook, PATVIEW)
 
     def values():
-        return bytes(m.uc.mem_read(HZ_VALUE, 4))
+        return bytes(m.uc.mem_read(HZ_VALUE, 5))
 
     def path(name):
         return f"Projects/User/{name}/humanize.bin"
 
     fs.set_project(Path("."), "A", "Projects/User")
     tick()
-    check(values() == bytes([9, 1, 49, 49]), "project without humanize.bin: defaults")
+    check(values() == DEFAULT_VALUES, "project without humanize.bin: defaults")
     tick(SAVE_DELAY + 5)
     check(fs.writes_opened == 0, "nothing written while nothing changed")
-    m.write(HZ_VALUE, bytes([19, 0, 99, 29]))             # as the Config menu would
+    m.write(HZ_VALUE, bytes([19, 0, 99, 29, 3]))          # as the Config menu would
     tick(SAVE_DELAY - 2, cfg_hook)
     check(fs.writes_opened == 0, "no write right after a change")
     tick(5, cfg_hook)
     data = fs.overlay.get(path("A"))
-    check(fs.writes_opened == 1 and data is not None and data[:4] == FILE_MAGIC and data[4:8] == bytes([19, 0, 99, 29])
-          and len(data) == 12, "the change is written once, a while later")
+    check(fs.writes_opened == 1 and data is not None and data[:4] == FILE_MAGIC
+          and data[4:12] == bytes([19, 0, 99, 29, 3, 0, 0, 0]) and len(data) == 16,
+          "the change is written once, a while later (HHZ2, 16 bytes)")
     check(max(fs.write_sizes or [0]) <= 256, "writes of at most 256 bytes")
     tick(SAVE_DELAY * 2)
     check(fs.writes_opened == 1, "no rewrite while nothing changes")
     fs.set_project(Path("."), "B", "Projects/User")
     tick()
-    check(values() == bytes([9, 1, 49, 49]), "another project without the file: defaults")
+    check(values() == DEFAULT_VALUES, "another project without the file: defaults")
     fs.set_project(Path("."), "A", "Projects/User")
     tick()
-    check(values() == bytes([19, 0, 99, 29]), "back to the first project: its saved values")
+    check(values() == bytes([19, 0, 99, 29, 3]), "back to the first project: its saved values")
     good = fs.overlay[path("A")]
-    fs.overlay[path("A")] = good[:11] + bytes([good[11] ^ 1])
+    fs.overlay[path("A")] = good[:15] + bytes([good[15] ^ 1])
     fs.set_project(Path("."), "B", "Projects/User")
     tick()
     fs.set_project(Path("."), "A", "Projects/User")
     tick()
-    check(values() == bytes([9, 1, 49, 49]), "damaged file: defaults")
+    check(values() == DEFAULT_VALUES, "damaged file: defaults")
     fs.overlay[path("A")] = good
+    old = bytes([24, 1, 79, 39])                          # HHZ1: range 25, On, 80, 40
+    fs.overlay[path("D")] = OLD_MAGIC + old + struct.pack("<I", fnv1a(old))
+    fs.set_project(Path("."), "D", "Projects/User")
+    opened = fs.writes_opened
+    tick()
+    check(values() == bytes([24, 1, 79, 39, 24]), "earlier version's file (HHZ1): both ranges get its range")
+    tick(SAVE_DELAY + 5)
+    check(fs.writes_opened == opened, "and it is not rewritten while nothing changes")
+    m.w8(HZ_VALUE + 4, 4)
+    tick(SAVE_DELAY + 5)
+    data = fs.overlay.get(path("D"))
+    check(data[:4] == FILE_MAGIC and data[4:9] == bytes([24, 1, 79, 39, 4]), "a change rewrites it as HHZ2")
+    fs.overlay[path("D")] = OLD_MAGIC + old + struct.pack("<I", fnv1a(old) ^ 1)
+    fs.set_project(Path("."), "B", "Projects/User")
+    tick()
+    fs.set_project(Path("."), "D", "Projects/User")
+    tick()
+    check(values() == DEFAULT_VALUES, "damaged HHZ1 file: defaults")
     m.write(PROJECT_NAME, b"\0")                           # a new project, no name yet
     tick()
-    check(values() == bytes([9, 1, 49, 49]), "new project: defaults")
+    check(values() == DEFAULT_VALUES, "new project: defaults")
     opened = fs.writes_opened
-    m.write(HZ_VALUE, bytes([4, 1, 69, 69]))
+    m.write(HZ_VALUE, bytes([4, 1, 69, 69, 7]))
     tick(SAVE_DELAY * 2)
     check(fs.writes_opened == opened, "project without a name: nothing written")
     fs.set_project(Path("."), "C", "Projects/User")       # its first save
     tick()
-    check(values() == bytes([4, 1, 69, 69]), "first save of a new project keeps its values")
+    check(values() == bytes([4, 1, 69, 69, 7]), "first save of a new project keeps its values")
     tick(SAVE_DELAY + 5)
     data = fs.overlay.get(path("C"))
-    check(data is not None and data[4:8] == bytes([4, 1, 69, 69]), "and writes them to its folder")
+    check(data is not None and data[4:9] == bytes([4, 1, 69, 69, 7]), "and writes them to its folder")
     total = sum(calls.values())
     check(calls["pattern"] > 0 and calls["config"] > 0 and total == calls["pattern"] + calls["config"],
           f"stock update methods ran on every call ({calls['pattern']} + {calls['config']})")

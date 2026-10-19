@@ -19,37 +19,38 @@
  * push the pattern onto the undo ring (so Undo reverts it), turn the editor's
  * selection into the sequencer's step/track rectangle, edit, rebuild the grid rows
  * and mark the pattern changed (so it gets saved). Without a selection it takes the
- * cursor's whole track, up to the pattern length. With range R, for every step with a
- * note (not empty, note off, cut or fade):
+ * cursor's whole track, up to the pattern length. With timing range T and volume
+ * range R, for every step with a note (not empty, note off, cut or fade):
  *  - an existing Volume/Velocity FX gets a random value in a window of R around it,
  *    within 1..100 (an existing V 0 stays 0);
- *  - an existing Micro-move FX the same, within 0..100;
- *  - a missing Micro-move goes into the first free FX slot as m 0..R;
+ *  - an existing Micro-move FX gets one in a window of T around it, within 0..100;
+ *  - a missing Micro-move goes into the first free FX slot as m 0..T;
  *  - a missing Volume/Velocity then goes into a free slot, in a window of R around the
  *    default for the step's instrument (samples 0..47, or MIDI and synths 48..66).
  * A window is value - R/2 .. value - R/2 + R; near a limit it slides to stay inside.
  * With Volume/velocity off, V FX are neither changed nor added. Steps without a free
  * slot keep what they have. Random numbers come from the firmware's own generator.
  *
- * The settings. Config > Project Settings gets a "Humanize" folder with Range,
- * Volume/velocity, MIDI velocity and Sample volume. The Config menu is a tree of
+ * The settings. Config > Project Settings gets a "Humanize" folder with Timing range,
+ * Volume/velocity, Volume range, MIDI velocity and Sample volume. The Config menu is a tree of
  * nodes built at startup by 0x60118acc:
  *  - mt_hz_settings_folder replaces the call that creates Project Settings with room
  *    for 10 items (0x60118b00) and asks for 11;
  *  - mt_hz_last_item replaces the constructor's last item call (Licenses, 0x601193e6),
- *    then adds the Humanize folder and its 4 items, in nodes from the firmware's heap.
+ *    then adds the Humanize folder and its 5 items, in nodes from the firmware's heap.
  * The values live in HZ, this patch's RAM (.mt_ram). Numbers are stored as list
  * indexes 0..99 and shown + 1, as the stock number editor works. Each named project
  * keeps them in <project folder>/humanize.bin. mt_hz_pattern_update and
  * mt_hz_config_update (the Pattern and Config screens' update methods) load the file
  * when the project changes and save it a short while after a value changes, in the
  * same way colorsong saves its colors. A project without the file gets the defaults;
- * a new project keeps the values it had before its first save.
+ * a new project keeps the values it had before its first save. A file from an earlier
+ * version (one range for both) gives both ranges that value.
  */
 #include <stdint.h>
 
 #ifndef HUMANIZE_VERSION
-#define HUMANIZE_VERSION "hz6"
+#define HUMANIZE_VERSION "hz7"
 #endif
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */
@@ -136,10 +137,12 @@ void mt_hz_button(void);
 
 /* ---- settings ------------------------------------------------------------------ */
 
-enum { SET_RANGE, SET_VOLUME, SET_MIDI, SET_SAMPLE, SETTINGS };
+/* SET_TIMING was the one range of earlier versions, so their files map onto 0..3 */
+enum { SET_TIMING, SET_VOLUME, SET_MIDI, SET_SAMPLE, SET_VOLUME_RANGE, SETTINGS };
+#define OLD_SETTINGS        4u
 
 /* stored values: list indexes 0..99 (shown 1..100) and Off/On (0/1) */
-static const uint8_t defaults[SETTINGS] = {10 - 1, 1, 50 - 1, 50 - 1};
+static const uint8_t defaults[SETTINGS] = {10 - 1, 1, 50 - 1, 50 - 1, 10 - 1};
 
 #define HZ_MAGIC            0x5A48544Du     /* "MTHZ" */
 #define SAVE_DELAY          25u             /* screen updates between a change and the save */
@@ -231,7 +234,7 @@ static void add_fx(uint8_t *step, uint8_t type, uint8_t value)
     }
 }
 
-struct hz_params { int range, volume, midi, sample; };
+struct hz_params { int timing, volume_range, volume, midi, sample; };
 
 static void humanize_step(uint8_t *step, const struct hz_params *p)
 {
@@ -243,17 +246,17 @@ static void humanize_step(uint8_t *step, const struct hz_params *p)
         if (fx[0] == FX_VOLUME) {
             has_volume = 1;
             if (p->volume && fx[1] != 0)        /* V 0 is a deliberate silent note */
-                fx[1] = pick(fx[1], p->range, 1, 100);
+                fx[1] = pick(fx[1], p->volume_range, 1, 100);
         } else if (fx[0] == FX_MICRO_MOVE) {
             has_micro = 1;
-            fx[1] = pick(fx[1], p->range, 0, 100);
+            fx[1] = pick(fx[1], p->timing, 0, 100);
         }
     }
     if (!has_micro)
-        add_fx(step, FX_MICRO_MOVE, (uint8_t)rnd(0, p->range));
+        add_fx(step, FX_MICRO_MOVE, (uint8_t)rnd(0, p->timing));
     if (p->volume && !has_volume) {
         int base = step[1] <= INSTR_SAMPLE_LAST ? p->sample : p->midi;
-        add_fx(step, FX_VOLUME, pick(base, p->range, 1, 100));
+        add_fx(step, FX_VOLUME, pick(base, p->volume_range, 1, 100));
     }
 }
 
@@ -269,8 +272,9 @@ void mt_hz_button(void)
     ((obj_fn)FW_UNDO_PUSH)(FW_FM);
     ((void_fn)FW_SEL_TO_SEQ)();
 
-    struct hz_params p = {(int)setting(SET_RANGE), (int)setting(SET_VOLUME),
-                          (int)setting(SET_MIDI), (int)setting(SET_SAMPLE)};
+    struct hz_params p = {(int)setting(SET_TIMING), (int)setting(SET_VOLUME_RANGE),
+                          (int)setting(SET_VOLUME), (int)setting(SET_MIDI),
+                          (int)setting(SET_SAMPLE)};
     const volatile uint8_t *ed = (const volatile uint8_t *)FW_ED;
     const volatile uint8_t *sel = (const volatile uint8_t *)FW_SEQ;
     uint8_t *data = *(uint8_t **)FW_SEQ_PATTERN;
@@ -361,9 +365,10 @@ static void option_applied(void)            /* settings_tick sees the new value 
 {
 }
 
-static const struct menu_number range_desc = {&HZ->value[SET_RANGE], 0, 99, 1, 1};
+static const struct menu_number timing_desc = {&HZ->value[SET_TIMING], 0, 99, 1, 1};
 static const struct menu_options volume_desc = {&HZ->value[SET_VOLUME], 2, (const char *const *)FW_OFF_ON,
                                                 option_applied};
+static const struct menu_number volume_range_desc = {&HZ->value[SET_VOLUME_RANGE], 0, 99, 1, 1};
 static const struct menu_number midi_desc = {&HZ->value[SET_MIDI], 0, 99, 1, 1};
 static const struct menu_number sample_desc = {&HZ->value[SET_SAMPLE], 0, 99, 1, 1};
 
@@ -385,11 +390,13 @@ void *mt_hz_last_item(void *node, void *parent, const char *label, const char *h
         return r;
     ((folder_fn)FW_MENU_FOLDER)(folder, (void *)FW_PROJECT_SETTINGS, "Humanize", SETTINGS);
     static const struct { const char *label, *help; uint32_t type; const void *desc; } items[SETTINGS] = {
-        {"Range", "How far Humanize moves timing and level. New Micro-move: 0 to this "
-                  "value. Volume/Velocity and existing Micro-move: a random value in a "
-                  "window this wide.", MENU_NUMBER, &range_desc},
+        {"Timing range", "How far Humanize moves timing. New Micro-move: 0 to this "
+                         "value. Existing Micro-move: a random value in a window this "
+                         "wide.", MENU_NUMBER, &timing_desc},
         {"Volume/velocity", "Off: Humanize changes only Micro-move and leaves "
                             "Volume/Velocity alone.", MENU_OPTIONS, &volume_desc},
+        {"Volume range", "How far Humanize moves Volume/Velocity: a random value in a "
+                         "window this wide.", MENU_NUMBER, &volume_range_desc},
         {"MIDI velocity", "Center for a new Volume/Velocity FX on MIDI and synth "
                           "instruments.", MENU_NUMBER, &midi_desc},
         {"Sample volume", "Center for a new Volume/Velocity FX on sample instruments.",
@@ -406,8 +413,11 @@ void *mt_hz_last_item(void *node, void *parent, const char *label, const char *h
 
 /* ---- humanize.bin ---------------------------------------------------------------- */
 
-#define FILE_MAGIC          0x315A4848u     /* "HHZ1" */
-#define FILE_SIZE           12u             /* magic, 4 values, 4-byte checksum */
+#define FILE_MAGIC          0x325A4848u     /* "HHZ2" */
+#define FILE_SIZE           16u             /* magic, 5 values, 3 zero bytes, 4-byte checksum */
+#define FILE_DATA           8u              /* the checksummed bytes after the magic */
+#define OLD_MAGIC           0x315A4848u     /* "HHZ1": magic, 4 values, 4-byte checksum */
+#define OLD_SIZE            12u
 
 static uint32_t fnv1a(uint32_t h, uint32_t byte)
 {
@@ -425,10 +435,10 @@ static uint32_t project_session(void)
     return fnv1a(h, 0) | 1;                 /* never 0 */
 }
 
-static uint32_t values_sum(const uint8_t *v)
+static uint32_t values_sum(const uint8_t *v, uint32_t n)
 {
     uint32_t h = 2166136261u;
-    for (uint32_t i = 0; i < SETTINGS; i++)
+    for (uint32_t i = 0; i < n; i++)
         h = fnv1a(h, v[i]);
     return h;
 }
@@ -452,9 +462,12 @@ static int settings_path(char *path, uint32_t size)
     return n > 0 && (uint32_t)n < size;
 }
 
-static int settings_valid(const uint8_t *v)
+static int settings_valid(const uint8_t *v, uint32_t n)
 {
-    return v[SET_RANGE] <= 99 && v[SET_VOLUME] <= 1 && v[SET_MIDI] <= 99 && v[SET_SAMPLE] <= 99;
+    for (uint32_t i = 0; i < n; i++)
+        if (v[i] > (i == SET_VOLUME ? 1u : 99u))
+            return 0;
+    return 1;
 }
 
 /* 1: the file was read and applied */
@@ -470,12 +483,21 @@ static int settings_load(void)
     ((fs_open_fn)vt[FS_OPEN / 4])(&res, fs, path, FS_MODE_READ, 0);
     if (!res.ok)
         return 0;
-    int ok = ((fs_read_fn)vt[FS_READ / 4])(fs, buf, FILE_SIZE, res.handle) == (int)FILE_SIZE;
+    /* both versions start with 12 bytes; the current one has 4 more */
+    int ok = ((fs_read_fn)vt[FS_READ / 4])(fs, buf, OLD_SIZE, res.handle) == (int)OLD_SIZE;
+    int old = ok && get32(buf) == OLD_MAGIC;
+    if (ok && !old)
+        ok = get32(buf) == FILE_MAGIC && ((fs_read_fn)vt[FS_READ / 4])(fs, buf + OLD_SIZE,
+                FILE_SIZE - OLD_SIZE, res.handle) == (int)(FILE_SIZE - OLD_SIZE);
     ((fs_close_fn)vt[FS_CLOSE / 4])(fs, res.handle, 1);
-    ok = ok && get32(buf) == FILE_MAGIC && get32(buf + 8) == values_sum(buf + 4)
-         && settings_valid(buf + 4);
+    if (old)
+        ok = get32(buf + 8) == values_sum(buf + 4, OLD_SETTINGS) && settings_valid(buf + 4, OLD_SETTINGS);
+    else
+        ok = ok && get32(buf + 12) == values_sum(buf + 4, FILE_DATA) && settings_valid(buf + 4, SETTINGS);
     if (!ok)
         return 0;
+    if (old)
+        buf[4 + SET_VOLUME_RANGE] = buf[4 + SET_TIMING];    /* one range for both */
     for (uint32_t i = 0; i < SETTINGS; i++)
         HZ->value[i] = HZ->saved[i] = buf[4 + i];
     HZ->saved_valid = 1;
@@ -491,9 +513,9 @@ static void settings_save(void)
     void **vt = *(void ***)fs;
     uint8_t buf[FILE_SIZE];
     put32(buf, FILE_MAGIC);
-    for (uint32_t i = 0; i < SETTINGS; i++)
-        buf[4 + i] = HZ->value[i];
-    put32(buf + 8, values_sum(buf + 4));
+    for (uint32_t i = 0; i < FILE_DATA; i++)
+        buf[4 + i] = i < SETTINGS ? HZ->value[i] : 0;
+    put32(buf + 12, values_sum(buf + 4, FILE_DATA));
     struct fs_open_result res = {0, 0, {0, 0, 0}};
     ((fs_remove_fn)vt[FS_REMOVE / 4])(fs, path);
     ((fs_open_fn)vt[FS_OPEN / 4])(&res, fs, path, FS_MODE_WRITE, 0);

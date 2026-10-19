@@ -847,7 +847,7 @@ items (`tools/emu/test_humanize.py` walks it).
   project files. `ghidra/scripts/RefsInRange.java` lists the references to a range.
 
 `patch/humanize` creates Project Settings with room for 11 items, appends a
-"Humanize" folder with three number items and an Off/On item after the constructor's
+"Humanize" folder with four number items and an Off/On item after the constructor's
 last item, in nodes from the firmware's heap, and keeps the values in its own RAM
 (32 bytes, placed by the patcher, section 15) and in `<project folder>/humanize.bin`, read and written from the
 Pattern and Config screens' update methods. Tested on hardware.
