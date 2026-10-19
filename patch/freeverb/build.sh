@@ -30,7 +30,7 @@ CFLAGS=(-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -O2 -std=c11
 link() {                               # link <linker script> <elf> <map>
     "$ARM_GCC_BIN/arm-none-eabi-gcc" -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 \
         -nostdlib -nostartfiles -T "$1" -Wl,--gc-sections \
-        -Wl,--undefined=mt_fv_update -Wl,--undefined=mt_version_fmt \
+        -Wl,--undefined=mt_fv_update -Wl,--undefined=mt_fv_pattern_update -Wl,--undefined=mt_fv_last_item -Wl,--undefined=mt_version_fmt \
         -Wl,-Map="$3" "$OUT/freeverb.o" -o "$2"
 }
 link "$HERE/link.ld" "$OUT/freeverb.elf" "$OUT/freeverb.map"

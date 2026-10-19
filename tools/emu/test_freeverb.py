@@ -9,6 +9,10 @@ constructors. The test calls the object's update() through its vtable, as the au
 graph does, with the block helpers stubbed: receive-writable hands it two prepared
 blocks (left, right send), transmit and release are recorded.
 
+0. Start-up: until the Pattern screen's update has run, the hook gives exactly the stock
+   reverb's output; then it stays silent (sends nothing) while it clears the buffers,
+   8 blocks, and switches to Freeverb; the Config menu constructor (run at every start)
+   puts it back to the stock reverb until the Pattern screen runs again.
 1. Hook and block handling: the vtable slot points into the patch; with the bypass flag
    set nothing is received or sent; with no left block nothing is sent, and with no
    right block the left one is released; otherwise both blocks are transmitted (left to
@@ -41,6 +45,10 @@ from seq_timing import make  # noqa: E402
 
 REVERB = 0x20019014
 RECEIVE_WRITABLE, TRANSMIT, RELEASE = 0x600305D4, 0x60030574, 0x60030524
+PATTERN_UPDATE_SLOT, PATTERN_UPDATE = 0x600403DC, 0x600E1F98
+MENU_CTOR, ATEXIT = 0x60118ACC, 0x600A3594
+CLEAR_BLOCKS = 8
+STOCK_UPDATE = 0x60031E5C
 BUF_L, BUF_R = 0x24, 0x28
 AMOUNT, INPUT_GAIN, SIZE, DIFFUSION, LP, PREDELAY, LEVEL, BYPASS = 0x4C, 0x50, 0x54, 0x58, 0x5C, 0x6C, 0x70, 0x80
 BLOCK = 128
@@ -58,25 +66,36 @@ def check(ok: bool, what: str) -> None:
 class Rig:
     """The reverb object of one firmware, driven block by block."""
 
-    def __init__(self, ptf: Path):
+    def __init__(self, ptf: Path, booted: bool = True):
         self.m = m = make(ptf)
         self.blocks = [m.alloc(4 + 2 * BLOCK, 4), m.alloc(4 + 2 * BLOCK, 4)]
         self.give = [True, True]
         self.sent: list[tuple[int, int]] = []
         self.released: list[int] = []
         self.received = 0
+        self.received_blocks: list[int] = []
 
         def receive(mm):
             i = mm.arg(1)
             self.received += 1
-            return self.blocks[i] if i < 2 and self.give[i] else 0
+            if i < 2 and self.give[i]:
+                self.received_blocks.append(self.blocks[i])
+                return self.blocks[i]
+            return 0
         m.stub_function(RECEIVE_WRITABLE, receive)
         m.stub_function(TRANSMIT, lambda mm: self.sent.append((mm.arg(1), mm.arg(2))) or 0)
         m.stub_function(RELEASE, lambda mm: self.released.append(mm.arg(0)) or 0)
         self.update = m.r32(m.r32(REVERB))
-        self.counting = False
-        self.count = 0
+        m.stub_function(PATTERN_UPDATE, lambda mm: 0)
+        m.stub_function(ATEXIT, lambda mm: 0)
         self.settings(bypass=0)
+        if booted:
+            self.boot()
+
+    def boot(self) -> None:
+        """The Pattern screen updates once (the unit has booted), then the buffer clear runs."""
+        self.m.call(self.m.r32(PATTERN_UPDATE_SLOT), 0x20021770)
+        self.run([0] * (BLOCK * CLEAR_BLOCKS), [0] * (BLOCK * CLEAR_BLOCKS))
 
     def f32(self, off: int, v: float) -> None:
         self.m.write(REVERB + off, struct.pack("<f", v))
@@ -176,6 +195,31 @@ def main() -> int:
     code = next(q for q in json.loads(ptf.with_suffix(".map.json").read_text())["patches"] if q["name"] == "freeverb")
     lo, hi = (int(x, 16) for x in code["code"])
 
+    print("start-up")
+    burst_l, burst_r = noise_burst(BLOCK * 40, BLOCK * 20, 8), noise_burst(BLOCK * 40, BLOCK * 20, 9)
+    stock_rig = Rig(stock, booted=False)
+    want = stock_rig.run(burst_l, burst_r)
+    r = Rig(ptf, booted=False)
+    check(r.run(burst_l, burst_r) == want, "before the Pattern screen has run: exactly the stock reverb's output")
+    r.m.call(r.m.r32(PATTERN_UPDATE_SLOT), 0x20021770)
+    rnd = random.Random(3)
+    for off in (BUF_L, BUF_R):                       # whatever the stock reverb left there
+        r.m.write(r.m.r32(REVERB + off), bytes(rnd.randrange(256) for _ in range(32768)))
+    sent = 0
+    for _ in range(CLEAR_BLOCKS):
+        r.run(burst_l[:BLOCK], burst_r[:BLOCK])
+        sent += len(r.sent)
+    out = r.run([0] * (BLOCK * 20), [0] * (BLOCK * 20))
+    check(sent == 0 and not any(out[0]) and not any(out[1]),
+          f"after it: {CLEAR_BLOCKS} silent blocks while the buffers are cleared, then Freeverb, from clean buffers")
+    r.m.call(MENU_CTOR, max_insns=50_000_000)        # a new start
+    stock_calls = [0]
+    r.m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: stock_calls.__setitem__(0, stock_calls[0] + 1),
+                    begin=STOCK_UPDATE, end=STOCK_UPDATE)
+    r.run(burst_l[:BLOCK * 10], burst_r[:BLOCK * 10])
+    check(stock_calls[0] == 10, f"the Config menu constructor (every start) brings back the stock reverb until the "
+          f"Pattern screen runs (stock update() in {stock_calls[0]} of 10 blocks)")
+
     print("hook and block handling")
     r = Rig(ptf)
     check(lo <= r.update < hi and r.update & 1, f"the reverb's update() is the patch's ({r.update:#x})")
@@ -199,12 +243,6 @@ def main() -> int:
 
     print("Freeverb")
     r = Rig(ptf)
-    rnd = random.Random(7)
-    for off in (BUF_L, BUF_R):                       # garbage in the stock buffers
-        buf = r.m.r32(REVERB + off)
-        r.m.write(buf, bytes(rnd.randrange(256) for _ in range(32768)))
-    out_l, out_r = r.run([0] * (BLOCK * 20), [0] * (BLOCK * 20))
-    check(not any(out_l) and not any(out_r), "the stock buffers are cleared before first use: silence in, silence out")
     r.settings(amount=0.0)
     sig = noise_burst(BLOCK * 8, BLOCK * 8)
     out_l, out_r = r.run(sig, sig)
@@ -249,6 +287,7 @@ def main() -> int:
     for label, fw in (("stock", stock), ("freeverb", ptf)):
         rr = Rig(fw)
         rr.settings()
+        rr.run([0] * (BLOCK * 16), [0] * (BLOCK * 16))    # past the start-up
         count = [0]
         rr.m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: count.__setitem__(0, count[0] + 1))
         left, right = rr.run(burst_l, burst_r)

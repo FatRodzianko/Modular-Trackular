@@ -49,7 +49,7 @@ must be byte-identical to these builds:
 | colorsong | `TrackerPlus_c11.ptf` | `1.2.0-c11` | tested | `cc9119abe627d994ba6010bfe0db59129e3f494611dbc8c1e5c68fcf0653ebc6` |
 | humanize | `TrackerPlus_hz8.ptf` | `1.2.0-hz8` | not yet | `ec3c30fda0d186299e39cce2be48031303f3bc0583fd1e8803600b500bf4b46f` |
 | interpolate | `TrackerPlus_ip5.ptf` | `1.2.0-ip5` | not yet | `f3d98eb18f5852dc718d41ba9311e813d056d1ab5b37b1252e87cf0341c0942a` |
-| freeverb | `TrackerPlus_fv1.ptf` | `1.2.0-fv1` | not yet | `0e12cb99196bd8d5c537d2d5ffe4db512d370868c2e4e2bcc735a4a6e77415d1` |
+| freeverb | `TrackerPlus_fv4.ptf` | `1.2.0-fv4` | tested | `063c64e0f66c8f392e9b45d6dee99098fd71d394d0bc9b4d4e846d1cd7347f56` |
 | all (colorsong + humanize + interpolate) | `TrackerPlus_MTC.ptf` | `1.2.0-MTC` | tested | `5609dff165918fa6668385622eda3b97318dcf9909bab8bbcf760f2d06971a6a` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
@@ -116,7 +116,7 @@ The patches in one firmware have to fit together:
   |---|---|---|---|
   | `ocram_tail` | `0x20205000`–`0x20207fff` | 12,288 B | on-chip |
   | `dtcm_above_heap` | `0x20051c70`–`0x20052fff` | 5,008 B | on-chip, below the stack |
-  | `sdram_top` | `0x83ff9bf0`–`0x83ffffff` | 25,616 B | external SDRAM; not before `main` |
+  | `sdram_top` | `0x83ff9bf0`–`0x83ffffff` | 25,616 B | external SDRAM; not before `main`. Fine for state used once the unit runs (colorsong); not for state written from the audio interrupt during boot (that hung the unit at boot) |
   | `dtcm_after_audio` | `0x200094c0`–`0x200097ff` | 832 B | on-chip |
   | `itcm_tail` | `0x0001fb40`–`0x0001ffff` | 1,216 B | only when a spec names it; aligned accesses only |
 
@@ -160,7 +160,7 @@ python tools/emu/test_colorsong.py build/TrackerPlus_c11.ptf
 python tools/emu/test_rescan.py build/TrackerPlus_c11.ptf "path/to/<project A>" "path/to/<project B>"
 python tools/emu/test_humanize.py build/TrackerPlus_hz8.ptf
 python tools/emu/test_interpolate.py build/TrackerPlus_ip5.ptf
-python tools/emu/test_freeverb.py build/TrackerPlus_fv1.ptf path/to/TrackerPlus_1.2.0.ptf out/reverb_wav
+python tools/emu/test_freeverb.py build/TrackerPlus_fv4.ptf path/to/TrackerPlus_1.2.0.ptf out/reverb_wav
 ```
 
 Each test works on any firmware that contains its patch, so for a bundle run every

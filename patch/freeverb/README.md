@@ -5,9 +5,9 @@ A patch for Polyend Tracker+ firmware 1.2.0. It replaces the stock master reverb
 filters and four allpasses per channel, a darker and denser room than the stock plate.
 The reverb send, the Master Reverb page and its knobs work as before; only the sound of
 the reverb changes. Installed on its own, Config shows the firmware version as
-`1.2.0-fv1`.
+`1.2.0-fv4`.
 
-**Status:** emulator-tested; not yet tested on hardware.
+**Status:** tested on hardware.
 
 ## Using it
 
@@ -34,6 +34,13 @@ sends it on as the reverb return.
 | Hook | Where | What |
 |---|---|---|
 | `mt_fv_update` | the reverb object's vtable, `update()` slot `0x60042f94` (stock `0x60031e5d`) | Takes the two send blocks, runs Freeverb on them in place, transmits and releases them, as the stock `update()` does |
+| `mt_fv_pattern_update` | Pattern screen vtable slot `0x600403dc` (chained) | The unit has booted: Freeverb may take over |
+| `mt_fv_last_item` | the Config menu constructor's last `bl cfg_menu_item` (`0x601193e6`, chained) | Runs at every start: back to the stock reverb until the Pattern screen runs |
+
+**Start-up.** Freeverb only takes over once the unit has booted. Until the Pattern
+screen first appears, the hook runs the stock reverb; then it clears its buffers a piece
+at a time over 8 blocks (about 23 ms, silent) and switches to Freeverb. Running
+Freeverb while the unit boots hangs the boot.
 
 - **Signal:** the send is summed to mono, delayed by the Predelay, and fed to 8 comb
   filters (1116–1617 samples, a one-pole lowpass in each feedback path) and 4 allpasses
@@ -46,19 +53,30 @@ sends it on as the reverb return.
   them every block.
 - **Memory:** the delay lines are stored as 16-bit samples in the stock reverb's two
   32 KB SDRAM buffers (`+0x24`, `+0x28`), which the stock reverb doesn't use any more:
-  left channel in one, right in the other, cleared before first use. The patch's own RAM
-  (10,288 bytes: the predelay line and the filter states) goes in the free top of SDRAM.
+  left channel in one, right in the other, cleared before first use. The predelay line
+  (5,001 samples) uses what is left at the end of the two buffers. The patch's own RAM
+  (288 bytes: positions and filter states) is on-chip (the OCRAM tail, or the DTCM gap
+  above the heap in a bundle). It stays out of the free top of SDRAM, which isn't safe
+  for state written from the audio interrupt while the unit boots.
 - **Also kept:** the bypass flag (`+0x80`) and the level value the stock reverb writes
   after each block (`+0x70`).
 
-The code is 1,277 bytes (built with `-O2`, as it runs in the audio interrupt); the
+The code is 1,513 bytes (built with `-O2`, as it runs in the audio interrupt); the
 patcher places it after the stock image or after the patches listed before it.
 
 **CPU:** each filter runs over the whole 128-sample block at a time. In the emulator
-Freeverb takes about 75,000 instructions per block against about 34,000 for the stock
+Freeverb takes about 76,000 instructions per block against about 34,000 for the stock
 reverb (Freeverb has 24 filters per sample, the stock plate about a dozen): roughly 2 %
-more of the processor while the reverb runs. Firmware details are in
+more of the processor while the reverb runs. On the device, a deliberately heavy pattern
+(every drum hit and all three synths, 8 voices each, sending fully to the reverb) showed
+66 % average and 86 % peak CPU with Freeverb, against 61 % and 84 % with the stock
+reverb. With such large sends the stock reverb crackles; Freeverb doesn't. Firmware details are in
 [docs/FINDINGS.md](../../docs/FINDINGS.md) (section 19).
+
+Diagnostic builds (`FV_DEFS='-D<name> -DFREEVERB_VERSION="<text>"' patch/freeverb/build.sh`):
+`FV_PASSTHROUGH` only calls the stock `update()`; `FV_DIAG_CLEAR` runs the stock reverb but
+clears the two buffers at once on the first block, from boot on; `FV_DIAG_MUTED` runs
+Freeverb from boot on without clearing and sends the send back unchanged.
 
 ## Build
 
@@ -66,7 +84,7 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/freeverb/patch.json build/TrackerPlus_fv1.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/freeverb/patch.json build/TrackerPlus_fv4.ptf
 ```
 
 To combine it with other patches, list `../freeverb/patch.json` in a bundle (see
@@ -79,12 +97,12 @@ To build the patch code from source, you need the Arm GNU Toolchain
 patch/freeverb/build.sh
 ```
 
-### Emulator test
+### Emulator tests
 
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_freeverb.py build/TrackerPlus_fv1.ptf path/to/TrackerPlus_1.2.0.ptf out/reverb_wav
+python tools/emu/test_freeverb.py build/TrackerPlus_fv4.ptf path/to/TrackerPlus_1.2.0.ptf out/reverb_wav
 ```
 
 It calls the reverb object's `update()` through its vtable, as the audio engine does,
@@ -96,11 +114,23 @@ the level value, the loudness against the stock reverb (within 6 dB) and the cos
 block. With a folder given, it also writes WAV files of the same test sounds through
 the stock reverb and Freeverb, for listening.
 
+A stress test runs long randomized sessions (here 4 of 20,000 blocks, about a minute of
+audio each): changing sends, Master Reverb fields set to random values and to garbage
+(NaN, infinities, out-of-range Predelay), bypass toggles, missing blocks, moved buffers,
+the Pattern-screen start and the start-up reset at random. A write watch fails the run
+if the patch writes anywhere but its own RAM, the reverb buffers, the audio blocks, the
+level field or the stack; it also checks the state after every block, that blocks are
+released exactly once, and that the reverb sounds again once normal settings return:
+
+```bash
+python tools/emu/stress_freeverb.py build/TrackerPlus_fv4.ptf 20000 11 12 13 14
+```
+
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-fv1 Build 1504`.
+Config → Firmware → the patched file. Config should show `1.2.0-fv4 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Projects keep their reverb
 settings and play with the stock reverb again.

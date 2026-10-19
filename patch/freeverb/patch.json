@@ -3,8 +3,10 @@
   "description": "Freeverb as the master reverb: the reverb object's update() runs Freeverb (public domain) instead of the stock reverb, driven by the same Master Reverb knobs",
   "firmware": "TrackerPlus 1.2.0",
   "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "ram_startup": true,
   "ram_regions": [
-    "sdram_top"
+    "ocram_tail",
+    "dtcm_above_heap"
   ],
   "bin": "build/freeverb.bin",
   "sym": "build/freeverb.sym",
@@ -12,7 +14,15 @@
   "prebuilt_bin": "prebuilt/freeverb.bin",
   "prebuilt_sym": "prebuilt/freeverb.sym",
   "prebuilt_rel": "prebuilt/freeverb.rel",
-  "branches": [],
+  "branches": [
+    {
+      "at": "0x601193E6",
+      "old": "fef7ffff",
+      "to": "mt_fv_last_item",
+      "next": "mt_fv_next_last_item",
+      "note": "Config menu constructor: last item (Licenses); also resets Freeverb's start-up state at every start"
+    }
+  ],
   "words": [
     {
       "at": "0x60042F94",
@@ -22,11 +32,19 @@
       "note": "master reverb object vtable: update method 0x60031e5d -> mt_fv_update (Freeverb)"
     },
     {
+      "at": "0x600403DC",
+      "old": "991f0e60",
+      "to": "mt_fv_pattern_update",
+      "next": "mt_fv_next_pattern_update",
+      "thumb": true,
+      "note": "Pattern screen vtable: update method 0x600e1f99 -> mt_fv_pattern_update (the unit has booted: Freeverb may start)"
+    },
+    {
       "at": "0x600CBF9C",
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-fv1"
+      "note": "version text 1.2.0-fv4"
     }
   ]
 }

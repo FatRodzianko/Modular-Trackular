@@ -13,8 +13,10 @@
  * channel's delays are 23 samples longer (stereo spread). The delay lengths are
  * Freeverb's own, for 44.1 kHz. The delay lines are stored as 16-bit samples in the
  * stock reverb's two 32 KB SDRAM buffers (object +0x24 and +0x28), which the stock
- * reverb no longer uses: left in the first, right in the second. The patch clears them
- * before first use. Each filter runs over the whole block at a time, in sample units
+ * reverb no longer uses: left in the first, right in the second, and the predelay line in
+ * what is left at the end of the two. The patch clears them before first use. Its own
+ * state (about 300 bytes) is on-chip: the top of SDRAM, free once the unit is running,
+ * hung the boot when this patch used it from the audio interrupt. Each filter runs over the whole block at a time, in sample units
  * (16-bit full scale = 32768), so the delay lines need no scaling.
  *
  * The Master Reverb page is unchanged; its setters still write the reverb object, and
@@ -27,18 +29,32 @@
  * the object's amount (+0x4c, 0.8) and input gain (+0x50, 0.1). The bypass flag (+0x80)
  * works as before, and the block's average output level goes to +0x70, as the stock
  * reverb writes it.
+ *
+ * Start-up. Freeverb only takes over once the unit has finished booting: until the
+ * Pattern screen's update method first runs, mt_fv_update calls the stock update().
+ * Then it clears the two buffers a piece per block (silent meanwhile) and switches to
+ * Freeverb. The Config menu constructor (a static constructor, so at every start)
+ * resets that state, so Freeverb never runs during a boot.
+ *
+ * Diagnostic builds:
+ *  - -DFV_PASSTHROUGH ("fvP"): the hook only calls the stock update();
+ *  - -DFV_DIAG_CLEAR ("fvC"): the stock update(), plus the whole 64 KB clear at once on
+ *    the first block that has input, from boot on;
+ *  - -DFV_DIAG_MUTED ("fvD"): Freeverb runs from boot on, without clearing, and its
+ *    output is the send unchanged (the wet signal is computed but not used).
  */
 #include <stdint.h>
 #include <arm_acle.h>                      /* __ssat */
 
 #ifndef FREEVERB_VERSION
-#define FREEVERB_VERSION "fv1"
+#define FREEVERB_VERSION "fv4"
 #endif
 
 /* ---- firmware 1.2.0 (function pointers carry the Thumb bit) ---------------------- */
 #define FW_RECEIVE_WRITABLE 0x600305D5u     /* (object, input) -> block or 0 */
 #define FW_TRANSMIT         0x60030575u     /* (object, block, output) */
 #define FW_RELEASE          0x60030525u     /* (block) */
+#define FW_REVERB_UPDATE    0x60031E5Du     /* the stock update() */
 
 /* reverb object fields */
 #define RV_BUF_L            0x24u           /* -> int16[16384], SDRAM */
@@ -58,6 +74,16 @@
 typedef void *(*receive_fn)(void *obj, uint32_t input);
 typedef void (*transmit_fn)(void *obj, void *block, uint32_t output);
 typedef void (*release_fn)(void *block);
+typedef void (*update_fn)(void *obj);
+typedef void (*screen_update_fn)(void *screen, void *a1, void *a2, void *a3);
+typedef void *(*item_fn)(void *node, void *parent, const char *label, const char *help,
+                         uint32_t type, const void *descriptor);
+
+/* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
+ * compiler must read them, not assume the 0 they are linked with. */
+#define CHAIN_WORD(name) const volatile uint32_t name __attribute__((used)) = 0
+CHAIN_WORD(mt_fv_next_pattern_update);      /* Pattern screen update 0x600e1f99 */
+CHAIN_WORD(mt_fv_next_last_item);           /* last item: cfg_menu_item 0x601183e9 */
 
 /* ---- Freeverb tuning (44.1 kHz) ---------------------------------------------------- */
 #define COMBS               8u
@@ -71,12 +97,15 @@ typedef void (*release_fn)(void *block);
 #define OFFSET_ROOM         0.7f
 #define SCALE_DAMP          0.4f
 #define PREDELAY_MAX        5000u           /* the stock setter's range */
+#define PRE_RING            (PREDELAY_MAX + 1u)
 
 static const uint16_t comb_len[COMBS] = {1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617};
 static const uint16_t allpass_len[ALLPASSES] = {556, 441, 341, 225};
 
-/* ---- state (.mt_ram, placed by the patcher in SDRAM) ------------------------------- */
-#define FV_MAGIC            0x56524654u     /* "TFRV" */
+/* ---- state (.mt_ram, placed by the patcher in on-chip RAM) ----------------------- */
+#define FV_MAGIC            0x56524654u     /* "TFRV": lines laid out for buf_l/buf_r */
+#define FV_READY            0x59444552u     /* "REDY": booted, Freeverb may run */
+#define CLEAR_WORDS         1024u           /* words of each buffer cleared per block (8 blocks) */
 
 struct line { uint16_t start, len, pos, pad; };
 
@@ -86,9 +115,11 @@ struct fv_state {
     struct line comb[2][COMBS];
     struct line allpass[2][ALLPASSES];
     float comb_store[2][COMBS];             /* comb lowpass states */
-    uint16_t pre_pos;
-    uint16_t pad;
-    int16_t pre[PREDELAY_MAX + 1];
+    uint16_t pre_pos;                       /* predelay ring write position, 0..PRE_RING-1 */
+    uint16_t pre_split;                     /* ring positions below this are in the left buffer */
+    uint32_t pre_l, pre_r;                  /* the ring's two parts: the buffers' unused ends */
+    uint32_t ready;                         /* FV_READY once the unit has booted */
+    uint32_t cleared;                       /* words of each buffer cleared so far */
 };
 static struct fv_state fv_state_ram __attribute__((section(".mt_ram")));
 #define FV (&fv_state_ram)
@@ -98,8 +129,15 @@ static inline int16_t sat16(float v)
     return (int16_t)__ssat((int32_t)v, 16);
 }
 
-/* Lay out the delay lines in the two buffers and clear everything. */
-static void fv_init(uint32_t buf_l, uint32_t buf_r)
+/* A predelay ring position: the first part is in the left buffer's spare end, the rest
+ * in the right buffer's. */
+static inline int16_t *pre_at(uint32_t i)
+{
+    return i < FV->pre_split ? (int16_t *)FV->pre_l + i : (int16_t *)FV->pre_r + (i - FV->pre_split);
+}
+
+/* Lay out the delay lines in the two buffers (cleared afterwards, a piece per block). */
+__attribute__((unused)) static void fv_init(uint32_t buf_l, uint32_t buf_r)
 {
     for (uint32_t ch = 0; ch < 2; ch++) {
         uint32_t at = 0, spread = ch ? STEREO_SPREAD : 0;
@@ -112,16 +150,34 @@ static void fv_init(uint32_t buf_l, uint32_t buf_r)
             FV->allpass[ch][i] = (struct line){(uint16_t)at, (uint16_t)(allpass_len[i] + spread), 0, 0};
             at += allpass_len[i] + spread;
         }
+        /* the rest of this buffer: part of the predelay ring */
+        if (ch == 0) {
+            FV->pre_l = buf_l + 2 * at;
+            FV->pre_split = (uint16_t)(BUFFER_SAMPLES - at);
+        } else {
+            FV->pre_r = buf_r + 2 * at;
+        }
     }
-    volatile uint32_t *l = (volatile uint32_t *)buf_l, *r = (volatile uint32_t *)buf_r;
-    for (uint32_t i = 0; i < BUFFER_SAMPLES / 2; i++)
-        l[i] = r[i] = 0;
-    for (uint32_t i = 0; i <= PREDELAY_MAX; i++)
-        FV->pre[i] = 0;
+    FV->cleared = 0;
     FV->pre_pos = 0;
     FV->buf_l = buf_l;
     FV->buf_r = buf_r;
     FV->magic = FV_MAGIC;
+}
+
+/* Clear the next piece of the two buffers; 1 when they are clear. */
+__attribute__((unused)) static int clear_step(uint32_t words)
+{
+    volatile uint32_t *l = (volatile uint32_t *)FV->buf_l, *r = (volatile uint32_t *)FV->buf_r;
+    uint32_t end = FV->cleared + words;
+    if (end > BUFFER_SAMPLES / 2)
+        end = BUFFER_SAMPLES / 2;
+    for (uint32_t i = FV->cleared; i < end; i++) {
+        l[i] = 0;
+        r[i] = 0;
+    }
+    FV->cleared = end;
+    return end == BUFFER_SAMPLES / 2;
 }
 
 /* One comb filter over the block: acc += its output. */
@@ -158,13 +214,16 @@ static void allpass_block(struct line *a, int16_t *buf, float *io, float feedbac
     a->pos = (uint16_t)pos;
 }
 
+/* lo..hi; NaN (from a corrupted project) counts as lo, so filter states never get NaN */
 static float fclamp(float v, float lo, float hi)
 {
-    return v < lo ? lo : v > hi ? hi : v;
+    if (!(v >= lo))
+        return lo;
+    return v > hi ? hi : v;
 }
 
 /* Process one block of the stereo send in place; returns the average output level. */
-static float fv_process(uint8_t *obj, int16_t *left, int16_t *right)
+static float fv_process(uint8_t *obj, int16_t *left, int16_t *right, int muted)
 {
     int16_t *buf[2] = {(int16_t *)FV->buf_l, (int16_t *)FV->buf_r};
     int16_t *io[2] = {left, right};
@@ -172,7 +231,7 @@ static float fv_process(uint8_t *obj, int16_t *left, int16_t *right)
     float damping = fclamp(1.0f - *(volatile float *)(obj + RV_LP), 0.0f, 1.0f);
     float diffusion = fclamp(*(volatile float *)(obj + RV_DIFFUSION), 0.0f, 1.0f);
     float amount = fclamp(*(volatile float *)(obj + RV_AMOUNT), 0.0f, 1.0f);
-    float gain = *(volatile float *)(obj + RV_INPUT_GAIN);
+    float gain = fclamp(*(volatile float *)(obj + RV_INPUT_GAIN), 0.0f, 1.0f);
     int32_t predelay = *(volatile int32_t *)(obj + RV_PREDELAY);
     if (predelay < 0)
         predelay = 0;
@@ -186,16 +245,16 @@ static float fv_process(uint8_t *obj, int16_t *left, int16_t *right)
     float in_gain = FIXED_GAIN * LINE_GAIN * (gain / 0.1f);
     float wet_gain = SCALE_WET * OUTPUT_TRIM / LINE_GAIN;
 
-    /* the mono send through the predelay (a ring of PREDELAY_MAX + 1 samples) */
+    /* the mono send through the predelay (a ring of PRE_RING samples) */
     float mono[BLOCK];
     uint32_t wr = FV->pre_pos;
     for (uint32_t n = 0; n < BLOCK; n++) {
-        FV->pre[wr] = sat16(((float)left[n] + (float)right[n]) * 0.5f);
-        uint32_t rd = wr + (PREDELAY_MAX + 1) - (uint32_t)predelay;
-        if (rd > PREDELAY_MAX)
-            rd -= PREDELAY_MAX + 1;
-        mono[n] = (float)FV->pre[rd] * 2.0f * in_gain;
-        if (++wr > PREDELAY_MAX)
+        *pre_at(wr) = sat16(((float)left[n] + (float)right[n]) * 0.5f);
+        uint32_t rd = wr + PRE_RING - (uint32_t)predelay;
+        if (rd >= PRE_RING)
+            rd -= PRE_RING;
+        mono[n] = (float)*pre_at(rd) * 2.0f * in_gain;
+        if (++wr == PRE_RING)
             wr = 0;
     }
     FV->pre_pos = (uint16_t)wr;
@@ -212,21 +271,18 @@ static float fv_process(uint8_t *obj, int16_t *left, int16_t *right)
         int16_t *s = io[ch];
         for (uint32_t n = 0; n < BLOCK; n++) {
             float wet = acc[n] * wet_gain, dry = (float)s[n];
-            s[n] = sat16(dry + (wet - dry) * amount);
+            if (!muted)
+                s[n] = sat16(dry + (wet - dry) * amount);
             level += wet < 0 ? -wet : wet;
         }
     }
     return level / BLOCK;
 }
 
-/* Reverb object vtable slot 0x60042f94 (update method 0x60031e5d) */
-void mt_fv_update(uint8_t *obj)
+/* Take the two send blocks, process them with Freeverb and send them on, as the stock
+ * update() does. */
+__attribute__((unused)) static void freeverb_blocks(uint8_t *obj, int muted)
 {
-    if (obj[RV_BYPASS])
-        return;
-    uint32_t buf_l = *(volatile uint32_t *)(obj + RV_BUF_L), buf_r = *(volatile uint32_t *)(obj + RV_BUF_R);
-    if (!buf_l || !buf_r)
-        return;
     uint8_t *left = ((receive_fn)FW_RECEIVE_WRITABLE)(obj, 0);
     if (!left)
         return;
@@ -235,13 +291,71 @@ void mt_fv_update(uint8_t *obj)
         ((release_fn)FW_RELEASE)(left);
         return;
     }
-    if (FV->magic != FV_MAGIC || FV->buf_l != buf_l || FV->buf_r != buf_r)
-        fv_init(buf_l, buf_r);
-    *(volatile float *)(obj + RV_LEVEL) = fv_process(obj, (int16_t *)(left + 4), (int16_t *)(right + 4));
+    *(volatile float *)(obj + RV_LEVEL) = fv_process(obj, (int16_t *)(left + 4), (int16_t *)(right + 4), muted);
     ((transmit_fn)FW_TRANSMIT)(obj, left, 0);
     ((transmit_fn)FW_TRANSMIT)(obj, right, 1);
     ((release_fn)FW_RELEASE)(left);
     ((release_fn)FW_RELEASE)(right);
+}
+
+/* Reverb object vtable slot 0x60042f94 (update method 0x60031e5d) */
+void mt_fv_update(uint8_t *obj)
+{
+    uint32_t buf_l = *(volatile uint32_t *)(obj + RV_BUF_L), buf_r = *(volatile uint32_t *)(obj + RV_BUF_R);
+#if defined(FV_PASSTHROUGH)
+    (void)buf_l;
+    (void)buf_r;
+    ((update_fn)FW_REVERB_UPDATE)(obj);
+#elif defined(FV_DIAG_CLEAR)
+    if (FV->magic != FV_MAGIC && !obj[RV_BYPASS] && buf_l && buf_r) {
+        fv_init(buf_l, buf_r);
+        clear_step(BUFFER_SAMPLES / 2);
+    }
+    ((update_fn)FW_REVERB_UPDATE)(obj);
+#elif defined(FV_DIAG_MUTED)
+    if (obj[RV_BYPASS] || !buf_l || !buf_r)
+        return;
+    if (FV->magic != FV_MAGIC || FV->buf_l != buf_l || FV->buf_r != buf_r) {
+        fv_init(buf_l, buf_r);
+        FV->cleared = BUFFER_SAMPLES / 2;   /* not cleared: the output is muted */
+    }
+    freeverb_blocks(obj, 1);
+#else
+    if (FV->ready != FV_READY) {            /* still booting: the stock reverb */
+        ((update_fn)FW_REVERB_UPDATE)(obj);
+        return;
+    }
+    if (obj[RV_BYPASS] || !buf_l || !buf_r)
+        return;
+    if (FV->magic != FV_MAGIC || FV->buf_l != buf_l || FV->buf_r != buf_r)
+        fv_init(buf_l, buf_r);
+    if (FV->cleared < BUFFER_SAMPLES / 2) { /* clearing: silent, like the bypass */
+        clear_step(CLEAR_WORDS);
+        return;
+    }
+    freeverb_blocks(obj, 0);
+#endif
+}
+
+/* Pattern screen vtable slot 0x600403dc (update method 0x600e1f99; chained): the unit
+ * has booted, Freeverb may take over. */
+void mt_fv_pattern_update(void *screen, void *a1, void *a2, void *a3)
+{
+    if (FV->ready != FV_READY) {
+        FV->magic = 0;                      /* lay out and clear before the first block */
+        FV->ready = FV_READY;
+    }
+    ((screen_update_fn)mt_fv_next_pattern_update)(screen, a1, a2, a3);
+}
+
+/* replaces the Config menu constructor's last "bl 0x601183e8" (Licenses) at 0x601193e6
+ * (chained): a static constructor, so this runs at every start, before the audio. */
+void *mt_fv_last_item(void *node, void *parent, const char *label, const char *help,
+                      uint32_t type, const void *descriptor)
+{
+    FV->ready = 0;
+    FV->magic = 0;
+    return ((item_fn)mt_fv_next_last_item)(node, parent, label, help, type, descriptor);
 }
 
 /* ---- version text: Config shows 1.2.0-<FREEVERB_VERSION> --------------------------- */

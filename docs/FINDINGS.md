@@ -1278,6 +1278,36 @@ setting, as for FX Interpolation). This keeps everything else as it is:
   through the real block helpers and its output written to a WAV file for listening,
   before it goes near hardware.
 
+**Boot hang with RAM in `sdram_top`.** The first build of `patch/freeverb` kept 10 KB of
+state (mostly the predelay line) in `sdram_top`, written from the audio interrupt, and
+the unit stopped at the boot logo, before the project's progress bar, every time (with
+all reverb and delay sends at 0 as well); the pinhole recovery brought it back. The
+emulator tests (which start from the static constructors, not a real boot) passed. The
+same region holds colorsong's table in the reversed bundle without trouble, but colorsong
+only touches it once the project is loaded; ramdiag only checked it after the Pattern
+screen ran. A second build with the state on-chip (288 bytes in the OCRAM tail) and the predelay
+line in the stock reverb's own buffers hung the same way, while a build whose hook only
+calls the stock `update()` booted and played its reverb. So the hang comes from running
+Freeverb (its one-time 64 KB clear of the buffers, or its DSP) while the unit boots, not
+from the hook or `sdram_top`. Two diagnostics settled which part: the stock reverb plus
+the one-time 64 KB clear during boot booted fine; Freeverb's DSP running from boot with
+its output muted (no clear) hung (the screen faded to white after the update reached
+100 %, and the unit needed the pinhole to power on again). So running the heavier DSP in
+the audio interrupt while the unit boots breaks the boot; the emulator's stress runs
+(random settings including garbage, missing blocks, moved buffers, restarts) found no
+stray memory writes or runaway loops, which points at timing (about 76,000 instructions
+per block against the stock reverb's 34,000). The build that runs the stock reverb until
+the Pattern screen's update first runs, then clears the buffers over 8 blocks and
+switches, boots and plays (one unexplained crash during heavy editing, not reproduced).
+CPU on the device (Config's debug readout) with a pattern built to load it (every drum
+hit and all three synths, 8 voices each, sending fully to the reverb): 61 % average and
+84 % peak with the stock reverb, 66 % and 86 % with Freeverb. So Freeverb's extra cost is
+about 5 points on average and leaves headroom during playback; what breaks the boot is
+specific to running it while the unit starts, not steady load.
+
+The mixer's reverb mute (Master page 3) stops the reverb's input, not its return: on
+stock 1.2.0 a long tail keeps ringing after the channel is muted.
+
 `patch/freeverb` does this for the reverb: Freeverb (public domain) in place of the
 stock reverb, reading Size (`+0x54`), Damping (`+0x5c` = 1 - damping), Diffusion
 (`+0x58`, the setter clamps it to 0..0.85) and Predelay (`+0x6c`, 0..5000 samples) as
