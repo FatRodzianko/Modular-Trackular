@@ -38,8 +38,9 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   layer and widget library, screens, the Song screen, pattern and project file
   formats, the SD-card/FatFs API, the hardware lessons learned, the sequencer and FX
   timing, the Pattern screen's buttons, selection and undo, the Config menu, and a
-  map of all RAM with the regions free for patch state, and what disabling the
-  built-in NES games would free.
+  map of all RAM with the regions free for patch state, what disabling the
+  built-in NES games would free, and what adding a synth engine or custom step FX,
+  or swapping the master reverb or delay, would take.
   Function names
   with notes are in [ghidra/names_1.2.0.tsv](ghidra/names_1.2.0.tsv).
 - **Tools**: `.ptf` conversion and patching, Ghidra headless scripts, and a Unicorn

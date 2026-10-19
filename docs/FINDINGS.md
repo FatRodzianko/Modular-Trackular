@@ -1076,3 +1076,198 @@ constructor (`0x60082954`) initialises emulator globals at startup.
 Make `game_start_q` (`0x600d0aa0`) return without starting anything, the single path
 to the NES setup, and optionally hide the Games entries. The audio hook and the
 startup constructor can stay: without a game they do nothing. Not built yet.
+
+## 17. Synth engines: how models are built, and adding or swapping one
+
+Static analysis plus the slot-record check below; no engine has been run in the
+emulator (the synth host is created at runtime, after the static constructors).
+
+### Models and the registry
+
+Tracker+ has 3 synth slots (instruments 64-66, S1-S3); each slot runs one of 5 models
+(manual: ACD, FAT, VAP, WTFM, PERC) and loads a patch. Each model is a C++ class.
+`0x60140150` registers them at startup into a `std::unordered_map<unsigned,
+shared_ptr<descriptor>>` (insert `0x6012fd78`), keyed by model id:
+
+| Id | Model | Descriptor built by |
+|---|---|---|
+| 0 | "Midi out" | `0x60144b30` |
+| 1 | ACD | `0x60147d80` |
+| 2 | FAT | `0x6015c810` |
+| 3 | (not registered) | |
+| 4 | VAP | `0x6014dbf8` |
+| 5 | WTFM | `0x60161c38` |
+| 6 | PERC | `0x60155f48` |
+
+A descriptor is 0x38 bytes: the name (`std::string`) and two `std::function`s. For ACD
+the first holds the plain function `0x601482e0`, a very large function that builds the
+model's parameter descriptors (names such as "Saw Mix", value formatting through the
+fmt library, "{:.0f} st"); the second is a lambda (`0x60145e80`). The registry lives in
+a 0xb0-byte synth manager (`0x60126a28`, three hash maps) created by the audio setup
+`0x600b2118`, which also creates the synth host and stores it at app object
+`0x200170e0` + 8 + `0xac`.
+
+Notes reach the host through `seq_note_on_out_q` / `seq_note_off_out_q`
+(`0x600abb44` / `0x600abbe8`): with the synth flag set they call the host's virtual
+method `+0x20` (note on) with (note, velocity, slot). Macros and the other synth FX go
+through `synth_apply_fx_q` (section 12).
+
+### The slot record, and what stock firmware does with an unknown model
+
+The project holds one 0x40-byte record per slot at project `+0xd00`, `+0xd40`, `+0xd80`
+(`0x20204d00`...): the patch name (0x20 bytes at `+0x10`), the six Macro states
+(`+0x38`) and floats and indexes for the slot settings. `0x600b175c` copies a slot's
+live state into it. On project load `0x600b1858` (called from `0x600bce14`) checks each
+record: word `+8` below 5 (very likely the model: 5 models), word `+4` below 9 (very
+likely polyphony), gain at most 12 dB, panning and the two sends in range, Macro bytes
+not negative. A record that fails is replaced with the slot's defaults
+(`0x600b175c`). So a project saved with a sixth model, opened in stock 1.2.0, gets that
+slot reset to defaults: no crash, but the slot's settings are lost.
+
+### Adding an engine
+
+- **Registering it:** hook `0x60140150` (chained) and insert one more descriptor (id 3
+  or 7) with the patch's own factory. Or, to swap, give an existing id a descriptor
+  whose factory builds the new engine instead.
+- **The interface:** the new engine has to be a C++ object the host can drive: the
+  host's virtual calls (note on/off at `+0x20`, CC, pitch bend, the per-block render,
+  voice allocation, patch load/save) and the parameter descriptors the editor pages
+  read. None of that is mapped yet; it is the bulk of the work. The firmware was
+  built with GCC 10 and libstdc++ (`std::string`, `std::function`, `shared_ptr`,
+  `unordered_map`), whose layouts a patch would have to match.
+- **Flash:** not the limit. The MPU maps 16 MB of flash (section 8); the image is
+  1.6 MB.
+- **RAM:** the model factories allocate with `malloc_or_halt` from the heap, which
+  reaches its limit in heavy use (section 15). A new engine should keep its voice
+  state in a patch RAM region (`sdram_top`, 25 KB) or be no larger than the engine it
+  replaces, and its tables in flash.
+- **CPU:** the Config debug readout showed 53 % average and 62 % peak while playing a
+  pattern (section 15 has the method). An engine that replaces a stock one gives back
+  that model's share; one that adds a model adds to the total.
+- **Testing:** the emulator doesn't create the synth host, so engine work would need a
+  bigger harness or hardware tests from the start.
+
+### Swapping instead of adding
+
+A per-project setting (like FX Interpolation) that makes one stock model, or one slot,
+use the new engine keeps the project file a normal 1.2.0 project: the slot record
+still names a stock model, so stock firmware loads that stock model with its saved
+patch (it sounds different, but nothing is reset). The new engine's own patch (for an
+FM engine, a voice from a `.syx` bank) goes in a file in the project folder. The model
+list on the instrument page needs no new entry. The price: while swapped, that stock
+model isn't available in the project.
+
+### An FM engine (Dexed)
+
+Dexed's FM core comes from Google's music-synthesizer-for-android ("msfa",
+Apache-2.0); Dexed itself is GPL-3.0. Ports of the msfa core run on 600 MHz Cortex-M7
+boards (Teensy 4.x). For this repository (MIT, patches applied to Polyend's
+proprietary firmware) the Apache-2.0 core is the usable one; GPL code can't be
+combined with the stock firmware and distributed.
+
+## 18. Custom step FX
+
+### How FX ids flow
+
+- Storage: one byte of type and one of value per FX column, in the pattern (section
+  6). Types 1-42 are used (section 12).
+- The FX list: the 43-byte table at `0x60039ca4` maps list positions to types; names
+  are 0x24-byte entries at `0x6003be34`, by list position. 17 code sites use the list
+  table (literals at `0x600af0dc` ... `0x600e42bc`) and 3 the names (one is the data
+  pointer at `0x6003bd88`). Several loop to 0x2b (43).
+- Range and text: `fx_max` / `fx_min` (ITCM `0x3824` / `0x38ac`) and
+  `fx_value_text` (`0x600afb48`) switch on the type with a bounds check.
+- Playback: the FX pass in `seq_process_track` (ITCM) switches on types 1..37, other
+  types take the default path (section 12).
+
+### Stock firmware with a type it doesn't know (emulator, stock 1.2.0)
+
+Types 43, 60, 128 and 255, in FX1 and FX2, with and without a note, on a MIDI track, a
+synth slot and a sample track, through the real audio block for about 6 steps:
+
+| Where | Result |
+|---|---|
+| MIDI track | Ignored; the other FX on the step still sent |
+| Synth slot | Passed to `synth_apply_fx_q`, which ignores types it doesn't handle |
+| Sample track (no note) | Passed to `voice_apply_fx`, which falls through its bounds-checked switch |
+| `fx_max` / `fx_min` | 100 / 0 (the defaults) |
+| `fx_value_text` | The plain number ("  0") |
+| Pattern grid (`patview_fill_rows_q`) | The type isn't in the list table, so the cell shows `----`, like an empty one |
+
+So a pattern with a new FX type plays on stock firmware as if that FX weren't there,
+and nothing crashed. The pattern is saved as raw bytes, so the type survives a save in
+stock firmware. Not checked: what the stock FX picker does when the cursor is on such a
+cell.
+
+### Ways to add one
+
+- **New type ids (43 and up):** safe on stock (above). The patch would extend the list
+  and name tables (copies in patch flash, the 20 references repointed, the 43-entry
+  loop bounds raised), give the new types a range (`fx_max` / `fx_min` are in ITCM, so
+  either an ITCM-aware patcher or the defaults 0..100), and implement what they do.
+- **What they can do from a per-block hook** (as `patch/interpolate` does): anything
+  that reads the step's FX and acts on MIDI, synth Macros or sample-voice setters
+  between steps, for example LFOs or slides on a CC.
+- **What needs the sequencer itself:** FX that change when or whether a note plays
+  (ratchets, strums, conditional triggers) have to hook `seq_process_track` in ITCM,
+  as planned for negative Micro-move (section 12): not built yet.
+
+## 19. Master reverb and delay: the audio graph, and swapping an effect
+
+### The audio graph
+
+The audio engine is built like the Teensy Audio Library: audio objects with a virtual
+`update()`, linked in a list from `0x20026e50`, exchanging blocks of 128 16-bit
+samples (a block is 4 + 256 bytes). Once per audio block the engine's render (ITCM
+`0x3bac`, called from `app_audio_block`) stores the output buffers and runs
+`0x6003061c`, which calls `update()` on every active object in the list (`+4` active,
+`+0x10` next). The block helpers next to it: allocate `0x60030478`, release
+`0x60030524`, transmit `0x60030574`, receive read-only `0x600305bc`, receive
+writable `0x600305d4`. There are 182 objects, all built by the static constructors
+(the emulator has the whole graph); most are members of the engine object
+`0x20017b08`. The build has no RTTI, so the classes were told apart by what their
+`update()` does.
+
+### The two send effects
+
+| | Delay | Reverb |
+|---|---|---|
+| Object | `0x20018fc0` (engine + `0x14b8`) | `0x20019014` (engine + `0x150c`) |
+| Vtable / `update()` | `0x60042fec` / `0x60032404` | `0x60042f94` / `0x60031e5c` |
+| DSP | `0x600322b0` (integer) | `0x600ff800` (float) |
+| Inputs / outputs | 1 (the send) / 2 (stereo return) | 2 / 2, processed in place |
+| Algorithm | three ring buffers of 2^18 16-bit samples (about 5.9 s), feedback (`+0x2c`), ping-pong (`+0x2e`), a one-pole filter (`+0x30`..`+0x38`) | a plate-style network: fixed taps in a 16K-sample 16-bit ring buffer, some taps modulated by an LFO, damping filters |
+| Memory | the three buffers (about 1.5 MB of SDRAM), allocated at runtime | buffers in SDRAM at `0x83fc258c` and `0x80262000` |
+| Bypass | `+0x2d` | `+0x80` |
+
+The reverb's float settings sit at object `+0x50`..`+0x80` (defaults 0.5, 0.8, 0.1,
+0.7, 0.625, 0.2, 5.0). Which Master page parameter writes which field isn't mapped
+yet; the page labels are Size, Damping, Predelay and Diffusion for the reverb and
+PingPong, Sync, Rate, Time, Feedback and Filter for the delay (manual 10.3, 10.4).
+
+### Swapping one
+
+Each effect is a single object with its own vtable in flash, so a patch can replace
+its `update()` with a word hook on the vtable slot (`0x60042f94` or `0x60042fec`,
+chained), no ITCM patching needed. The replacement does what a Teensy-style object
+does (receive the input blocks, process 128 samples, transmit, release) with its own
+DSP, or calls the stock `update()` when the swap is off (for example a per-project
+setting, as for FX Interpolation). This keeps everything else as it is:
+
+- **Project files:** nothing changes in them; stock firmware opens the project with
+  the stock effect.
+- **Controls:** the Master page still writes the stock object's settings. The new
+  effect can read them and give them its own meaning (Size, Damping, Predelay,
+  Diffusion for a reverb; Time, Feedback, Filter for a delay) once the fields are
+  mapped.
+- **Memory:** while swapped the stock DSP doesn't run, so its buffers (1.5 MB of SDRAM
+  for the delay, the reverb's ring buffers) can hold the new effect's state; no heap
+  needed.
+- **CPU:** the new effect replaces the stock one's cost.
+- **Testing:** the emulator has both objects, so a replacement can be fed test blocks
+  through the real block helpers and its output written to a WAV file for listening,
+  before it goes near hardware.
+
+Open-source algorithms with licenses that fit (MIT or public domain) include Freeverb,
+the Dattorro plate, CloudSeed, and the reverbs and delays in Mutable Instruments'
+eurorack code.

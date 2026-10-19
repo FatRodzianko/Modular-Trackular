@@ -222,3 +222,27 @@
 600832a8	nes_video_init_q	"video initialization failed for %s at %dx%d"
 6010985c	game_fb_init_q	game screen buffer at SDRAM 0x83fd99e0 (256 x 240)
 60109918	game_fb_copy_q	copies game frames from 0x83fd99e0
+60140150	synth_models_register	startup: registers the synth models by id (0 Midi out, 1 ACD, 2 FAT, 4 VAP, 5 WTFM, 6 PERC)
+6012fd78	synth_model_map_insert	(map, id, descriptor): unordered_map<unsigned, shared_ptr<descriptor>> insert
+60144b30	synth_model_midi_out_desc	builds the 0x38-byte descriptor for model 0 (Midi out)
+60147d80	synth_model_acd_desc	builds the descriptor for model 1 (ACD): name, factory 0x601482e0, lambda 0x60145e80
+6015c810	synth_model_fat_desc	model 2 (FAT) descriptor
+6014dbf8	synth_model_vap_desc	model 4 (VAP) descriptor
+60161c38	synth_model_wtfm_desc	model 5 (WTFM) descriptor
+60155f48	synth_model_perc_desc	model 6 (PERC) descriptor
+60126a28	synth_manager_new	0xb0-byte synth manager with three hash maps (one is the model registry)
+600b2118	synth_audio_setup_q	creates the synth manager and host (app+8+0xac), sets up the 3 slots
+600b175c	synth_slot_record_store	(app, slot, record): live slot state -> 0x40-byte project record (project+0xd00+0x40*slot)
+600b1858	synth_slot_record_check	on project load: record fields out of range (model >= 5, polyphony >= 9, ...) -> slot defaults
+600b0e04	synth_host_get	(app+8): the synth host object (*(+0xac) + 8)
+600ac3d0	seq_play_selection	(seq, loop): Preview: selection -> +0x20..0x23, only selected tracks enabled, +0x1e = 1
+6003061c	audio_update_all	calls update() on every active audio object in the list at 0x20026e50 (Teensy-style)
+60030478	audio_block_allocate_q	Teensy-style audio block allocate
+60030524	audio_block_release_q	Teensy-style audio block release
+60030574	audio_transmit_q	(obj, block, output index)
+600305bc	audio_receive_read_only_q	(obj, input index)
+600305d4	audio_receive_writable_q	(obj, input index)
+60032404	master_delay_update	delay object 0x20018fc0 (engine+0x14b8): mono send in, stereo out
+600322b0	master_delay_process	three 2^18-sample int16 ring buffers, feedback +0x2c, ping-pong +0x2e, one-pole filter
+60031e5c	master_reverb_update	reverb object 0x20019014 (engine+0x150c): stereo in place, bypass +0x80
+600ff800	master_reverb_process	plate-style network, 16K-sample int16 ring buffer in SDRAM, LFO-modulated taps
