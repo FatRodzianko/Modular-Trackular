@@ -3,6 +3,11 @@
   "description": "Diagnostic for stock 1.2.0: fills RAM regions no firmware code refers to with a pattern once the Pattern screen runs, then reports how much stays untouched and the heap's high-water mark (Config > Project Settings > RAM diag, and ramdiag.txt). Install on its own: it uses the same hook sites as humanize.",
   "firmware": "TrackerPlus 1.2.0",
   "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "standalone": true,
+  "ram_startup": true,
+  "ram_regions": [
+    "ocram_tail"
+  ],
   "bin": "build/ramdiag.bin",
   "sym": "build/ramdiag.sym",
   "rel": "build/ramdiag.rel",
@@ -43,7 +48,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-RD1"
+      "note": "version text 1.2.0-RD2"
     }
   ]
 }

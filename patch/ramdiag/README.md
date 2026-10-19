@@ -4,7 +4,7 @@ A diagnostic patch for Polyend Tracker+ firmware 1.2.0. It checks on the device
 whether RAM regions that no firmware code refers to stay untouched while you use the
 Tracker+, and how far the heap grows. The answers decide where future patches can keep
 their state ([docs/FINDINGS.md](../../docs/FINDINGS.md), section 15). Config shows the
-firmware version as `1.2.0-RD1`.
+firmware version as `1.2.0-RD2`.
 
 It's a tool, not a feature: install it on its own on top of stock firmware, run one
 test session, then go back to your usual firmware. It can't be combined with humanize
@@ -29,7 +29,7 @@ Plus the heap's high-water mark: how far the heap has grown above its start, out
 
 1. Back up the SD card. Test with copies of your projects.
 2. Put the stock `TrackerPlus_1.2.0.ptf` and the diagnostic build in `/Firmware`, and
-   install the diagnostic through Config → Firmware. Config shows `1.2.0-RD1`.
+   install the diagnostic through Config → Firmware. Config shows `1.2.0-RD2`.
 3. Power on, open a project and go to the Pattern screen. That fills the regions with
    the test pattern.
 4. In the same session (no power cycle), use as much of the Tracker+ as you can:
@@ -62,8 +62,9 @@ Nothing happens at power-on except resetting its own state, so even if a region 
 out to be in use, Config stays reachable to switch back. Each region gets a pattern
 that depends on the address (`address XOR 0x5ac3a53c`), so zeroed, copied or shifted
 data all show as changed. The ITCM tail is written and read with aligned 4-byte
-accesses only (the MPU makes it Device memory). Its own state (under 256 bytes) is at
-`0x20205000`, in the OCRAM tail, which stock firmware doesn't use. The report is
+accesses only (the MPU makes it Device memory). Its own state (176 bytes) is at
+`0x20205000`, in the OCRAM tail, which stock firmware doesn't use (its spec names
+only that region). The report is
 written in pieces of at most 256 bytes, from the screens' update methods, like
 colorsong and humanize do. The code is 1,553 bytes and moves wherever the patcher
 places it (`prebuilt/ramdiag.rel`).
@@ -73,7 +74,7 @@ places it (`prebuilt/ramdiag.rel`).
 No compiler needed (the compiled patch is in `prebuilt/`):
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/ramdiag/patch.json build/TrackerPlus_RD1.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/ramdiag/patch.json build/TrackerPlus_RD2.ptf
 ```
 
 From source, with the Arm GNU Toolchain: `patch/ramdiag/build.sh`.
@@ -81,7 +82,7 @@ From source, with the Arm GNU Toolchain: `patch/ramdiag/build.sh`.
 Emulator test (`pip install unicorn capstone numpy`):
 
 ```bash
-python tools/emu/test_ramdiag.py build/TrackerPlus_RD1.ptf
+python tools/emu/test_ramdiag.py build/TrackerPlus_RD2.ptf
 ```
 
 It builds the Config menu with the stock constructor, checks the fill (every region,

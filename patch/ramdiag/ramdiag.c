@@ -22,13 +22,13 @@
  *  - ramdiag.txt in the card's root: written when Config opens and about once a
  *    minute on the Pattern and Config screens, so the last numbers survive a freeze.
  *
- * Its own state (under 256 bytes) lives at the start of the OCRAM tail (0x20205000),
- * which nothing uses on stock firmware.
+ * Its own state (under 256 bytes) is its .mt_ram, placed by the patcher in the OCRAM
+ * tail, which it doesn't test.
  */
 #include <stdint.h>
 
 #ifndef RAMDIAG_VERSION
-#define RAMDIAG_VERSION "RD1"
+#define RAMDIAG_VERSION "RD2"
 #endif
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */
@@ -88,7 +88,6 @@ static uint32_t pattern(uint32_t addr)
 
 /* ---- state ------------------------------------------------------------------------- */
 
-#define RD_BASE             0x20205000u     /* OCRAM tail: unused on stock firmware */
 #define RD_MAGIC            0x31444152u     /* "RAD1" */
 #define TEXT                20u
 
@@ -104,7 +103,11 @@ struct rd_state {
     uint32_t in_config;                     /* the last update was the Config screen's */
     char text[LINES][TEXT];                 /* what the RAM diag menu items show */
 };
-#define RD ((volatile struct rd_state *)RD_BASE)
+/* This patch's RAM (.mt_ram, neither loaded nor zeroed; tools/patch_ptf.py places it in
+ * a free RAM region, never one this patch tests). Used from the Config menu constructor
+ * at startup. */
+static struct rd_state rd_state_ram __attribute__((section(".mt_ram")));
+#define RD ((volatile struct rd_state *)&rd_state_ram)
 _Static_assert(sizeof(struct rd_state) <= 256, "ramdiag state must stay small");
 
 void *memset(void *dst, int c, unsigned n);

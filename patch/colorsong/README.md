@@ -3,7 +3,7 @@
 A patch for Polyend Tracker+ firmware 1.2.0. Each filled block on the Song screen
 (one track in one pattern) gets a color from its content, so you can follow the same
 material through a song at a glance. With the patch installed, Config shows the
-firmware version as `1.2.0-c10`.
+firmware version as `1.2.0-c11`.
 
 ![The same song's Song screen on stock firmware (left) and with colorsong (right)](images/firmware_comparison.png)
 
@@ -47,11 +47,12 @@ shades. Rendered in the emulator with the firmware's own Song screen drawing cod
 
 ## How it works
 
-The patch code (4,149 bytes) goes right after the stock image (`0x601bab80`), or
-after the patches listed before it in a bundle; the patcher moves its 6 address
-words to match (`prebuilt/colorsong.rel`). Its state, a 12,208-byte table, lives in
-the free tail of the 32 KB on-chip OCRAM (`0x20205000`–`0x20207fbf`), which nothing
-else in the firmware uses.
+The patch code (4,185 bytes) goes right after the stock image (`0x601bab80`), or
+after the patches listed before it in a bundle. Its state, a 12,208-byte table, gets
+RAM from the patcher, normally the free tail of the 32 KB on-chip OCRAM
+(`0x20205000` on its own), which nothing else in the firmware uses. The patcher moves
+the code's 6 code-address words and 28 RAM-address words to match
+(`prebuilt/colorsong.rel`).
 Firmware addresses and structures are described in [docs/FINDINGS.md](../../docs/FINDINGS.md).
 
 | Hook | Where | What |
@@ -95,14 +96,14 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.json build/TrackerPlus_c10.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.json build/TrackerPlus_c11.ptf
 ```
 
 With Humanize in one firmware (`patch/all`; to choose your own set of patches, see
 "Choosing patches" in [docs/PATCHING.md](../../docs/PATCHING.md)):
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT5.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MT6.ptf
 ```
 
 To build the patch code from source, you need the Arm GNU Toolchain
@@ -112,16 +113,16 @@ To build the patch code from source, you need the Arm GNU Toolchain
 
 ```bash
 patch/colorsong/build.sh
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.json build/TrackerPlus_c10.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.json build/TrackerPlus_c11.ptf
 ```
 
 For troubleshooting your own changes there is a pass-through build, in which every
 hook only calls the original (stock colors, no table, no file I/O, version text
-`1.2.0-p10`). If a change freezes the unit, this tells you whether the hooking or
+`1.2.0-p11`). If a change freezes the unit, this tells you whether the hooking or
 the logic is at fault:
 
 ```bash
-CS_DEFS='-DCOLORSONG_VERSION="p10" -DCOLORSONG_PASSTHROUGH' patch/colorsong/build.sh
+CS_DEFS='-DCOLORSONG_VERSION="p11" -DCOLORSONG_PASSTHROUGH' patch/colorsong/build.sh
 ```
 
 ### Emulator tests
@@ -131,9 +132,9 @@ capstone numpy`). Project folders are copies of folders from the SD card's
 `Projects/`.
 
 ```bash
-python tools/emu/test_colorsong.py build/TrackerPlus_c10.ptf out/test_colorsong.png
-python tools/emu/test_rescan.py build/TrackerPlus_c10.ptf "path/to/<project A>" "path/to/<project B>"
-python tools/emu/song_grid.py build/TrackerPlus_c10.ptf "path/to/<project A>" out/song.png
+python tools/emu/test_colorsong.py build/TrackerPlus_c11.ptf out/test_colorsong.png
+python tools/emu/test_rescan.py build/TrackerPlus_c11.ptf "path/to/<project A>" "path/to/<project B>"
+python tools/emu/song_grid.py build/TrackerPlus_c11.ptf "path/to/<project A>" out/song.png
 ```
 
 - `test_colorsong.py` runs the patched firmware on synthetic patterns and checks 21
@@ -154,9 +155,9 @@ python tools/emu/song_grid.py build/TrackerPlus_c10.ptf "path/to/<project A>" ou
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy
-`TrackerPlus_c10.ptf` to `/Firmware` on the SD card next to the stock
-`TrackerPlus_1.2.0.ptf`, then Config → Firmware → `TrackerPlus_c10.ptf`. Config should
-show `1.2.0-c10 Build 1504`.
+`TrackerPlus_c11.ptf` to `/Firmware` on the SD card next to the stock
+`TrackerPlus_1.2.0.ptf`, then Config → Firmware → `TrackerPlus_c11.ptf`. Config should
+show `1.2.0-c11 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. The `colorsong.bin` files can
 stay (stock firmware ignores them) or be deleted.

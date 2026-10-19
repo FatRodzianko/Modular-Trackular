@@ -3,6 +3,7 @@
   "description": "Pattern screen button (More, More, button 3, record mode) that adds small random Volume/Velocity and Micro-move FX to the notes in the selection, or the cursor's track; settings in Config > Project Settings > Humanize",
   "firmware": "TrackerPlus 1.2.0",
   "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "ram_startup": true,
   "bin": "build/humanize.bin",
   "sym": "build/humanize.sym",
   "rel": "build/humanize.rel",
@@ -67,7 +68,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-hz5"
+      "note": "version text 1.2.0-hz6"
     }
   ]
 }

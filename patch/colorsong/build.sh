@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build colorsong into build/colorsong.{elf,bin,sym}.
-# Variants: CS_DEFS='-DCOLORSONG_VERSION="p10" -DCOLORSONG_PASSTHROUGH' (diagnostic: hooks only call the originals).
+# Variants: CS_DEFS='-DCOLORSONG_VERSION="p11" -DCOLORSONG_PASSTHROUGH' (diagnostic: hooks only call the originals).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -35,15 +35,23 @@ link() {                               # link <linker script> <elf> <map>
         -Wl,-Map="$3" "$OUT/shim.o" "$OUT/colorsong.o" -o "$2"
 }
 link "$HERE/link.ld" "$OUT/colorsong.elf" "$OUT/colorsong.map"
-"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary "$OUT/colorsong.elf" "$OUT/colorsong.bin"
-# Relocation table: link again 64 KB higher and compare, so tools/patch_ptf.py can place
-# the patch anywhere (tools/mkrel.py).
-BASE=$(sed -n 's/.*ORIGIN = \(0x[0-9A-Fa-f]*\).*/\1/p' "$HERE/link.ld")
+"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/colorsong.elf" "$OUT/colorsong.bin"
+# Relocation table: link again with the code 64 KB higher, and again with the RAM
+# (.mt_ram) 64 KB higher, and compare, so tools/patch_ptf.py can place the code and
+# the RAM anywhere (tools/mkrel.py).
+BASE=$(sed -n 's/.*PATCH (rx) *: ORIGIN = \(0x[0-9A-Fa-f]*\).*/\1/p' "$HERE/link.ld")
 SHIFT=0x10000
 sed "s/ORIGIN = $BASE/ORIGIN = $(printf '0x%X' $((BASE + SHIFT)))/" "$HERE/link.ld" > "$OUT/link_shifted.ld"
 link "$OUT/link_shifted.ld" "$OUT/colorsong_shifted.elf" "$OUT/colorsong_shifted.map"
-"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary "$OUT/colorsong_shifted.elf" "$OUT/colorsong_shifted.bin"
-"$PYTHON" "$ROOT/tools/mkrel.py" "$OUT/colorsong.bin" "$OUT/colorsong_shifted.bin" "$BASE" "$SHIFT" "$OUT/colorsong.rel"
+"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/colorsong_shifted.elf" "$OUT/colorsong_shifted.bin"
+RAM=$(sed -n 's/.*RAM (rw) *: ORIGIN = \(0x[0-9A-Fa-f]*\).*/\1/p' "$HERE/link.ld")
+sed "s/ORIGIN = $RAM/ORIGIN = $(printf '0x%X' $((RAM + SHIFT)))/" "$HERE/link.ld" > "$OUT/link_ram_shifted.ld"
+link "$OUT/link_ram_shifted.ld" "$OUT/colorsong_ram_shifted.elf" "$OUT/colorsong_ram_shifted.map"
+"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/colorsong_ram_shifted.elf" "$OUT/colorsong_ram_shifted.bin"
+RAM_START=0x$("$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/colorsong.elf" | sed -n 's/^\([0-9a-f]*\) . __mt_ram_start$/\1/p')
+RAM_END=0x$("$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/colorsong.elf" | sed -n 's/^\([0-9a-f]*\) . __mt_ram_end$/\1/p')
+"$PYTHON" "$ROOT/tools/mkrel.py" "$OUT/colorsong.bin" "$OUT/colorsong_shifted.bin" "$BASE" "$SHIFT" "$OUT/colorsong.rel" \
+    --ram "$OUT/colorsong_ram_shifted.bin" "$RAM_START" $((RAM_END - RAM_START))
 "$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/colorsong.elf" | grep -E ' [TtRr] ' > "$OUT/colorsong.sym"
 "$ARM_GCC_BIN/arm-none-eabi-size" "$OUT/colorsong.elf"
 cat "$OUT/colorsong.sym"

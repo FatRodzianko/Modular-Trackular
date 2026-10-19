@@ -20,7 +20,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   FX, so programmed parts sound less mechanical. Works in record mode, and Undo
   reverts it. Range and default velocities are set per project under Config →
   Project Settings → Humanize. Tested on hardware. See [patch/humanize/README.md](patch/humanize/README.md).
-- **all**: colorsong and humanize in one firmware (version text `1.2.0-MT5`),
+- **all**: colorsong and humanize in one firmware (version text `1.2.0-MT6`),
   from [patch/all/patch.json](patch/all/patch.json).
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
@@ -67,9 +67,9 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
 | `tools/ptf.py` | Read / convert / re-encode `.ptf` (Intel HEX), with a byte-exact round-trip check |
-| `tools/patch_ptf.py` | Apply a patch or bundle spec to a stock `.ptf`: places the patches in the order listed and relocates them (stock hash + original-byte checks, gap-free append) |
-| `tools/mkrel.py` | Make a patch's relocation table from two links of its code (used by the build scripts) |
-| `tools/test_layout.py` | Check the patcher's placement and relocation for each patch alone and both bundle orders |
+| `tools/patch_ptf.py` | Apply a patch or bundle spec to a stock `.ptf`: places the patches in the order listed, assigns their RAM and relocates them (stock hash + original-byte checks, gap-free append) |
+| `tools/mkrel.py` | Make a patch's relocation table (code and RAM addresses) from three links of it (used by the build scripts) |
+| `tools/test_layout.py` | Check the patcher's code and RAM placement and relocation for each patch alone and both bundle orders |
 | `tools/thumbdis.py` | Quick Thumb disassembly with literal-pool values and strings |
 | `tools/movw_refs.py` | Find literal and MOVW/MOVT references to an address |
 | `tools/vtables.py` | Find C++ vtables and list their method pointers |
@@ -83,6 +83,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/test_humanize.py` | humanize button, edit-rule, Config menu and settings-file tests on the patched firmware |
 | `tools/emu/seq_timing.py` | Run the stock sequencer on test patterns and print the MIDI it sends, with timing |
 | `tools/emu/check_version.py` | Print the version text a `.ptf` would show |
+| `tools/emu/layout.py` | Read where the patcher put each patch's RAM (`<firmware>.map.json`), for the tests |
 
 Local-only folders (ignored by git): `work/` (converted images, exports), `out/`
 (renders), `build/` (patched `.ptf` files), `patch/*/build/`, `ghidra/projects/`.
@@ -118,8 +119,8 @@ Emulator examples (a project folder is a copy of one from the SD card's
 
 ```bash
 python tools/emu/song_grid.py TrackerPlus_1.2.0.ptf "path/to/Projects/User/<project>" out/song.png
-python tools/emu/test_colorsong.py build/TrackerPlus_c10.ptf out/test_colorsong.png
-python tools/emu/test_rescan.py build/TrackerPlus_c10.ptf "path/to/<project A>" "path/to/<project B>"
+python tools/emu/test_colorsong.py build/TrackerPlus_c11.ptf out/test_colorsong.png
+python tools/emu/test_rescan.py build/TrackerPlus_c11.ptf "path/to/<project A>" "path/to/<project B>"
 ```
 
 ## Hard-won rules
@@ -127,7 +128,7 @@ python tools/emu/test_rescan.py build/TrackerPlus_c10.ptf "path/to/<project A>" 
 - Test every patch in the emulator first, with the emulator mapping **only the memory
   the device has** (see FINDINGS section 11: a table at a non-existent address froze
   the unit).
-- Keep version markers to 9 characters (`1.2.0-c10`). Longer text didn't show in
+- Keep version markers to 9 characters (`1.2.0-c11`). Longer text didn't show in
   Config.
 - Do SD I/O only where the stock firmware does (a screen's update method), in pieces
   of at most 256 bytes.

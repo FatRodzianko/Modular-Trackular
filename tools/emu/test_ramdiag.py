@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fakefs import FakeFS  # noqa: E402
+from layout import patch_ram  # noqa: E402
 from machine import Machine  # noqa: E402
 
 MENU_CTOR, ATEXIT = 0x60118ACC, 0x600A3594
@@ -30,7 +31,7 @@ PATTERN_UPDATE_SLOT, PATTERN_UPDATE = 0x600403DC, 0x600E1F98
 CONFIG_UPDATE_SLOT, CONFIG_UPDATE = 0x6003B5F8, 0x600C6474
 CLOCK = 0x20027D18
 HEAP_BREAK, HEAP_START = 0x2002FB9C, 0x2002FC68
-RD = 0x20205000
+RD = 0                              # ramdiag's state: from the firmware's .map.json
 RD_MAGIC = 0x31444152
 REGIONS = [("DTCM above heap", 0x20051C68, 0x20053000), ("SDRAM top", 0x83FF9BF0, 0x84000000),
            ("ITCM tail", 0x0001FB38, 0x00020000), ("DTCM after audio", 0x200094B8, 0x20009800)]
@@ -50,6 +51,8 @@ def pattern(a: int) -> int:
 
 
 def main() -> int:
+    global RD
+    RD = patch_ram(Path(sys.argv[1]), "ramdiag")
     m = Machine(Path(sys.argv[1]))
     fs = FakeFS(m, Path("."))
     clock_ms = [0]

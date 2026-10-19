@@ -50,6 +50,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
+from layout import patch_ram  # noqa: E402
 from machine import Machine  # noqa: E402
 from song_grid import PATTERN_DATA_SIZE  # noqa: E402
 
@@ -71,9 +72,9 @@ UNDO_SLOT = 0x3030
 CUR_PATTERN = 0x202046C8
 CHANGED = FM + 0x4CA                # + pattern number
 STOCK_HANDLERS = {0: 0x600DFE65, 1: 0x600DFDD1, 7: 0x600E2A45}
-HZ = 0x20207FC0                     # humanize state: magic, session, value[4], saved[4], ...
+HZ = 0                              # humanize state (magic, session, value[4], ...): from the .map.json
 HZ_MAGIC = 0x5A48544D
-HZ_VALUE = HZ + 8                   # range-1, volume (0 Off / 1 On), MIDI-1, sample-1
+HZ_VALUE = 0                        # HZ + 8: range-1, volume (0 Off / 1 On), MIDI-1, sample-1
 MENU_CTOR = 0x60118ACC
 ATEXIT = 0x600A3594
 PROJECT_SETTINGS = 0x20028714
@@ -279,7 +280,10 @@ def check_rules(before: bytes, after: bytes, inside, p: Params = DEFAULTS) -> tu
 
 
 def main() -> int:
+    global HZ, HZ_VALUE
     ptf = Path(sys.argv[1])
+    HZ = patch_ram(ptf, "humanize")
+    HZ_VALUE = HZ + 8
     r = Rig(ptf)
     m = r.m
 

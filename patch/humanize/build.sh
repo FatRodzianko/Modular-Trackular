@@ -34,15 +34,23 @@ link() {                               # link <linker script> <elf> <map>
         -Wl,-Map="$3" "$OUT/humanize.o" -o "$2"
 }
 link "$HERE/link.ld" "$OUT/humanize.elf" "$OUT/humanize.map"
-"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary "$OUT/humanize.elf" "$OUT/humanize.bin"
-# Relocation table: link again 64 KB higher and compare, so tools/patch_ptf.py can place
-# the patch anywhere (tools/mkrel.py).
-BASE=$(sed -n 's/.*ORIGIN = \(0x[0-9A-Fa-f]*\).*/\1/p' "$HERE/link.ld")
+"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/humanize.elf" "$OUT/humanize.bin"
+# Relocation table: link again with the code 64 KB higher, and again with the RAM
+# (.mt_ram) 64 KB higher, and compare, so tools/patch_ptf.py can place the code and
+# the RAM anywhere (tools/mkrel.py).
+BASE=$(sed -n 's/.*PATCH (rx) *: ORIGIN = \(0x[0-9A-Fa-f]*\).*/\1/p' "$HERE/link.ld")
 SHIFT=0x10000
 sed "s/ORIGIN = $BASE/ORIGIN = $(printf '0x%X' $((BASE + SHIFT)))/" "$HERE/link.ld" > "$OUT/link_shifted.ld"
 link "$OUT/link_shifted.ld" "$OUT/humanize_shifted.elf" "$OUT/humanize_shifted.map"
-"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary "$OUT/humanize_shifted.elf" "$OUT/humanize_shifted.bin"
-"$PYTHON" "$ROOT/tools/mkrel.py" "$OUT/humanize.bin" "$OUT/humanize_shifted.bin" "$BASE" "$SHIFT" "$OUT/humanize.rel"
+"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/humanize_shifted.elf" "$OUT/humanize_shifted.bin"
+RAM=$(sed -n 's/.*RAM (rw) *: ORIGIN = \(0x[0-9A-Fa-f]*\).*/\1/p' "$HERE/link.ld")
+sed "s/ORIGIN = $RAM/ORIGIN = $(printf '0x%X' $((RAM + SHIFT)))/" "$HERE/link.ld" > "$OUT/link_ram_shifted.ld"
+link "$OUT/link_ram_shifted.ld" "$OUT/humanize_ram_shifted.elf" "$OUT/humanize_ram_shifted.map"
+"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/humanize_ram_shifted.elf" "$OUT/humanize_ram_shifted.bin"
+RAM_START=0x$("$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/humanize.elf" | sed -n 's/^\([0-9a-f]*\) . __mt_ram_start$/\1/p')
+RAM_END=0x$("$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/humanize.elf" | sed -n 's/^\([0-9a-f]*\) . __mt_ram_end$/\1/p')
+"$PYTHON" "$ROOT/tools/mkrel.py" "$OUT/humanize.bin" "$OUT/humanize_shifted.bin" "$BASE" "$SHIFT" "$OUT/humanize.rel" \
+    --ram "$OUT/humanize_ram_shifted.bin" "$RAM_START" $((RAM_END - RAM_START))
 "$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/humanize.elf" | grep -E ' [TtRr] ' > "$OUT/humanize.sym"
 "$ARM_GCC_BIN/arm-none-eabi-size" "$OUT/humanize.elf"
 cat "$OUT/humanize.sym"

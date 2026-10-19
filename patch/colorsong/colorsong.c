@@ -100,14 +100,12 @@ static uint32_t counted_fx(uint32_t type)
     return type;
 }
 
-/* ---- fingerprint table in the free tail of OCRAM ------------------------------
- * The unit's only on-chip OCRAM is the one FlexRAM bank configured as OCRAM: 32 KB at
- * 0x20200000 (the firmware's OCRAM .bss ends at 0x20204f4c, nothing else references
- * the rest). Nothing exists at 0x20280000 on this unit: an access there bus-faults
- * and freezes the device. Normal cacheable memory (MPU region 7).
+/* ---- fingerprint table: this patch's RAM ---------------------------------------
+ * The table lives in .mt_ram, which is neither loaded nor zeroed: tools/patch_ptf.py
+ * places it in one of the free RAM regions (FINDINGS section 15; alone or first, the
+ * OCRAM tail at 0x20205000, Normal cacheable memory). At power-on it holds whatever
+ * the RAM held, hence the magic check.
  */
-#define FP_BASE         0x20205000u
-#define FP_LIMIT        0x20207FC0u     /* the last 64 bytes of the 32 KB OCRAM bank are humanize's */
 #define FP_MAGIC 0x48534F4Cu        /* "LOSH": a table in the current layout */
 #define FP_SCAN_DONE 0xFFu
 
@@ -163,8 +161,8 @@ static void colors_load(void);          /* saved colors (defined with the layout
 static void colors_save(void);
 #endif
 
-#define FP ((struct fp_table *)FP_BASE)
-_Static_assert(FP_BASE + sizeof(struct fp_table) <= FP_LIMIT, "fingerprint table must fit in OCRAM");
+static struct fp_table fp_table_ram __attribute__((section(".mt_ram")));
+#define FP (&fp_table_ram)
 
 /* ---- small helpers ----------------------------------------------------------- */
 /* GCC may emit memset calls for zeroed locals even in freestanding mode. */
@@ -939,6 +937,6 @@ void mt_block_color(uint32_t theme_rgb, const uint8_t *ctrl, uint32_t row, uint3
 
 /* ---- version text: Config shows 1.2.0-<COLORSONG_VERSION> ---------------------- */
 #ifndef COLORSONG_VERSION
-#define COLORSONG_VERSION "c10"
+#define COLORSONG_VERSION "c11"
 #endif
 const char mt_version_fmt[] = "%d.%d.%d-" COLORSONG_VERSION;

@@ -24,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fakefs import FILEMAN, FakeFS  # noqa: E402
+from layout import patch_ram  # noqa: E402
 from machine import Machine  # noqa: E402
 from song_grid import (MASK_HI, MASK_LO, PATTERN_DATA_SIZE, PLAYLIST, SAVE_PATH_USAGE_CALL,  # noqa: E402
                        SONG_GRID_DRAW, bl_target, build_song_control)
@@ -39,7 +40,8 @@ PROJECT_PATTERN_COPY_CALL = 0x601145CE  # bl file_copy_step in the project-open 
 FILE_COPY_STEP = 0x600C4578
 CUR_PATTERN = 0x202046C8
 CUR_PATTERN_BUF_HOLDER = 0x20017274 + 0x14
-FP_TABLE = 0x20205000                 # colorsong table (free tail of the 32 KB OCRAM)
+FP_TABLE = 0x20205000                 # colorsong table: set from the firmware's .map.json in main
+FP_TABLE_SIZE = 12208
 FP_PATTERNS = FP_TABLE + 0x220         # table layout: pat[256] after header + family registry
 FP_PATTERN_SIZE = 36                   # mask u16, valid u8, pad u8, key u16[16]
 FILE_PLAYLIST, FILE_LO, FILE_HI = 0x10, 0x318, 0x642   # project.mt offsets (lo[p] at +p)
@@ -113,7 +115,7 @@ class Rig:
 
     def power_on(self, seed=1):
         rnd = random.Random(seed)
-        self.m.write(FP_TABLE, bytes(rnd.randrange(256) for _ in range(0x3000)))
+        self.m.write(FP_TABLE, bytes(rnd.randrange(256) for _ in range(FP_TABLE_SIZE)))
 
     def load_project(self, project: Path, name: str, current: int | None = None, edit=None):
         """State right after the firmware opened `project` (masks from project.mt)."""
@@ -188,6 +190,9 @@ def expected_colors(ptf: Path, project: Path, name: str, current=None, edit=None
 
 
 def main() -> int:
+    global FP_TABLE, FP_PATTERNS
+    FP_TABLE = patch_ram(Path(sys.argv[1]), "colorsong")
+    FP_PATTERNS = FP_TABLE + 0x220
     ptf, proj_a, proj_b = (Path(a) for a in sys.argv[1:4])
     ok = True
 

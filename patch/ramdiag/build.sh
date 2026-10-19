@@ -34,15 +34,23 @@ link() {                               # link <linker script> <elf> <map>
         -Wl,-Map="$3" "$OUT/ramdiag.o" -o "$2"
 }
 link "$HERE/link.ld" "$OUT/ramdiag.elf" "$OUT/ramdiag.map"
-"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary "$OUT/ramdiag.elf" "$OUT/ramdiag.bin"
-# Relocation table: link again 64 KB higher and compare, so tools/patch_ptf.py can place
-# the patch anywhere (tools/mkrel.py).
-BASE=$(sed -n 's/.*ORIGIN = \(0x[0-9A-Fa-f]*\).*/\1/p' "$HERE/link.ld")
+"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/ramdiag.elf" "$OUT/ramdiag.bin"
+# Relocation table: link again with the code 64 KB higher, and again with the RAM
+# (.mt_ram) 64 KB higher, and compare, so tools/patch_ptf.py can place the code and
+# the RAM anywhere (tools/mkrel.py).
+BASE=$(sed -n 's/.*PATCH (rx) *: ORIGIN = \(0x[0-9A-Fa-f]*\).*/\1/p' "$HERE/link.ld")
 SHIFT=0x10000
 sed "s/ORIGIN = $BASE/ORIGIN = $(printf '0x%X' $((BASE + SHIFT)))/" "$HERE/link.ld" > "$OUT/link_shifted.ld"
 link "$OUT/link_shifted.ld" "$OUT/ramdiag_shifted.elf" "$OUT/ramdiag_shifted.map"
-"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary "$OUT/ramdiag_shifted.elf" "$OUT/ramdiag_shifted.bin"
-"$PYTHON" "$ROOT/tools/mkrel.py" "$OUT/ramdiag.bin" "$OUT/ramdiag_shifted.bin" "$BASE" "$SHIFT" "$OUT/ramdiag.rel"
+"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/ramdiag_shifted.elf" "$OUT/ramdiag_shifted.bin"
+RAM=$(sed -n 's/.*RAM (rw) *: ORIGIN = \(0x[0-9A-Fa-f]*\).*/\1/p' "$HERE/link.ld")
+sed "s/ORIGIN = $RAM/ORIGIN = $(printf '0x%X' $((RAM + SHIFT)))/" "$HERE/link.ld" > "$OUT/link_ram_shifted.ld"
+link "$OUT/link_ram_shifted.ld" "$OUT/ramdiag_ram_shifted.elf" "$OUT/ramdiag_ram_shifted.map"
+"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/ramdiag_ram_shifted.elf" "$OUT/ramdiag_ram_shifted.bin"
+RAM_START=0x$("$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/ramdiag.elf" | sed -n 's/^\([0-9a-f]*\) . __mt_ram_start$/\1/p')
+RAM_END=0x$("$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/ramdiag.elf" | sed -n 's/^\([0-9a-f]*\) . __mt_ram_end$/\1/p')
+"$PYTHON" "$ROOT/tools/mkrel.py" "$OUT/ramdiag.bin" "$OUT/ramdiag_shifted.bin" "$BASE" "$SHIFT" "$OUT/ramdiag.rel" \
+    --ram "$OUT/ramdiag_ram_shifted.bin" "$RAM_START" $((RAM_END - RAM_START))
 "$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/ramdiag.elf" | grep -E ' [TtRr] ' > "$OUT/ramdiag.sym"
 "$ARM_GCC_BIN/arm-none-eabi-size" "$OUT/ramdiag.elf"
 cat "$OUT/ramdiag.sym"

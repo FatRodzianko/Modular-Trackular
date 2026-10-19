@@ -33,7 +33,7 @@ You only need **Python 3** (standard library only, no compiler; tested with 3.15
 the compiled patch code in `patch/<name>/prebuilt/`, so this works out of the box:
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.json build/TrackerPlus_c10.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.json build/TrackerPlus_c11.ptf
 ```
 
 Use `patch/humanize/patch.json` for Humanize alone, or `patch/all/patch.json` for
@@ -46,10 +46,10 @@ must be byte-identical to these builds:
 
 | Patch | Output file | Version text in Config | On hardware | Output SHA-256 |
 |---|---|---|---|---|
-| colorsong | `TrackerPlus_c10.ptf` | `1.2.0-c10` | tested | `5d82977eadf595b6a491b90c793dcd1bfc644cec74920a98897d86444e28cb4a` |
-| humanize | `TrackerPlus_hz5.ptf` | `1.2.0-hz5` | tested | `58722f49ccc6cecc2ffa93ac4e649a9364f596e7464d93d44925793908096b54` |
-| all (colorsong + humanize) | `TrackerPlus_MT5.ptf` | `1.2.0-MT5` | tested | `b1753f2988901eb388649ae4d15cb4baa7b533b1592b11b22ff64c60d31b3b8b` |
-| ramdiag (diagnostic, on its own) | `TrackerPlus_RD1.ptf` | `1.2.0-RD1` | tested | `ab238ea32b68cdea8b316a110eb238909ea4805dac0b1ca9d7d450c256472b67` |
+| colorsong | `TrackerPlus_c11.ptf` | `1.2.0-c11` | not yet | `cc9119abe627d994ba6010bfe0db59129e3f494611dbc8c1e5c68fcf0653ebc6` |
+| humanize | `TrackerPlus_hz6.ptf` | `1.2.0-hz6` | not yet | `03069b235e8cbc985d75961a9b0dfab971a1f5400a16f32d00a40bf122f5b200` |
+| all (colorsong + humanize) | `TrackerPlus_MT6.ptf` | `1.2.0-MT6` | not yet | `c55a3888f83653220130694ae458134d26bff3d8ce6f663869777ee7bd0b0f7a` |
+| ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | not yet | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 
 **Name the output `TrackerPlus<anything>.ptf`.** Config's firmware list only shows
@@ -67,7 +67,7 @@ Each patch can be installed on its own, or several can go into one firmware:
 
   ```json
   "include": ["../colorsong/patch.json", "../humanize/patch.json"],
-  "version": "MT5",
+  "version": "MT6",
   ```
 
 To make your own mix, copy `patch/all/` to a new folder (for example `patch/mymix/`)
@@ -89,23 +89,37 @@ The patches in one firmware have to fit together:
   the order listed, each right after the one before (16-byte aligned), and moves
   each one's code to where it lands, using the relocation table its build makes
   (`prebuilt/<name>.rel`). Listing `["../humanize/patch.json",
-  "../colorsong/patch.json"]` puts Humanize first (both orders are tested on
-  hardware). A patch whose spec has a fixed
+  "../colorsong/patch.json"]` puts Humanize first (`tools/test_layout.py` checks
+  both orders). A patch whose spec has a fixed
   `base` and no relocation table (like versiontest) stays exactly there, and must not
   overlap what comes before it.
 - **Hook sites:** two patches can't hook the same call or data word. If they both need
   the same one, one patch has to call the other, which takes changes to their code.
-- **RAM:** each patch keeps its state at fixed addresses in its source code. The free
-  on-chip RAM is taken: colorsong uses `0x20205000`–`0x20207fbf` and Humanize
-  `0x20207fc0`–`0x20207fff`. A new patch has to use the firmware's heap (as Humanize
-  does for its menu entries) or another region that is proven unused and exists on
-  the device (FINDINGS sections 8 and 11).
+- **RAM: handled for you.** Each patch's state variables are one block (its
+  `.mt_ram` section). The patcher hands the blocks out from the free RAM regions
+  below, in the order the patches are listed: each block goes into the first region
+  (in the patch's order) that still has room, 16-byte aligned, and the patch's code
+  is moved to match. It prints where each block went and writes it, with the code
+  ranges, to `<output>.map.json` next to the `.ptf`.
+
+  | Region | Addresses | Size | Notes |
+  |---|---|---|---|
+  | `ocram_tail` | `0x20205000`–`0x20207fff` | 12,288 B | on-chip |
+  | `dtcm_above_heap` | `0x20051c70`–`0x20052fff` | 5,008 B | on-chip, below the stack |
+  | `sdram_top` | `0x83ff9bf0`–`0x83ffffff` | 25,616 B | external SDRAM; not before `main` |
+  | `dtcm_after_audio` | `0x200094c0`–`0x200097ff` | 832 B | on-chip |
+  | `itcm_tail` | `0x0001fb40`–`0x0001ffff` | 1,216 B | only when a spec names it; aligned accesses only |
+
+  The default order is the first four, top to bottom. colorsong (12,208 B) and
+  Humanize (32 B) both fit in `ocram_tail`. If a patch's block fits nowhere, the
+  patcher refuses to build.
 - **Firmware:** every patch must be for the same stock firmware
   (`stock_image_sha256`).
 
 The patcher refuses to build when code ranges overlap, two patches hook the same site,
-a patch is for another firmware, or an original byte doesn't match. It **can't**
-detect RAM overlaps, or two patches that each work alone but disturb each other.
+a patch is for another firmware, an original byte doesn't match, the RAM runs out, or
+a bundle includes a patch marked `standalone` (the ramdiag diagnostic). It **can't**
+detect two patches that each work alone but disturb each other.
 
 A new combination, or the same patches in another order, is a firmware nobody has
 tested, and its SHA-256 isn't in the table above. Before installing it, run the
@@ -120,7 +134,7 @@ set to its `bin` folder):
 
 ```bash
 patch/colorsong/build.sh                                # writes patch/colorsong/build/
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.json build/TrackerPlus_c10.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.json build/TrackerPlus_c11.ptf
 ```
 
 When `patch/<name>/build/` exists, the patcher uses it instead of `prebuilt/`. The
@@ -131,19 +145,22 @@ different (but equivalent) code and therefore a different hash.
 
 ```bash
 python -m pip install unicorn capstone numpy
-python tools/emu/check_version.py build/TrackerPlus_c10.ptf          # -> '1.2.0-c10'
-python tools/emu/test_colorsong.py build/TrackerPlus_c10.ptf
-python tools/emu/test_rescan.py build/TrackerPlus_c10.ptf "path/to/<project A>" "path/to/<project B>"
-python tools/emu/test_humanize.py build/TrackerPlus_hz5.ptf
+python tools/emu/check_version.py build/TrackerPlus_c11.ptf          # -> '1.2.0-c11'
+python tools/emu/test_colorsong.py build/TrackerPlus_c11.ptf
+python tools/emu/test_rescan.py build/TrackerPlus_c11.ptf "path/to/<project A>" "path/to/<project B>"
+python tools/emu/test_humanize.py build/TrackerPlus_hz6.ptf
 ```
 
 Each test works on any firmware that contains its patch, so for a bundle run every
-contained patch's tests on the bundle's `.ptf`.
+contained patch's tests on the bundle's `.ptf`. The tests read where the patch's RAM
+went from the `.map.json` the patcher wrote next to the `.ptf`, so keep the two
+together.
 
 `tools/test_layout.py` checks the patcher's placement without the emulator. It builds
 each patch alone, `patch/all`, and the same two patches in the other order, and
-checks that each patch sits where it should, that exactly the words in its
-relocation table moved, and that every hook points into it:
+checks that each patch's code and RAM sit where they should (RAM in a region the
+patch may use, no two blocks overlapping), that exactly the words in its relocation
+table moved, and that every hook points into it:
 
 ```bash
 python tools/test_layout.py path/to/TrackerPlus_1.2.0.ptf build/layout
@@ -159,7 +176,7 @@ The test projects are copies of project folders from the SD card (`Projects/...`
    only pick one of these two.
 3. On the Tracker+: **Config → Firmware**, choose the patched file, confirm. The unit
    updates and reboots.
-4. Config should now show the patch's version text, e.g. `1.2.0-c10 Build 1504`.
+4. Config should now show the patch's version text, e.g. `1.2.0-c11 Build 1504`.
 
 ## 4. Back to stock
 
@@ -191,19 +208,28 @@ boot, and switch back to stock through Config.
 See `patch/colorsong/` for a complete example and `docs/FINDINGS.md` for the firmware
 details. A patch is:
 
-- C/assembly code, linked at any address after the stock image (`link.ld`). No
-  initialised RAM. State lives at fixed addresses that are known to be unused and
-  **known to exist** (FINDINGS sections 2, 8 and 11).
-- A relocation table, so the patcher can move the code: `build.sh` links it twice,
-  64 KB apart, and `tools/mkrel.py` lists the words that differ by exactly that
-  much (pointers to the patch's own code and data). It refuses code it can't move
-  this way. The colorsong and Humanize build scripts show how.
+- C/assembly code, linked at any address after the stock image (`link.ld`).
+- State variables in the `.mt_ram` section:
+  `static struct my_state state __attribute__((section(".mt_ram")));`. It isn't
+  initialised (no zeroing, no initial values): the patch has to set it up itself,
+  for example with a magic word checked on first use. The patcher picks the address.
+- A relocation table, so the patcher can move the code and the RAM: `build.sh` links
+  the patch three times (as built, code moved 64 KB, RAM moved 64 KB), and
+  `tools/mkrel.py` lists the words that differ by exactly that much (pointers to the
+  patch's own code and data, and to its RAM). It refuses code it can't move this way.
+  The colorsong and Humanize build scripts show how.
 - `patch.json`: the stock image hash, the build outputs (`bin`, `sym`, `rel`, and
   their `prebuilt_` copies), Thumb-2 `BL` sites to retarget (with their original
   bytes), and data words to replace (literal pools, vtable slots with
   `"thumb": true`). Instead of a relocation table, a spec can give a fixed `base`.
+  Optional RAM settings:
+  - `"ram_startup": true` when the state is used before `main` (for example from the
+    Config menu constructor, as Humanize does). The patch then never gets
+    `sdram_top`, which may not be set up that early.
+  - `"ram_regions": [...]` to choose the regions and their order instead of the
+    default. Name `itcm_tail` here to allow it (32-bit aligned accesses only).
+  - `"standalone": true` for a patch that must not be combined with others.
 - `tools/patch_ptf.py` checks everything, appends the code without gaps, and keeps the
   stock Intel HEX layout, so an unmodified image re-encodes to the exact stock file.
-- To combine it with other patches, give it its own hook sites and RAM,
-  and mark its version-text word with `"version": true` so a bundle can replace it
+- To combine it with other patches, give it its own hook sites, and mark its version-text word with `"version": true` so a bundle can replace it
   (see "Choosing patches" in section 2).

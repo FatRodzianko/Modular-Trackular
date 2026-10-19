@@ -38,7 +38,7 @@
  *    for 10 items (0x60118b00) and asks for 11;
  *  - mt_hz_last_item replaces the constructor's last item call (Licenses, 0x601193e6),
  *    then adds the Humanize folder and its 4 items, in nodes from the firmware's heap.
- * The values live in HZ (the last 64 bytes of OCRAM). Numbers are stored as list
+ * The values live in HZ, this patch's RAM (.mt_ram). Numbers are stored as list
  * indexes 0..99 and shown + 1, as the stock number editor works. Each named project
  * keeps them in <project folder>/humanize.bin. mt_hz_pattern_update and
  * mt_hz_config_update (the Pattern and Config screens' update methods) load the file
@@ -49,7 +49,7 @@
 #include <stdint.h>
 
 #ifndef HUMANIZE_VERSION
-#define HUMANIZE_VERSION "hz5"
+#define HUMANIZE_VERSION "hz6"
 #endif
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */
@@ -141,7 +141,6 @@ enum { SET_RANGE, SET_VOLUME, SET_MIDI, SET_SAMPLE, SETTINGS };
 /* stored values: list indexes 0..99 (shown 1..100) and Off/On (0/1) */
 static const uint8_t defaults[SETTINGS] = {10 - 1, 1, 50 - 1, 50 - 1};
 
-#define HZ_BASE             0x20207FC0u     /* last 64 bytes of the 32 KB OCRAM bank */
 #define HZ_MAGIC            0x5A48544Du     /* "MTHZ" */
 #define SAVE_DELAY          25u             /* screen updates between a change and the save */
 
@@ -155,8 +154,10 @@ struct hz_state {
     uint8_t wait;                           /* updates left before saving */
     uint8_t reserved;
 };
-#define HZ ((volatile struct hz_state *)HZ_BASE)
-_Static_assert(sizeof(struct hz_state) <= 0x40, "humanize state must fit in its 64 bytes");
+/* This patch's RAM (.mt_ram, neither loaded nor zeroed; tools/patch_ptf.py places it in
+ * a free RAM region). It is used from the Config menu constructor at startup. */
+static struct hz_state hz_state_ram __attribute__((section(".mt_ram")));
+#define HZ ((volatile struct hz_state *)&hz_state_ram)
 
 void *memset(void *dst, int c, unsigned n);
 void *memset(void *dst, int c, unsigned n)

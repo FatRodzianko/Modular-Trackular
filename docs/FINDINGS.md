@@ -244,7 +244,7 @@ sweep, per region:
 | Flash after image end `0x601bab78` | Only the GCC crtstuff end-of-image symbol (`0x600908a4`, `0x600908c8`). No self-check of the image | **Patch code goes here**, appended with no gap |
 | Flash `0x601b1594`–`0x601bab78` | 0x95e4 bytes, mostly zeros, inside the image and not in the copy tables | Leave alone (may be referenced const data) |
 | DTCM `0x2002fc68`–`0x20051c67` | The heap (`_sbrk`, section 15); above it 5 KB, then the stack | Heap, not free; the 5 KB gap is a candidate (section 15) |
-| OCRAM `0x20204f4c`–`0x20207fff` (tail of the 32 KB bank) | No address constants, no MOVW/MOVT | **Patch RAM goes here**: colorsong `0x20205000`–`0x20207fbf` (12,208 bytes used), humanize settings `0x20207fc0`–`0x20207fff` |
+| OCRAM `0x20204f4c`–`0x20207fff` (tail of the 32 KB bank) | No address constants, no MOVW/MOVT | **Patch RAM goes here**: the patcher's first region (section 15); colorsong's 12,208-byte table and humanize's 32 bytes of settings both fit |
 | `0x20208000`–`0x202fffff` | Doesn't exist on this unit (reserved address space) | **Never use.** An access to `0x20280000` froze the unit (section 11) |
 | SDRAM `0x80000000`–`0x83ff9bef` | Sample memory and fixed buffers, the last two at `0x83ff5bf0`–`0x83ff9bef` | Not free; the 25 KB above is a candidate (section 15) |
 
@@ -271,7 +271,7 @@ Caveat: the bootloader's maximum image size is unknown (1.2.0 is 1.6 MB and grew
 Region 4 allows access to `0x20280000` ("FlexRAM OCRAM" on an RT106x) as Device
 memory, but there is no RAM behind that address on this unit, so the access
 bus-faults. The MPU says what is *allowed*, not what *exists*. Patch RAM belongs in
-the OCRAM tail at `0x20205000` (region 7, Normal memory).
+RAM that exists, such as the OCRAM tail at `0x20205000` (region 7, Normal memory).
 
 `SystemInit` (`0x60094b50`) itself only enables the FPU, sets `VTOR = 0x60030000`,
 disables WDOG1/WDOG2/RTWDOG and SysTick, and enables the I-cache.
@@ -849,7 +849,7 @@ items (`tools/emu/test_humanize.py` walks it).
 `patch/humanize` creates Project Settings with room for 11 items, appends a
 "Humanize" folder with three number items and an Off/On item after the constructor's
 last item, in nodes from the firmware's heap, and keeps the values in its own RAM
-(`0x20207fc0`) and in `<project folder>/humanize.bin`, read and written from the
+(32 bytes, placed by the patcher, section 15) and in `<project folder>/humanize.bin`, read and written from the
 Pattern and Config screens' update methods. Tested on hardware.
 
 ## 15. RAM map and RAM for patches
@@ -875,7 +875,7 @@ the candidates below has been tested on hardware yet.
 | DTCM `0x20051c68`–`0x20052fff` | 5,016 B | **Candidate.** Between the heap limit and the stack; only the limit constant refers to it. A stack overflow past 20 KB would reach it first |
 | DTCM `0x20053000`–`0x20057fff` | 20 KB | Stack (filled with `0xAA` at reset for the high-water mark) |
 | OCRAM `0x20200000`–`0x20204f4b` | 20 KB | `.bss` |
-| OCRAM `0x20205000`–`0x20207fff` | 12 KB | **Used by patches**: colorsong `0x20205000`–`0x20207fbf`, humanize `0x20207fc0`–`0x20207fff` (tested on hardware) |
+| OCRAM `0x20205000`–`0x20207fff` | 12 KB | **Used by patches**: the patcher's first region (`ocram_tail`); colorsong and humanize together use 12,240 B of it |
 | SDRAM `0x80000000`–`0x83ff9bef` | 64 MB | Sample memory and fixed buffers. The top holds a stack of buffers: pattern copies, undo ring (`0x83f811cc`), audio and display buffers, ending with two 8 KB buffers at `0x83ff5bf0` (`0x601225a4`) |
 | SDRAM `0x83ff9bf0`–`0x83ffffff` | 25 KB | **Candidate.** After the last buffer; no references. Cached (MPU region 8, Normal write-back). Whether it is ready before `main` (patch constructors run earlier) is unchecked |
 
@@ -951,6 +951,18 @@ Max stack was 8,033 B again; CPU peaked at 88 % while rendering. Not covered yet
 performance mode and the games. The games run on a built-in NES emulator; if their
 buffers (and any fast-RAM code) are used only while a game runs, disabling the games
 could free more. Unchecked.
+
+**Implemented: option 1.** `tools/patch_ptf.py` assigns patch RAM from these regions
+(`RAM_REGIONS`: `ocram_tail`, `dtcm_above_heap` from `0x20051c70`, `sdram_top`,
+`dtcm_after_audio` from `0x200094c0`, and `itcm_tail` from `0x0001fb40` only when a spec
+names it; starts rounded up to 16 bytes). Patches declare their state in a `.mt_ram`
+(NOLOAD) section; the build links a third time with the RAM origin moved 64 KB, and
+`tools/mkrel.py` lists the RAM-address words next to the code ones. A spec whose
+state is used before `main` sets `"ram_startup": true` and never gets SDRAM (whether
+SDRAM is ready that early is unchecked). The patcher writes the result to
+`<output>.map.json`, which the emulator tests read. In the emulator, colorsong's table
+works from `sdram_top` and humanize's settings from `dtcm_above_heap` too; on hardware
+only the OCRAM tail is in use so far.
 
 ## 16. The games (NES emulator), and what disabling them would free
 
