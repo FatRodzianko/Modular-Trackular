@@ -46,10 +46,10 @@ must be byte-identical to these builds:
 
 | Patch | Output file | Version text in Config | On hardware | Output SHA-256 |
 |---|---|---|---|---|
-| colorsong | `TrackerPlus_c11.ptf` | `1.2.0-c11` | not yet | `cc9119abe627d994ba6010bfe0db59129e3f494611dbc8c1e5c68fcf0653ebc6` |
-| humanize | `TrackerPlus_hz6.ptf` | `1.2.0-hz6` | not yet | `03069b235e8cbc985d75961a9b0dfab971a1f5400a16f32d00a40bf122f5b200` |
-| all (colorsong + humanize) | `TrackerPlus_MT6.ptf` | `1.2.0-MT6` | not yet | `c55a3888f83653220130694ae458134d26bff3d8ce6f663869777ee7bd0b0f7a` |
-| ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | not yet | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
+| colorsong | `TrackerPlus_c11.ptf` | `1.2.0-c11` | tested | `cc9119abe627d994ba6010bfe0db59129e3f494611dbc8c1e5c68fcf0653ebc6` |
+| humanize | `TrackerPlus_hz6.ptf` | `1.2.0-hz6` | tested | `03069b235e8cbc985d75961a9b0dfab971a1f5400a16f32d00a40bf122f5b200` |
+| all (colorsong + humanize) | `TrackerPlus_MT6.ptf` | `1.2.0-MT6` | tested | `c55a3888f83653220130694ae458134d26bff3d8ce6f663869777ee7bd0b0f7a` |
+| ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 
 **Name the output `TrackerPlus<anything>.ptf`.** Config's firmware list only shows
