@@ -732,8 +732,9 @@ all of the block's ticks. Per track and FX column:
   are untested for cost and clicks.
 - The stock pending-delay quirk (a pending delayed note drops the next step's note)
   interacts with negative Micro-move; the patch should keep or fix it on purpose.
-- Nothing in this section has been checked on hardware. Checked in the emulator:
-  Micro-move timing, CC send timing, preload request and buffer swap.
+- The plans in this section were made from the emulator (Micro-move timing, CC send
+  timing, preload request and buffer swap). FX interpolation has since been built and
+  tested on hardware (below); negative Micro-move has not.
 
 #### Implemented: `patch/interpolate` (MIDI CCs and synth Macros)
 
@@ -783,8 +784,8 @@ way:
 
 Cost: a look-up through the whole pattern for all 16 tracks at once (they change step
 together) took 555,000 instructions in one block; moving ramps along incrementally and
-doing at most 2 full look-ups per block brought the worst block to 23,670. Not checked
-on hardware yet.
+doing at most 2 full look-ups per block brought the worst block to 23,670. Tested on
+hardware in both bundle orders (MIDI CC and synth Macro ramps, Preview, rendering).
 
 ## 13. Pattern screen: bottom bar, selection, undo (`patch/humanize`)
 
@@ -1012,8 +1013,11 @@ names it; starts rounded up to 16 bytes). Patches declare their state in a `.mt_
 state is used before `main` sets `"ram_startup": true` and never gets SDRAM (whether
 SDRAM is ready that early is unchecked). The patcher writes the result to
 `<output>.map.json`, which the emulator tests read. In the emulator, colorsong's table
-works from `sdram_top` and humanize's settings from `dtcm_above_heap` too; on hardware
-only the OCRAM tail is in use so far.
+works from `sdram_top` and humanize's settings from `dtcm_above_heap` too. On hardware
+three regions are now in use and tested: the OCRAM tail (colorsong and humanize in
+`patch/all`), `dtcm_above_heap` (interpolate's 1,504 bytes in `patch/all`, used from
+the audio interrupt) and `sdram_top` (colorsong's 12,208-byte table when the bundle is
+listed the other way round, so interpolate and humanize take the OCRAM tail).
 
 ## 16. The games (NES emulator), and what disabling them would free
 

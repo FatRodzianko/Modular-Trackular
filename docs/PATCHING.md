@@ -93,7 +93,7 @@ The patches in one firmware have to fit together:
   each one's code to where it lands, using the relocation table its build makes
   (`prebuilt/<name>.rel`). Listing `["../interpolate/patch.json",
   "../humanize/patch.json", "../colorsong/patch.json"]` puts them the other way round
-  (`tools/test_layout.py` checks both orders). A patch whose spec has a fixed
+  (`tools/test_layout.py` checks both orders, and both were tested on hardware). A patch whose spec has a fixed
   `base` and no relocation table (like versiontest) stays exactly there, and must not
   overlap what comes before it.
 - **Hook sites: shared ones must be chained.** Two patches can hook the same call or
