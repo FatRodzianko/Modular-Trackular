@@ -951,3 +951,61 @@ Max stack was 8,033 B again; CPU peaked at 88 % while rendering. Not covered yet
 performance mode and the games. The games run on a built-in NES emulator; if their
 buffers (and any fast-RAM code) are used only while a game runs, disabling the games
 could free more. Unchecked.
+
+## 16. The games (NES emulator), and what disabling them would free
+
+The Tracker+ plays NES games (`.nes` files from the card's `Games` folder) with a
+built-in port of **Nofrendo**, an open-source NES emulator (its messages: "`DiskDude!`
+found in ROM header", "Failed to create NES instance.", "setting up mapper %d", and
+~30 mapper names such as "Tengen RAMBO-1"). No games are built into the firmware: the
+`NES\x1a` bytes in the image are the header check's constant. Found with a whole-program
+reference graph (`ghidra/scripts/ExportRefGraph.java`, 9,206 functions) and the code
+around each use. Static analysis only; nothing here is checked on hardware.
+
+### Code
+
+| What | Where | Size |
+|---|---|---|
+| Emulator (Nofrendo: ROM loader, mappers, PPU/APU glue, video setup) | `0x6008105c`–`0x6008e977` | ~54 KB |
+| — of which the 6502 CPU core: one function with a 256-entry opcode table (`0x60083c34`, Ghidra stops at its table) | `0x60083c34`–`0x60089513` | ~22 KB |
+| Emulator strings (loader, video, mapper names) | `0x60061d7c`–`0x60062f00` | ~4.5 KB |
+| Games screen (vtable `0x6003e1f0`), game start (`game_start_q`, `0x600d0aa0`), file helpers (`0x600c5a84`–`0x600c5e84`), frame copy (`0x60109918`) | scattered | a few KB |
+
+The double-precision math helpers right after the emulator (`0x6008e978` on) are used
+everywhere and stay. None of the emulator runs from ITCM (fast RAM): disabling the
+games frees no fast-RAM code space.
+
+Ways in: everything goes through `game_start_q` (`0x600d0aa0`), the only caller of the
+NES setup (`0x60082c94` → `nes_load_q` `0x60082ec8`); it is called from the Games screen
+and from `0x600c8940` / `0x600d0c64`. Two hooks reach the emulator outside a game: the
+audio DMA callback calls `nes_audio_q` (`0x60082b28`) for game sound, and a static
+constructor (`0x60082954`) initialises emulator globals at startup.
+
+### RAM
+
+| What | Where | Size | Used when |
+|---|---|---|---|
+| Game screen buffer, 256 × 240 at one byte per pixel | SDRAM `0x83fd99e0`–`0x83fe89df` | 61,440 B | Only by the game start (`0x6010985c`) and the frame copy (`0x60109918`) |
+| ROM buffer, NES machine | heap (`malloc`) | depends on the game | Only while a game runs |
+| Emulator globals | DTCM `.bss`, ~36 fields between `0x2002a529` and `0x2002c88e` | small (under 1 KB) | Startup constructor and games |
+
+### What disabling the games would free
+
+- **SDRAM: the 60 KB game screen buffer.** By far the most useful part: as large as all
+  other confirmed free regions together. Needs the same hardware check as section 15
+  (fill it, use the device, count) with the games disabled.
+- **Flash: ~60 KB** (emulator code, strings, game screens). Flash isn't short (patches
+  are appended after the image), but a patcher that knows about free flash ranges could
+  put patch code there instead, keeping the image the same size, in case the
+  bootloader has a size limit (unknown, section 8).
+- **Heap safety:** a game allocates its ROM and machine from the heap, which stock
+  firmware already drives to its limit (section 15). Without games that can't happen.
+- **Not freed:** fast RAM (none of the emulator is in ITCM), meaningful DTCM (the
+  globals are small and scattered), CPU time at idle (the audio hook only checks
+  whether a game runs).
+
+### How to disable them
+
+Make `game_start_q` (`0x600d0aa0`) return without starting anything, the single path
+to the NES setup, and optionally hide the Games entries. The audio hook and the
+startup constructor can stay: without a game they do nothing. Not built yet.

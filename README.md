@@ -33,7 +33,8 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   layer and widget library, screens, the Song screen, pattern and project file
   formats, the SD-card/FatFs API, the hardware lessons learned, the sequencer and FX
   timing, the Pattern screen's buttons, selection and undo, the Config menu, and a
-  map of all RAM with the candidate regions for patch state.
+  map of all RAM with the regions free for patch state, and what disabling the
+  built-in NES games would free.
   Function names
   with notes are in [ghidra/names_1.2.0.tsv](ghidra/names_1.2.0.tsv).
 - **Tools**: `.ptf` conversion and patching, Ghidra headless scripts, and a Unicorn
@@ -59,7 +60,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `docs/FINDINGS.md` | Reverse engineering notes, with addresses (firmware 1.2.0) |
 | `docs/PATCHING.md` | How to build, verify, install and remove a patched firmware |
 | `ghidra/names_1.2.0.tsv` | Function names worked out so far, with notes |
-| `ghidra/scripts/` | Ghidra scripts: memory map setup, vtable functions, names, index export, decompile, callers, references in a range (byte by byte, or summarized for large ranges) |
+| `ghidra/scripts/` | Ghidra scripts: memory map setup, vtable functions, names, index export, decompile, callers, references in a range (byte by byte, or summarized for large ranges), whole-program reference graph |
 | `patch/colorsong/` | Colored Song blocks: C + assembly shim, linker script, build script, patch spec, prebuilt binary |
 | `patch/humanize/` | Humanize button: C, linker script, build script, patch spec, prebuilt binary |
 | `patch/all/` | Bundle spec: colorsong + humanize in one firmware |
