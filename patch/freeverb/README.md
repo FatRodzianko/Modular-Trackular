@@ -73,7 +73,8 @@ bit. In the emulator Freeverb takes about 54,000 instructions per block against 
 dozen). On the device, a deliberately heavy pattern
 (every drum hit and all three synths, 8 voices each, sending fully to the reverb) showed
 64–67 % average and 84 % peak CPU with Freeverb, against 61 % and 84 % with the stock
-reverb. With such large sends the stock reverb crackles; Freeverb doesn't. Firmware details are in
+reverb. With the synths off and only the drum samples sending to the reverb, it showed
+about 23 % average and 43 % peak. With such large sends the stock reverb crackles; Freeverb doesn't. Firmware details are in
 [docs/FINDINGS.md](../../docs/FINDINGS.md) (section 19).
 
 Other builds (`FV_DEFS='-D<name> -DFREEVERB_VERSION="<text>"' patch/freeverb/build.sh`):
