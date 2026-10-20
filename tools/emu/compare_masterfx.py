@@ -1,10 +1,11 @@
-"""Compare two freeverb builds block by block, and measure both.
+"""Compare two masterfx builds block by block, and measure both.
 
-  python tools/emu/compare_freeverb.py <a.ptf> <b.ptf> [blocks] [seed ...]
+  python tools/emu/compare_masterfx.py <a.ptf> <b.ptf> [blocks] [seed ...]
 
-Both builds get the same randomized session (as tools/emu/stress_freeverb.py makes them:
-changing sends, Master Reverb fields set to random and garbage values, bypass toggles,
-missing blocks, the Pattern-screen start and the start-up reset). After every block the
+Both builds start with Freeverb chosen and get the same randomized session (as
+tools/emu/stress_masterfx.py makes them: changing sends, Master Reverb fields set to
+random and garbage values, bypass toggles, missing blocks, the Pattern-screen start, the
+start-up reset, and now and then the reverb choice switched to Stock and back). After every block the
 two outputs (both channels, every sample) and the level field must be equal, unless
 --tolerance N allows a difference of up to N per sample (for builds that are meant to
 differ slightly). Instructions per block are measured for both on a sample of blocks.
@@ -21,7 +22,7 @@ from unicorn import UC_HOOK_CODE
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import test_freeverb as tf  # noqa: E402
+import reverb_rig as tf  # noqa: E402
 from patch_ptf import bl_target  # noqa: E402
 
 REVERB = tf.REVERB
@@ -29,8 +30,9 @@ GARBAGE = [float("nan"), float("inf"), -float("inf"), -1.0, 2.0, 1e9]
 
 
 def make_rig(ptf: Path) -> tf.Rig:
-    r = tf.Rig(ptf)
+    r = tf.Rig(ptf, reverb=1)
     r.m.stub_function(0x601183E8, lambda mm: 0)          # cfg_menu_item, for the restart hook
+    r.m.stub_function(0x60118394, lambda mm: 0)          # cfg_menu_folder, for the restart hook
     image = bytes(r.m.uc.mem_read(0x60000000, 0x200000))
     r.restart = bl_target(image, 0x60000000, 0x601193E6)
     return r
@@ -63,6 +65,8 @@ def session(a: tf.Rig, b: tf.Rig, blocks: int, seed: int, tolerance: int):
             action = ("pattern",)
         elif ev < 0.0177:
             action = ("restart",)
+        elif ev < 0.0187:
+            action = ("choose", rnd.choice([0, 1]))
         n = tf.BLOCK
         if kind == "silence":
             left = right = [0] * n
@@ -95,6 +99,8 @@ def session(a: tf.Rig, b: tf.Rig, blocks: int, seed: int, tolerance: int):
                     m.call(m.r32(tf.PATTERN_UPDATE_SLOT), 0x20021770)
                 elif action[0] == "restart":
                     m.call(r.restart | 1, 0, 0, 0, 0, 0, 0)
+                elif action[0] == "choose":
+                    r.choose(action[1])
             count = [0]
             sample = blk % 25 == 0
             if sample:

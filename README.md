@@ -25,8 +25,9 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   rate capped so notes always get through. MIDI and synths each have their own
   per-project setting under Config → Project Settings → FX Interpolation (both Off by
   default). Tested on hardware. See [patch/interpolate/README.md](patch/interpolate/README.md).
-- **freeverb**: replaces the stock master reverb with Freeverb (public domain), driven
-  by the same Master Reverb knobs; projects are unchanged. Tested on hardware. See [patch/freeverb/README.md](patch/freeverb/README.md).
+- **masterfx**: each project chooses its master reverb under Config → Project Settings →
+  Master FX → Reverb: Stock (default) or Freeverb (public domain), driven by the same
+  Master Reverb knobs. Tested on hardware. See [patch/masterfx/README.md](patch/masterfx/README.md).
 - **all**: colorsong, humanize and interpolate in one firmware (version text
   `1.2.0-MTC`), from [patch/all/patch.json](patch/all/patch.json).
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
@@ -72,7 +73,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/colorsong/` | Colored Song blocks: C + assembly shim, linker script, build script, patch spec, prebuilt binary |
 | `patch/humanize/` | Humanize button: C, linker script, build script, patch spec, prebuilt binary |
 | `patch/interpolate/` | CC and Macro ramps between steps |
-| `patch/freeverb/` | Freeverb as the master reverb |
+| `patch/masterfx/` | Master reverb per project: Stock or Freeverb |
 | `patch/all/` | Bundle spec: colorsong + humanize + interpolate in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
@@ -91,9 +92,10 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/test_colorsong.py`, `test_rescan.py` | colorsong rule and scenario tests on the patched firmware |
 | `tools/emu/test_ramdiag.py` | ramdiag menu, fill, scan and report tests on the patched firmware |
 | `tools/emu/test_humanize.py` | humanize button, edit-rule, Config menu and settings-file tests on the patched firmware |
-| `tools/emu/compare_freeverb.py` | freeverb: runs the same randomized session through two builds and compares every output sample, and measures both |
-| `tools/emu/stress_freeverb.py` | freeverb stress: long randomized sessions (garbage settings, missing blocks, restarts) with a write watch and state checks |
-| `tools/emu/test_freeverb.py` | freeverb block handling, knob, level and cost tests through the reverb object's update(), and WAV renders next to the stock reverb |
+| `tools/emu/reverb_rig.py` | The master reverb object driven block by block through its update(), for the masterfx tools |
+| `tools/emu/test_masterfx.py` | masterfx: Stock identical to stock firmware, switching, start-up, Freeverb block handling, knob, level and cost tests, Config menu and settings file, and WAV renders next to the stock reverb |
+| `tools/emu/stress_masterfx.py` | masterfx stress: long randomized sessions (garbage settings, missing blocks, restarts, reverb choices) with a write watch and state checks |
+| `tools/emu/compare_masterfx.py` | masterfx: runs the same randomized session through two builds and compares every output sample, and measures both |
 | `tools/emu/test_interpolate.py` | interpolate ramp, MIDI-rate, cost, Config menu and settings-file tests, through the real audio block |
 | `tools/emu/seq_timing.py` | Run the stock sequencer on test patterns and print the MIDI it sends, with timing |
 | `tools/emu/check_version.py` | Print the version text a `.ptf` would show |

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build freeverb into build/freeverb.{elf,bin,sym}.
-# Variants: FV_DEFS='-DFREEVERB_VERSION="fvX"' to change the version text.
+# Build masterfx into build/masterfx.{elf,bin,sym}.
+# Variants: MFX_DEFS='-DMASTERFX_VERSION="mfX"' to change the version text.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -25,32 +25,32 @@ OUT="$HERE/build"
 mkdir -p "$OUT"
 CFLAGS=(-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -O2 -std=c11
         -mno-unaligned-access -ffreestanding -fno-builtin -fno-tree-loop-distribute-patterns -fno-common
-        -ffunction-sections -Wall -Wextra -Werror ${FV_DEFS:-})
-"$ARM_GCC_BIN/arm-none-eabi-gcc" "${CFLAGS[@]}" -c "$HERE/freeverb.c" -o "$OUT/freeverb.o"
+        -ffunction-sections -Wall -Wextra -Werror ${MFX_DEFS:-})
+"$ARM_GCC_BIN/arm-none-eabi-gcc" "${CFLAGS[@]}" -c "$HERE/masterfx.c" -o "$OUT/masterfx.o"
 link() {                               # link <linker script> <elf> <map>
     "$ARM_GCC_BIN/arm-none-eabi-gcc" -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 \
         -nostdlib -nostartfiles -T "$1" -Wl,--gc-sections \
-        -Wl,--undefined=mt_fv_update -Wl,--undefined=mt_fv_pattern_update -Wl,--undefined=mt_fv_last_item -Wl,--undefined=mt_version_fmt \
-        -Wl,-Map="$3" "$OUT/freeverb.o" -o "$2"
+        -Wl,--undefined=mt_mfx_reverb_update -Wl,--undefined=mt_mfx_settings_folder -Wl,--undefined=mt_mfx_last_item -Wl,--undefined=mt_mfx_pattern_update -Wl,--undefined=mt_mfx_config_update -Wl,--undefined=mt_version_fmt \
+        -Wl,-Map="$3" "$OUT/masterfx.o" -o "$2"
 }
-link "$HERE/link.ld" "$OUT/freeverb.elf" "$OUT/freeverb.map"
-"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/freeverb.elf" "$OUT/freeverb.bin"
+link "$HERE/link.ld" "$OUT/masterfx.elf" "$OUT/masterfx.map"
+"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/masterfx.elf" "$OUT/masterfx.bin"
 # Relocation table: link again with the code 64 KB higher, and again with the RAM
 # (.mt_ram) 64 KB higher, and compare, so tools/patch_ptf.py can place the code and
 # the RAM anywhere (tools/mkrel.py).
 BASE=$(sed -n 's/.*PATCH (rx) *: ORIGIN = \(0x[0-9A-Fa-f]*\).*/\1/p' "$HERE/link.ld")
 SHIFT=0x10000
 sed "s/ORIGIN = $BASE/ORIGIN = $(printf '0x%X' $((BASE + SHIFT)))/" "$HERE/link.ld" > "$OUT/link_shifted.ld"
-link "$OUT/link_shifted.ld" "$OUT/freeverb_shifted.elf" "$OUT/freeverb_shifted.map"
-"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/freeverb_shifted.elf" "$OUT/freeverb_shifted.bin"
+link "$OUT/link_shifted.ld" "$OUT/masterfx_shifted.elf" "$OUT/masterfx_shifted.map"
+"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/masterfx_shifted.elf" "$OUT/masterfx_shifted.bin"
 RAM=$(sed -n 's/.*RAM (rw) *: ORIGIN = \(0x[0-9A-Fa-f]*\).*/\1/p' "$HERE/link.ld")
 sed "s/ORIGIN = $RAM/ORIGIN = $(printf '0x%X' $((RAM + SHIFT)))/" "$HERE/link.ld" > "$OUT/link_ram_shifted.ld"
-link "$OUT/link_ram_shifted.ld" "$OUT/freeverb_ram_shifted.elf" "$OUT/freeverb_ram_shifted.map"
-"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/freeverb_ram_shifted.elf" "$OUT/freeverb_ram_shifted.bin"
-RAM_START=0x$("$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/freeverb.elf" | sed -n 's/^\([0-9a-f]*\) . __mt_ram_start$/\1/p')
-RAM_END=0x$("$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/freeverb.elf" | sed -n 's/^\([0-9a-f]*\) . __mt_ram_end$/\1/p')
-"$PYTHON" "$ROOT/tools/mkrel.py" "$OUT/freeverb.bin" "$OUT/freeverb_shifted.bin" "$BASE" "$SHIFT" "$OUT/freeverb.rel" \
-    --ram "$OUT/freeverb_ram_shifted.bin" "$RAM_START" $((RAM_END - RAM_START))
-"$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/freeverb.elf" | grep -E ' [TtRr] ' > "$OUT/freeverb.sym"
-"$ARM_GCC_BIN/arm-none-eabi-size" "$OUT/freeverb.elf"
-cat "$OUT/freeverb.sym"
+link "$OUT/link_ram_shifted.ld" "$OUT/masterfx_ram_shifted.elf" "$OUT/masterfx_ram_shifted.map"
+"$ARM_GCC_BIN/arm-none-eabi-objcopy" -O binary -j .text "$OUT/masterfx_ram_shifted.elf" "$OUT/masterfx_ram_shifted.bin"
+RAM_START=0x$("$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/masterfx.elf" | sed -n 's/^\([0-9a-f]*\) . __mt_ram_start$/\1/p')
+RAM_END=0x$("$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/masterfx.elf" | sed -n 's/^\([0-9a-f]*\) . __mt_ram_end$/\1/p')
+"$PYTHON" "$ROOT/tools/mkrel.py" "$OUT/masterfx.bin" "$OUT/masterfx_shifted.bin" "$BASE" "$SHIFT" "$OUT/masterfx.rel" \
+    --ram "$OUT/masterfx_ram_shifted.bin" "$RAM_START" $((RAM_END - RAM_START))
+"$ARM_GCC_BIN/arm-none-eabi-nm" "$OUT/masterfx.elf" | grep -E ' [TtRr] ' > "$OUT/masterfx.sym"
+"$ARM_GCC_BIN/arm-none-eabi-size" "$OUT/masterfx.elf"
+cat "$OUT/masterfx.sym"

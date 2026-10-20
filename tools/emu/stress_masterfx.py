@@ -1,25 +1,31 @@
-"""Stress the freeverb patch: long randomized sessions through the reverb object's update().
+"""Stress the masterfx patch: long randomized sessions through the reverb object's update().
 
-  python tools/emu/stress_freeverb.py <patched.ptf> [blocks] [seed] [seed ...]
+  python tools/emu/stress_masterfx.py <patched.ptf> [blocks] [seed] [seed ...]
+
+Works with masterfx alone or in a bundle. Each session starts with Freeverb chosen.
 
 Each seed runs a session of `blocks` audio blocks (default 20000, about 58 s) through
-the reverb object's update() as tools/emu/test_freeverb.py does, with:
+the reverb object's update() as tools/emu/test_masterfx.py does (tools/emu/reverb_rig.py),
+with:
   - sends that change every so often: silence, noise at random levels, full-scale noise,
     full-scale DC, a loud sine, impulses;
   - at random blocks: the Master Reverb fields set to random values, extremes or
     garbage (NaN, infinities, negatives, huge numbers, Predelay out of range); the bypass
     flag toggled; a missing left or right block; the buffer pointers moved to other
     memory and back; the Pattern screen hook and the start-up reset (the patch's hook on
-    the Config menu constructor, as at every start) fired.
+    the Config menu constructor, as at every start) fired; the project's reverb choice
+    set to Stock, Freeverb or a value out of range.
 After every block it checks:
   - no fault, and the update returns within 400,000 instructions;
   - every write by the patch's code went to its own RAM, the two reverb buffers in use,
-    the audio blocks, the reverb's level field or the stack (a write watch covers the rest
-    of RAM);
+    the audio blocks, the reverb's level field, the stock reverb's filter states (zeroed
+    on a switch to it), or the stack (a write watch covers the rest of RAM);
   - its state stays consistent: delay positions inside their lines, the predelay
     position inside its ring, the clear progress within the buffers;
   - every block it received was released exactly once and only those were transmitted;
-  - after garbage settings are replaced by normal ones, the reverb produces sound again.
+  - after garbage settings are replaced by normal ones, Freeverb produces sound again
+    (the probe chooses Freeverb: the stock reverb itself stays silent after a NaN
+    setting, in stock firmware too, as its filter states stay NaN until a restart).
 It also reports the deepest stack the patch used and the most instructions in a block.
 """
 from __future__ import annotations
@@ -35,7 +41,7 @@ from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_WRITE
 from unicorn.arm_const import UC_ARM_REG_PC
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import test_freeverb as tf  # noqa: E402
+import reverb_rig as tf  # noqa: E402
 from machine import STACK_TOP  # noqa: E402
 from patch_ptf import bl_target  # noqa: E402
 
@@ -45,16 +51,17 @@ BUF_BYTES = 32768
 MAX_INSNS = 400_000
 NAN, INF = float("nan"), float("inf")
 GARBAGE = [NAN, INF, -INF, -1.0, -1e9, 2.0, 1e9, 1e-40]
+FILTERS = (0x60, 0x6C)              # the stock reverb's filter states, zeroed on a switch to it
 
 
 class Session:
     def __init__(self, ptf: Path, seed: int):
         self.rnd = random.Random(seed)
         self.seed = seed
-        self.rig = tf.Rig(ptf, booted=False)
+        self.rig = tf.Rig(ptf, booted=False, reverb=1)
         m = self.m = self.rig.m
         code = next(q for q in json.loads(ptf.with_suffix(".map.json").read_text())["patches"]
-                    if q["name"] == "freeverb")
+                    if q["name"] == "masterfx")
         self.lo, self.hi = (int(x, 16) for x in code["code"])
         self.ram = int(code["ram"]["start"], 16), int(code["ram"]["end"], 16)
         self.bufs = [m.r32(REVERB + tf.BUF_L), m.r32(REVERB + tf.BUF_R)]
@@ -67,6 +74,7 @@ class Session:
         # a new start: the patch's hook on the Config menu constructor's last item, which
         # chains to the stock cfg_menu_item (stubbed: the menu is built once per machine)
         m.stub_function(0x601183E8, lambda mm: 0)
+        m.stub_function(0x60118394, lambda mm: 0)    # cfg_menu_folder (the patch adds one)
         image = bytes(m.uc.mem_read(0x60000000, 0x200000))
         self.restart_hook = bl_target(image, 0x60000000, 0x601193E6)
         self.received = self.rig.received_blocks      # kept up to date by the rig's stubs
@@ -83,6 +91,8 @@ class Session:
             if self.ram[0] <= address < self.ram[1]:
                 return
             if REVERB + tf.LEVEL <= address < REVERB + tf.LEVEL + 4:
+                return
+            if REVERB + FILTERS[0] <= address < REVERB + FILTERS[1]:
                 return
             for b in self.current_bufs():
                 if b <= address < b + BUF_BYTES:
@@ -184,7 +194,10 @@ class Session:
             elif ev < 0.0197:
                 m.call(self.restart_hook | 1, 0, 0, 0, 0, 0, 0)          # a new start
                 self.note("restart")
-            elif ev < 0.0215 and garbage_until >= 0:
+            elif ev < 0.0205:
+                self.rig.choose(r.choice([0, 1, 1, 2, 0xFF]))
+                self.note("reverb choice")
+            elif ev < 0.0225 and garbage_until >= 0:
                 self.normal_settings()                                  # back to normal knobs
                 m.w8(REVERB + tf.BYPASS, 0)
                 self.rig.give = [True, True]
@@ -234,7 +247,8 @@ class Session:
         m.w32(REVERB + tf.BUF_L, self.bufs[0])
         m.w32(REVERB + tf.BUF_R, self.bufs[1])
         n = tf.BLOCK
-        self.rig.run([0] * (n * 10), [0] * (n * 10))                 # any clear finishes
+        self.rig.choose(1)                                          # Freeverb
+        self.rig.run([0] * (n * 20), [0] * (n * 20))                 # any clear or switch finishes
         burst = tf.noise_burst(n * 8, n * 8, self.seed)
         self.rig.run(burst, burst)
         out_l, _ = self.rig.run([0] * (n * 40), [0] * (n * 40))

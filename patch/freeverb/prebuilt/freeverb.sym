@@ -1,9 +1,0 @@
-601c0a34 t allpass_len
-601c0a24 t comb_len
-601c0230 t fv_process.constprop.0
-601c020c T mt_fv_last_item
-601c0a40 T mt_fv_next_last_item
-601c0a3c T mt_fv_next_pattern_update
-601c01d0 T mt_fv_pattern_update
-601c0000 T mt_fv_update
-601c0a44 T mt_version_fmt

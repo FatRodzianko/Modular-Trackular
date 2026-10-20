@@ -49,7 +49,7 @@ must be byte-identical to these builds:
 | colorsong | `TrackerPlus_c11.ptf` | `1.2.0-c11` | tested | `cc9119abe627d994ba6010bfe0db59129e3f494611dbc8c1e5c68fcf0653ebc6` |
 | humanize | `TrackerPlus_hz8.ptf` | `1.2.0-hz8` | not yet | `ec3c30fda0d186299e39cce2be48031303f3bc0583fd1e8803600b500bf4b46f` |
 | interpolate | `TrackerPlus_ip5.ptf` | `1.2.0-ip5` | not yet | `f3d98eb18f5852dc718d41ba9311e813d056d1ab5b37b1252e87cf0341c0942a` |
-| freeverb | `TrackerPlus_fv5.ptf` | `1.2.0-fv5` | tested | `4d13eb2d7b6d800b2a6de611c4dee1d1ce277ec5d13fac100d6a7c5f82bea0cb` |
+| masterfx | `TrackerPlus_mf1.ptf` | `1.2.0-mf1` | tested | `c058e26921513749d9d737477a91abe117a96cde245a788b3caaaa5968be6752` |
 | all (colorsong + humanize + interpolate) | `TrackerPlus_MTC.ptf` | `1.2.0-MTC` | tested | `5609dff165918fa6668385622eda3b97318dcf9909bab8bbcf760f2d06971a6a` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
@@ -64,7 +64,8 @@ Each patch can be installed on its own, or several can go into one firmware:
 
 - **One patch:** use its own spec. `patch/colorsong/patch.json` gives colorsong only,
   `patch/humanize/patch.json` Humanize only, `patch/interpolate/patch.json`
-  interpolate only, `patch/freeverb/patch.json` Freeverb as the master reverb.
+  interpolate only, `patch/masterfx/patch.json` the master reverb chosen per project
+  (Stock or Freeverb).
 - **Several patches:** use a bundle spec, which lists the patches to combine.
   `patch/all/patch.json` is the bundle that ships (colorsong + Humanize +
   interpolate):
@@ -160,7 +161,7 @@ python tools/emu/test_colorsong.py build/TrackerPlus_c11.ptf
 python tools/emu/test_rescan.py build/TrackerPlus_c11.ptf "path/to/<project A>" "path/to/<project B>"
 python tools/emu/test_humanize.py build/TrackerPlus_hz8.ptf
 python tools/emu/test_interpolate.py build/TrackerPlus_ip5.ptf
-python tools/emu/test_freeverb.py build/TrackerPlus_fv5.ptf path/to/TrackerPlus_1.2.0.ptf out/reverb_wav
+python tools/emu/test_masterfx.py build/TrackerPlus_mf1.ptf path/to/TrackerPlus_1.2.0.ptf out/reverb_wav
 ```
 
 Each test works on any firmware that contains its patch, so for a bundle run every
@@ -169,8 +170,9 @@ went from the `.map.json` the patcher wrote next to the `.ptf`, so keep the two
 together.
 
 `tools/test_layout.py` checks the patcher's placement without the emulator. It builds
-each patch alone, `patch/all`, the same patches in the other order, and two patches
-on the same chained sites, and checks that each patch's code and RAM sit where they
+each patch alone, `patch/all`, the same patches in the other order, `patch/all`'s
+patches with masterfx in both orders, and two patches on the same chained sites, and
+checks that each patch's code and RAM sit where they
 should (RAM in a region the patch may use, no two blocks overlapping), that exactly the
 words in its relocation table moved, that each chain word holds what its site pointed
 to before, and that every hooked site points at the last patch that hooks it. It also

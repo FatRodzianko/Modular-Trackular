@@ -1,21 +1,17 @@
 /*
- * freeverb: Freeverb as the master reverb (Polyend Tracker+ firmware 1.2.0).
+ * freeverb_dsp.h: Freeverb on the master reverb object (Polyend Tracker+ firmware 1.2.0),
+ * for masterfx.c. Include it once, in one .c file.
  *
- * The master reverb is one audio object (0x20019014, engine + 0x150c) in the firmware's
- * Teensy-style audio graph: once per audio block its update() (vtable 0x60042f94,
- * 0x60031e5d) takes the stereo reverb send (2 inputs of 128 16-bit samples), runs the
- * stock reverb on it in place and transmits it as the reverb return. mt_fv_update
- * replaces that update(): same blocks, same in-place processing, with Freeverb (Jezar
- * at Dreampoint, public domain) instead of the stock reverb.
- *
- * Freeverb: the send is summed to mono and fed to 8 parallel comb filters with a
- * one-pole lowpass in their feedback, then 4 series allpasses, per channel; the right
- * channel's delays are 23 samples longer (stereo spread). The delay lengths are
- * Freeverb's own, for 44.1 kHz. The delay lines are stored as 16-bit samples in the
- * stock reverb's two 32 KB SDRAM buffers (object +0x24 and +0x28), which the stock
- * reverb no longer uses: left in the first, right in the second, and the predelay line in
- * what is left at the end of the two. The patch clears them before first use. Its own
- * state (288 bytes) is on-chip.
+ * Freeverb (Jezar at Dreampoint, public domain): the send is summed to mono and fed to
+ * 8 parallel comb filters with a one-pole lowpass in their feedback, then 4 series
+ * allpasses, per channel; the right channel's delays are 23 samples longer (stereo
+ * spread). The delay lengths are Freeverb's own, for 44.1 kHz. The delay lines are
+ * stored as 16-bit samples in the stock reverb's two 32 KB SDRAM buffers (object +0x24
+ * and +0x28): left in the first, right in the second, and the predelay line in what is
+ * left at the end of the two. fv_init() lays them out, clear_step() clears the buffers a
+ * piece at a time, and freeverb_blocks() takes the two send blocks, runs Freeverb on them
+ * in place and transmits them, as the stock update() does. The state (struct fv_state,
+ * 288 bytes) is in .mt_ram, placed by the patcher.
  *
  * The filters run over the whole block at a time, in sample units (16-bit full scale =
  * 32768), so the delay lines need no scaling: the combs four at a time (adding their
@@ -30,32 +26,14 @@
  *  - Predelay (+0x6c, 0..5000 samples, up to about 113 ms) -> a delay before the reverb
  *  - Diffusion (+0x58, 0..0.85) -> allpass feedback 0.30..0.72
  * The return is mixed as the stock reverb mixes it: send + (wet - send) * amount, with
- * the object's amount (+0x4c, 0.8) and input gain (+0x50, 0.1). The bypass flag (+0x80)
- * works as before, and the block's average output level goes to +0x70, as the stock
- * reverb writes it.
- *
- * Start-up. Freeverb only takes over once the unit has finished booting: until the
- * Pattern screen's update method first runs, mt_fv_update calls the stock update().
- * Then it clears the two buffers a piece per block (silent meanwhile) and switches to
- * Freeverb. The Config menu constructor (a static constructor, so at every start)
- * resets that state, so Freeverb never runs during a boot.
- *
- * Diagnostic builds:
- *  - -DFV_PASSTHROUGH ("fvP"): the hook only calls the stock update();
- *  - -DFV_DIAG_CLEAR ("fvC"): the stock update(), plus the whole 64 KB clear at once on
- *    the first block that has input, from boot on;
- *  - -DFV_DIAG_MUTED ("fvD"): Freeverb runs from boot on, without clearing, and its
- *    output is the send unchanged (the wet signal is computed but not used).
- * Variant -DFV_FIXED: the combs and allpasses in integer arithmetic (the comb lowpass
- * state with 8 extra fractional bits, Q15 coefficients through SMULWB) instead of float;
- * the result differs from the float build only by rounding.
+ * the object's amount (+0x4c, 0.8) and input gain (+0x50, 0.1). The block's average
+ * output level goes to +0x70, as the stock reverb writes it.
  */
+#ifndef FREEVERB_DSP_H
+#define FREEVERB_DSP_H
+
 #include <stdint.h>
 #include <arm_acle.h>                      /* __ssat */
-
-#ifndef FREEVERB_VERSION
-#define FREEVERB_VERSION "fv5"
-#endif
 
 /* ---- firmware 1.2.0 (function pointers carry the Thumb bit) ---------------------- */
 #define FW_RECEIVE_WRITABLE 0x600305D5u     /* (object, input) -> block or 0 */
@@ -81,16 +59,6 @@
 typedef void *(*receive_fn)(void *obj, uint32_t input);
 typedef void (*transmit_fn)(void *obj, void *block, uint32_t output);
 typedef void (*release_fn)(void *block);
-typedef void (*update_fn)(void *obj);
-typedef void (*screen_update_fn)(void *screen, void *a1, void *a2, void *a3);
-typedef void *(*item_fn)(void *node, void *parent, const char *label, const char *help,
-                         uint32_t type, const void *descriptor);
-
-/* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
- * compiler must read them, not assume the 0 they are linked with. */
-#define CHAIN_WORD(name) const volatile uint32_t name __attribute__((used)) = 0
-CHAIN_WORD(mt_fv_next_pattern_update);      /* Pattern screen update 0x600e1f99 */
-CHAIN_WORD(mt_fv_next_last_item);           /* last item: cfg_menu_item 0x601183e9 */
 
 /* ---- Freeverb tuning (44.1 kHz) ---------------------------------------------------- */
 #define COMBS               8u
@@ -121,7 +89,7 @@ struct fv_state {
     uint32_t buf_l, buf_r;                  /* the buffers the lines were laid out in */
     struct line comb[2][COMBS];
     struct line allpass[2][ALLPASSES];
-    float comb_store[2][COMBS];             /* comb lowpass states (FV_FIXED: int32, x256) */
+    float comb_store[2][COMBS];             /* comb lowpass states */
     uint16_t pre_pos;                       /* predelay ring write position, 0..PRE_RING-1 */
     uint16_t pre_split;                     /* ring positions below this are in the left buffer */
     uint32_t pre_l, pre_r;                  /* the ring's two parts: the buffers' unused ends */
@@ -279,94 +247,6 @@ __attribute__((unused)) static void allpass_chain(struct line *a, int16_t *buf, 
         a[k].pos = (uint16_t)pos[k];
 }
 
-#ifdef FV_FIXED
-static inline int32_t mulw(int32_t a, int32_t q15)          /* a * q15 / 2^16 (one SMULWB) */
-{
-    int32_t r;
-    __asm__("smulwb %0, %1, %2" : "=r"(r) : "r"(a), "r"(q15));
-    return r;
-}
-
-/* Four comb filters over the block, in integers: x8 is the input x256, the lowpass
- * state is kept x256, the coefficients are Q15 (SMULWB); acc gets the sum of the outputs. */
-static inline __attribute__((always_inline)) void comb_group_i(struct line *c, int16_t *buf, int32_t *store_p,
-                                                               const int32_t *x8, int32_t *acc, int first,
-                                                               int32_t feedback, int32_t damp1, int32_t damp2)
-{
-    uint32_t pos[GROUP], len[GROUP];
-    for (uint32_t k = 0; k < GROUP; k++) {
-        pos[k] = c[k].pos;
-        len[k] = c[k].len;
-    }
-    int32_t s0 = store_p[0], s1 = store_p[1], s2 = store_p[2], s3 = store_p[3];
-    for (uint32_t n = 0; n < BLOCK;) {
-        uint32_t run = run_length(pos, len, GROUP, BLOCK - n);
-        int16_t *q0 = buf + c[0].start + pos[0], *q1 = buf + c[1].start + pos[1];
-        int16_t *q2 = buf + c[2].start + pos[2], *q3 = buf + c[3].start + pos[3];
-        const int32_t *x = x8 + n;
-        int32_t *a = acc + n;
-        for (uint32_t k = 0; k < run; k++) {
-            int32_t o0 = q0[k], o1 = q1[k], o2 = q2[k], o3 = q3[k];
-            s0 = mulw(o0 << 9, damp2) + mulw(s0 << 1, damp1);
-            q0[k] = (int16_t)__ssat((x[k] + mulw(s0 << 1, feedback)) >> 8, 16);
-            s1 = mulw(o1 << 9, damp2) + mulw(s1 << 1, damp1);
-            q1[k] = (int16_t)__ssat((x[k] + mulw(s1 << 1, feedback)) >> 8, 16);
-            s2 = mulw(o2 << 9, damp2) + mulw(s2 << 1, damp1);
-            q2[k] = (int16_t)__ssat((x[k] + mulw(s2 << 1, feedback)) >> 8, 16);
-            s3 = mulw(o3 << 9, damp2) + mulw(s3 << 1, damp1);
-            q3[k] = (int16_t)__ssat((x[k] + mulw(s3 << 1, feedback)) >> 8, 16);
-            a[k] = (first ? 0 : a[k]) + o0 + o1 + o2 + o3;
-        }
-        for (uint32_t k = 0; k < GROUP; k++)
-            if ((pos[k] += run) == len[k])
-                pos[k] = 0;
-        n += run;
-    }
-    for (uint32_t k = 0; k < GROUP; k++)
-        c[k].pos = (uint16_t)pos[k];
-    store_p[0] = s0;
-    store_p[1] = s1;
-    store_p[2] = s2;
-    store_p[3] = s3;
-}
-
-/* The four allpasses in series, in integers (feedback Q15), in place. */
-static void allpass_chain_i(struct line *a, int16_t *buf, int32_t *io, int32_t feedback)
-{
-    uint32_t pos[ALLPASSES], len[ALLPASSES];
-    for (uint32_t k = 0; k < ALLPASSES; k++) {
-        pos[k] = a[k].pos;
-        len[k] = a[k].len;
-    }
-    for (uint32_t n = 0; n < BLOCK;) {
-        uint32_t run = run_length(pos, len, ALLPASSES, BLOCK - n);
-        int16_t *q0 = buf + a[0].start + pos[0], *q1 = buf + a[1].start + pos[1];
-        int16_t *q2 = buf + a[2].start + pos[2], *q3 = buf + a[3].start + pos[3];
-        int32_t *v = io + n;
-        for (uint32_t k = 0; k < run; k++) {
-            int32_t x = v[k], b;
-            b = q0[k];
-            q0[k] = (int16_t)__ssat(x + ((b * feedback) >> 15), 16);
-            x = b - x;
-            b = q1[k];
-            q1[k] = (int16_t)__ssat(x + ((b * feedback) >> 15), 16);
-            x = b - x;
-            b = q2[k];
-            q2[k] = (int16_t)__ssat(x + ((b * feedback) >> 15), 16);
-            x = b - x;
-            b = q3[k];
-            q3[k] = (int16_t)__ssat(x + ((b * feedback) >> 15), 16);
-            v[k] = b - x;
-        }
-        for (uint32_t k = 0; k < ALLPASSES; k++)
-            if ((pos[k] += run) == len[k])
-                pos[k] = 0;
-        n += run;
-    }
-    for (uint32_t k = 0; k < ALLPASSES; k++)
-        a[k].pos = (uint16_t)pos[k];
-}
-#endif
 
 /* lo..hi; NaN (from a corrupted project) counts as lo, so filter states never get NaN */
 static float fclamp(float v, float lo, float hi)
@@ -400,46 +280,25 @@ static float fv_process(uint8_t *obj, int16_t *left, int16_t *right, int muted)
     float wet_gain = SCALE_WET * OUTPUT_TRIM / LINE_GAIN;
 
     /* the mono send through the predelay (a ring of PRE_RING samples) */
-#ifdef FV_FIXED
-    int32_t mono[BLOCK];                    /* x256 */
-    float in_scale = 2.0f * in_gain * 256.0f;
-#else
     float mono[BLOCK];
-#endif
     uint32_t wr = FV->pre_pos;
     for (uint32_t n = 0; n < BLOCK; n++) {
         *pre_at(wr) = sat16(((float)left[n] + (float)right[n]) * 0.5f);
         uint32_t rd = wr + PRE_RING - (uint32_t)predelay;
         if (rd >= PRE_RING)
             rd -= PRE_RING;
-#ifdef FV_FIXED
-        mono[n] = (int32_t)((float)*pre_at(rd) * in_scale);
-#else
         mono[n] = (float)*pre_at(rd) * 2.0f * in_gain;
-#endif
         if (++wr == PRE_RING)
             wr = 0;
     }
     FV->pre_pos = (uint16_t)wr;
 
     float level = 0.0f;
-#ifdef FV_FIXED
-    int32_t fb_q15 = (int32_t)(feedback * 32767.0f), d1_q15 = (int32_t)(damp1 * 32767.0f);
-    int32_t d2_q15 = (int32_t)(damp2 * 32767.0f), ap_q15 = (int32_t)(ap_feedback * 32768.0f);
-    int32_t *store = (int32_t *)FV->comb_store[0];
-#endif
     for (uint32_t ch = 0; ch < 2; ch++) {
-#ifdef FV_FIXED
-        int32_t acc[BLOCK];
-        comb_group_i(&FV->comb[ch][0], buf[ch], store + ch * COMBS, mono, acc, 1, fb_q15, d1_q15, d2_q15);
-        comb_group_i(&FV->comb[ch][GROUP], buf[ch], store + ch * COMBS + GROUP, mono, acc, 0, fb_q15, d1_q15, d2_q15);
-        allpass_chain_i(FV->allpass[ch], buf[ch], acc, ap_q15);
-#else
         float acc[BLOCK];
         comb_group(&FV->comb[ch][0], buf[ch], &FV->comb_store[ch][0], mono, acc, 1, feedback, damp1, damp2);
         comb_group(&FV->comb[ch][GROUP], buf[ch], &FV->comb_store[ch][GROUP], mono, acc, 0, feedback, damp1, damp2);
         allpass_chain(FV->allpass[ch], buf[ch], acc, ap_feedback);
-#endif
         int16_t *s = io[ch];
         for (uint32_t n = 0; n < BLOCK; n++) {
             float wet = (float)acc[n] * wet_gain, dry = (float)s[n];
@@ -470,65 +329,4 @@ __attribute__((unused)) static void freeverb_blocks(uint8_t *obj, int muted)
     ((release_fn)FW_RELEASE)(right);
 }
 
-/* Reverb object vtable slot 0x60042f94 (update method 0x60031e5d) */
-void mt_fv_update(uint8_t *obj)
-{
-    uint32_t buf_l = *(volatile uint32_t *)(obj + RV_BUF_L), buf_r = *(volatile uint32_t *)(obj + RV_BUF_R);
-#if defined(FV_PASSTHROUGH)
-    (void)buf_l;
-    (void)buf_r;
-    ((update_fn)FW_REVERB_UPDATE)(obj);
-#elif defined(FV_DIAG_CLEAR)
-    if (FV->magic != FV_MAGIC && !obj[RV_BYPASS] && buf_l && buf_r) {
-        fv_init(buf_l, buf_r);
-        clear_step(BUFFER_SAMPLES / 2);
-    }
-    ((update_fn)FW_REVERB_UPDATE)(obj);
-#elif defined(FV_DIAG_MUTED)
-    if (obj[RV_BYPASS] || !buf_l || !buf_r)
-        return;
-    if (FV->magic != FV_MAGIC || FV->buf_l != buf_l || FV->buf_r != buf_r) {
-        fv_init(buf_l, buf_r);
-        FV->cleared = BUFFER_SAMPLES / 2;   /* not cleared: the output is muted */
-    }
-    freeverb_blocks(obj, 1);
-#else
-    if (FV->ready != FV_READY) {            /* still booting: the stock reverb */
-        ((update_fn)FW_REVERB_UPDATE)(obj);
-        return;
-    }
-    if (obj[RV_BYPASS] || !buf_l || !buf_r)
-        return;
-    if (FV->magic != FV_MAGIC || FV->buf_l != buf_l || FV->buf_r != buf_r)
-        fv_init(buf_l, buf_r);
-    if (FV->cleared < BUFFER_SAMPLES / 2) { /* clearing: silent, like the bypass */
-        clear_step(CLEAR_WORDS);
-        return;
-    }
-    freeverb_blocks(obj, 0);
 #endif
-}
-
-/* Pattern screen vtable slot 0x600403dc (update method 0x600e1f99; chained): the unit
- * has booted, Freeverb may take over. */
-void mt_fv_pattern_update(void *screen, void *a1, void *a2, void *a3)
-{
-    if (FV->ready != FV_READY) {
-        FV->magic = 0;                      /* lay out and clear before the first block */
-        FV->ready = FV_READY;
-    }
-    ((screen_update_fn)mt_fv_next_pattern_update)(screen, a1, a2, a3);
-}
-
-/* replaces the Config menu constructor's last "bl 0x601183e8" (Licenses) at 0x601193e6
- * (chained): a static constructor, so this runs at every start, before the audio. */
-void *mt_fv_last_item(void *node, void *parent, const char *label, const char *help,
-                      uint32_t type, const void *descriptor)
-{
-    FV->ready = 0;
-    FV->magic = 0;
-    return ((item_fn)mt_fv_next_last_item)(node, parent, label, help, type, descriptor);
-}
-
-/* ---- version text: Config shows 1.2.0-<FREEVERB_VERSION> --------------------------- */
-const char mt_version_fmt[] = "%d.%d.%d-" FREEVERB_VERSION;

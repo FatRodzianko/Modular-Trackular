@@ -1278,7 +1278,7 @@ setting, as for FX Interpolation). This keeps everything else as it is:
   through the real block helpers and its output written to a WAV file for listening,
   before it goes near hardware.
 
-**Boot hang with RAM in `sdram_top`.** The first build of `patch/freeverb` kept 10 KB of
+**Boot hang with RAM in `sdram_top`.** The first Freeverb build kept 10 KB of
 state (mostly the predelay line) in `sdram_top`, written from the audio interrupt, and
 the unit stopped at the boot logo, before the project's progress bar, every time (with
 all reverb and delay sends at 0 as well); the pinhole recovery brought it back. The
@@ -1308,8 +1308,8 @@ specific to running it while the unit starts, not steady load.
 The mixer's reverb mute (Master page 3) stops the reverb's input, not its return: on
 stock 1.2.0 a long tail keeps ringing after the channel is muted.
 
-`patch/freeverb` does this for the reverb: Freeverb (public domain) in place of the
-stock reverb, reading Size (`+0x54`), Damping (`+0x5c` = 1 - damping), Diffusion
+`patch/masterfx` does this for the reverb: Freeverb (public domain) in place of the
+stock reverb when the project chooses it, reading Size (`+0x54`), Damping (`+0x5c` = 1 - damping), Diffusion
 (`+0x58`, the setter clamps it to 0..0.85) and Predelay (`+0x6c`, 0..5000 samples) as
 the Master Reverb setters (`0x600b3618`, `0x600b3628`, `0x600b3660`, `0x600b3640`)
 store them, and mixing its return like the stock reverb: send + (wet - send) * amount
@@ -1319,3 +1319,62 @@ store them, and mixing its return like the stock reverb: send + (wet - send) * a
 Open-source algorithms with licenses that fit (MIT or public domain) include Freeverb,
 the Dattorro plate, CloudSeed, and the reverbs and delays in Mutable Instruments'
 eurorack code.
+
+### Choosing the effect per project
+
+Keeping the stock reverb and offering Freeverb (or others) as a choice works, tested in
+the emulator by letting the stock `update()` and Freeverb take turns on the same object
+(`patch/masterfx` does this, with a Project Settings item and a file per project):
+
+- **What the stock reverb keeps:** a write watch over 40 blocks of its `update()` shows
+  writes only to the audio blocks, its two 32 KB buffers (`+0x24`, `+0x28`, all of
+  both), and object fields `+0x1c`/`+0x20` (positions), `+0x3c`/`+0x40` (LFO),
+  `+0x60`..`+0x68` (filter states) and `+0x70` (level). Nothing else.
+- **Freeverb to stock:** the stock reverb run on Freeverb's leftover buffers plays them
+  back (peak 4,932 with silence in), so the switch has to clear both buffers and zero
+  `+0x60`..`+0x68` first. After that it is silent with silence in, and its impulse
+  response matches a stock-only unit's (same level and decay; samples differ by up to
+  31 because its LFO is at another point).
+- **Stock to Freeverb:** Freeverb's own start (state reset, buffers cleared over 8
+  silent blocks) gives output identical to the bit to a fresh Freeverb.
+- **Back and forth:** 20 switches with noise going through, every tail dies out to
+  zero, as on a stock-only unit.
+
+**A NaN setting silences the stock reverb for good.** In stock firmware, a NaN in
+Size (`+0x54`), the damping field (`+0x5c`) or Diffusion (`+0x58`) makes its filter
+states (`+0x64`, `+0x68`, with an infinite damping field also `+0x60`) NaN, and they stay
+NaN after the setting is normal again: no reverb until a restart (emulator). The Master
+page setters clamp their values, so the knobs can't do it; only a damaged value from
+elsewhere could. Freeverb clamps NaN to the bottom of each range, and a switch to the
+stock reverb zeroes those states.
+
+Switching costs at most 8 blocks (23 ms) of silent reverb return (the dry signal is
+not touched), and the rule from the boot hang stays: the stock reverb runs until the
+Pattern screen has updated once, whatever the project chose.
+
+**The delay** is swapped the same way. Its `update()` (`0x60032404`) receives the mono
+send read-only, allocates two blocks, runs `master_delay_process(obj, in, out_l,
+out_r, 128)` and transmits them as the stereo return. Its three 2^18-sample buffers
+(512 KB each) are at object `+0x14`, `+0x18`, `+0x1c`; they are allocated at runtime
+(zero after the static constructors), so a swapped delay must check them before use.
+The other fields read by the DSP: `+0x20`, `+0x28` (positions), `+0x2c` (feedback),
+`+0x2d` (bypass), `+0x2e` (ping-pong), `+0x30`..`+0x50` (filter coefficients and
+states). Which Master Delay knob writes which field isn't mapped yet.
+
+**The choice** fits the Config menu's option item (type 4: value pointer, count, names,
+apply callback; section 14), so a "Reverb" item in Project Settings can list Stock,
+Freeverb and others, and it can be kept per project in a file next to the project, as
+`interpolate.bin` is. Stock firmware ignores the file and plays the stock effects.
+
+**Effects loaded from the SD card.** The MPU (decoded in the emulator) leaves every RAM
+region executable (XN = 0 for ITCM, DTCM, OCRAM and SDRAM), so code read from a file can
+run. What it needs: a fixed binary format (header with magic, interface version, name,
+code size, entry points for init and process, and a relocation table, which the patcher's
+`.rel` format already is); a loader that reads it outside the audio interrupt (from the
+Pattern or Config screen's update, as the settings files are); code memory (on-chip RAM
+is small: the free regions are 1.2 KB of ITCM, 5 KB of DTCM and 12 KB of OCRAM, shared
+with the other patches; the SDRAM top has 25 KB but is cached, so after loading, the
+D-cache must be cleaned and the I-cache invalidated); and state memory (the reverb's
+64 KB of buffers, the delay's 1.5 MB). A bad file can crash the unit, so the loader
+should check the header and size, the effect should start only after boot, and taking
+the file off the card should bring back the stock effect.

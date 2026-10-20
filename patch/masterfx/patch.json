@@ -1,0 +1,65 @@
+{
+  "name": "masterfx",
+  "description": "Master reverb per project: Config > Project Settings > Master FX > Reverb chooses Stock (default) or Freeverb (public domain) for each project; the Master Reverb knobs drive both",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "ram_startup": true,
+  "ram_regions": [
+    "ocram_tail",
+    "dtcm_above_heap"
+  ],
+  "bin": "build/masterfx.bin",
+  "sym": "build/masterfx.sym",
+  "rel": "build/masterfx.rel",
+  "prebuilt_bin": "prebuilt/masterfx.bin",
+  "prebuilt_sym": "prebuilt/masterfx.sym",
+  "prebuilt_rel": "prebuilt/masterfx.rel",
+  "branches": [
+    {
+      "at": "0x60118B00",
+      "old": "fff748fc",
+      "to": "mt_mfx_settings_folder",
+      "next": "mt_mfx_next_folder",
+      "note": "Config menu constructor: Project Settings folder, room for one more item"
+    },
+    {
+      "at": "0x601193E6",
+      "old": "fef7ffff",
+      "to": "mt_mfx_last_item",
+      "next": "mt_mfx_next_last_item",
+      "note": "Config menu constructor: last item (Licenses); then adds the Master FX folder (Reverb) to Project Settings, and puts the reverb back to stock until the Pattern screen runs"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x60042F94",
+      "old": "5d1e0360",
+      "to": "mt_mfx_reverb_update",
+      "thumb": true,
+      "note": "master reverb object vtable: update method 0x60031e5d -> mt_mfx_reverb_update (the project's reverb: stock or Freeverb)"
+    },
+    {
+      "at": "0x600403DC",
+      "old": "991f0e60",
+      "to": "mt_mfx_pattern_update",
+      "next": "mt_mfx_next_pattern_update",
+      "thumb": true,
+      "note": "Pattern screen vtable: update method 0x600e1f99 -> mt_mfx_pattern_update (settings file load/save; the unit has booted)"
+    },
+    {
+      "at": "0x6003B5F8",
+      "old": "75640c60",
+      "to": "mt_mfx_config_update",
+      "next": "mt_mfx_next_config_update",
+      "thumb": true,
+      "note": "Config screen vtable: update method 0x600c6475 -> mt_mfx_config_update (settings file load/save)"
+    },
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "version": true,
+      "note": "version text 1.2.0-mf1"
+    }
+  ]
+}
