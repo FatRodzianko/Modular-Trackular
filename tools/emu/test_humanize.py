@@ -55,7 +55,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
-from layout import patch_ram  # noqa: E402
+from layout import patch_code, patch_ram  # noqa: E402
 from machine import Machine  # noqa: E402
 from song_grid import PATTERN_DATA_SIZE  # noqa: E402
 
@@ -102,6 +102,7 @@ STEPS = 0x1D
 EMPTY, OFF, CUT, FADE = 0xFF, 0xFC, 0xFD, 0xFE
 FX_M, FX_V, FX_CUTOFF, FX_PAN = 2, 18, 27, 31
 
+CODE = (0, 0)                       # set in main(): the patch's code, start and end
 failures: list[str] = []
 
 
@@ -295,9 +296,10 @@ def check_rules(before: bytes, after: bytes, inside, p: Params = DEFAULTS) -> tu
 
 
 def main() -> int:
-    global HZ, HZ_VALUE
+    global HZ, HZ_VALUE, CODE
     ptf = Path(sys.argv[1])
     HZ = patch_ram(ptf, "humanize")
+    CODE = patch_code(ptf, "humanize")
     HZ_VALUE = HZ + 8
     r = Rig(ptf)
     m = r.m
@@ -309,7 +311,7 @@ def main() -> int:
     r.record(True)
     m.call(PAGE3_BIND, 0)
     kind, handler = r.entry(2)
-    in_patch = 0x601BAB78 <= handler < 0x601C0000 and handler & 1
+    in_patch = CODE[0] <= handler < CODE[1] and handler & 1
     check(kind == 1 and bool(in_patch), f"record mode: button 2 bound to a patch handler ({kind}, {handler:#x})")
     for i, h in STOCK_HANDLERS.items():
         check(r.entry(i) == (1, h), f"button {i} keeps its stock handler {h:#x}")
@@ -566,7 +568,7 @@ def menu_checks(ptf: Path) -> None:
               f"Apply on {name} ({value}): stored, editor closed")
     opt = m.r32(items[1] + 0x10)
     cb = m.r32(opt + 12)
-    check(0x601BAB78 <= cb < 0x601C0000 and cb & 1, f"Volume/velocity has an apply callback in the patch ({cb:#x})")
+    check(CODE[0] <= cb < CODE[1] and cb & 1, f"Volume/velocity has an apply callback in the patch ({cb:#x})")
     back = m.call(MENU_BACK)
     check(back == 1 and m.r32(MENU_CURRENT) == ps, "back returns to Project Settings")
     back = m.call(MENU_BACK)

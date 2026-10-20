@@ -58,7 +58,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from patch_ptf import bl_target  # noqa: E402
 from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
-from layout import patch_ram  # noqa: E402
+from layout import patch_code, patch_ram  # noqa: E402
 from machine import Machine  # noqa: E402
 from seq_timing import PROJECT, SEQ, SEQ_PLAY_FROM, SETTINGS, make, pattern, set_step  # noqa: E402
 
@@ -93,6 +93,7 @@ SAVE_DELAY = 25
 STOCK_ITEMS = ["Performance presets", "Pattern divider", "Notes scale", "Root note", "Notes layout",
                "Anti-aliasing", "Limiter mode", "Sends mode", "Extra headroom", "Snap to zero"]
 
+CODE = (0, 0)                       # set in main(): the patch's code, start and end
 failures: list[str] = []
 
 
@@ -614,7 +615,7 @@ def menu_checks(ptf: Path) -> None:
         desc = m.r32(item + 0x10)
         cb = m.r32(desc + 12)
         check(m.r32(item + 0xC) & 0xFF == 4 and m.r32(desc) == addr and m.r32(desc + 4) & 0xFF == 2
-              and m.r32(desc + 8) == OFF_ON and 0x601BAB78 <= cb < 0x601D0000 and cb & 1
+              and m.r32(desc + 8) == OFF_ON and CODE[0] <= cb < CODE[1] and cb & 1
               and m.cstr(m.r32(item + 8)) != "" and m.uc.mem_read(addr, 1)[0] == 0,
               f"'{label}': a stock Off/On item on its own setting, with help text and an apply callback "
               "in the patch, starting Off")
@@ -710,9 +711,10 @@ def fnv1a(data: bytes) -> int:
 
 
 def main() -> int:
-    global IP, IP_VALUE, IP_SYNTH
+    global IP, IP_VALUE, IP_SYNTH, CODE
     ptf = Path(sys.argv[1])
     IP = patch_ram(ptf, "interpolate")
+    CODE = patch_code(ptf, "interpolate")
     IP_VALUE = IP + 8
     IP_SYNTH = IP + 16
     playback_checks(ptf)

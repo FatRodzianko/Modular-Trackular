@@ -1,6 +1,6 @@
 {
   "name": "masterfx",
-  "description": "Master reverb per project: Config > Project Settings > Master FX > Reverb chooses Stock (default) or Freeverb (public domain) for each project; the Master Reverb knobs drive both",
+  "description": "Master reverb and delay per project: Config > Project Settings > Master FX > Reverb chooses Stock (default), Freeverb (public domain), Plate (Dattorro), Spring or Shimmer, and Delay chooses Stock (default), Tape (a tape echo), BBD (an analog bucket-brigade delay) or \"Gated\" (a gated reverb burst), for each project; the Master Reverb and Master Delay knobs drive them",
   "firmware": "TrackerPlus 1.2.0",
   "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
   "ram_startup": true,
@@ -27,7 +27,7 @@
       "old": "fef7ffff",
       "to": "mt_mfx_last_item",
       "next": "mt_mfx_next_last_item",
-      "note": "Config menu constructor: last item (Licenses); then adds the Master FX folder (Reverb) to Project Settings, and puts the reverb back to stock until the Pattern screen runs"
+      "note": "Config menu constructor: last item (Licenses); then adds the Master FX folder (Reverb, Delay) to Project Settings, and puts the reverb and delay back to stock until the Pattern screen runs"
     }
   ],
   "words": [
@@ -36,7 +36,14 @@
       "old": "5d1e0360",
       "to": "mt_mfx_reverb_update",
       "thumb": true,
-      "note": "master reverb object vtable: update method 0x60031e5d -> mt_mfx_reverb_update (the project's reverb: stock or Freeverb)"
+      "note": "master reverb object vtable: update method 0x60031e5d -> mt_mfx_reverb_update (the project's reverb: stock, Freeverb, Plate, Spring or Shimmer)"
+    },
+    {
+      "at": "0x60042FEC",
+      "old": "05240360",
+      "to": "mt_mfx_delay_update",
+      "thumb": true,
+      "note": "master delay object vtable: update method 0x60032405 -> mt_mfx_delay_update (the project's delay: stock, Tape, BBD or \"Gated\")"
     },
     {
       "at": "0x600403DC",
@@ -59,7 +66,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-mf1"
+      "note": "version text 1.2.0-mf4"
     }
   ]
 }

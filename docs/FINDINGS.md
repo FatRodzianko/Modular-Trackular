@@ -1251,9 +1251,9 @@ of 150, 214, 319 and 527 samples, then loop allpasses of 2182 and 2690, laid out
 another by MI's `FxEngine`. Its default diffusion 0.625 and damping 0.7 are that
 reverb's `Init()` values, and like it, it stores 16-bit samples, processes in float and
 modulates taps with an LFO. So swapping in one of MI's reverbs would change little; a
-swap that sounds different needs a different algorithm. Which Master page parameter writes which field isn't mapped
-yet; the page labels are Size, Damping, Predelay and Diffusion for the reverb and
-PingPong, Sync, Rate, Time, Feedback and Filter for the delay (manual 10.3, 10.4).
+swap that sounds different needs a different algorithm. The Master page's labels are
+Size, Damping, Predelay and Diffusion for the reverb and PingPong, Sync, Rate, Time,
+Feedback and Filter for the delay (manual 10.3, 10.4); the fields they write are below.
 
 ### Swapping one
 
@@ -1359,7 +1359,33 @@ out_r, 128)` and transmits them as the stereo return. Its three 2^18-sample buff
 (zero after the static constructors), so a swapped delay must check them before use.
 The other fields read by the DSP: `+0x20`, `+0x28` (positions), `+0x2c` (feedback),
 `+0x2d` (bypass), `+0x2e` (ping-pong), `+0x30`..`+0x50` (filter coefficients and
-states). Which Master Delay knob writes which field isn't mapped yet.
+states).
+
+**The Master Delay knobs.** The engine's setters (`0x600b35b4`..`0x600b3614`, on the
+delay object at engine `+0x2620`, next to the reverb's at `+0x261c`) call the delay
+object's own (they block the audio interrupt while they write, `0x600303d4` /
+`0x600303c8`):
+
+| Knob | Setter | Field |
+|---|---|---|
+| Feedback | `0x60031f20` (0..0.99) | byte `+0x2c` = value × 255 (0..252) |
+| Time | `0x60031f80` (ms, up to 3500) | `+0x28` = ms × 44.1: the delay in samples |
+| Rate (with Sync) | `0x60031fe0` (index) | only with `+0x2f` set: `+0x28` = (15000 / BPM) ms (a 16th note) × a table at `0x60042f98` (8, 6, 4, 3, 2, 1.5, 1, 0.75, 0.5, 0.375, 1/3, 0.25, 0.1875, 1/6, 0.125, 1/12, 0.0625, 1/24, 1/32), up to 3500 ms |
+| PingPong | `0x60032060` | byte `+0x2e` |
+| Sync | `0x60032068` | byte `+0x2f` |
+| Filter | `0x60032070` (Hz) | a one-pole lowpass: w = 2π f / 44100, p = cos w / (1 + sin w); `+0x30` = `+0x34` = (1 − p) / 2 × 1023, `+0x38` = −p × 1023 (Q10); its states `+0x3c`..`+0x50` are zeroed |
+
+The project keeps PingPong, Sync and Rate in one byte (`+0x6d2` of the project
+structure: bit 7, bit 6, bits 0..5), which `0x601912e4` and `0x6019197a` hand to the
+three setters (through veneers at `0x601acdd4`, `0x601ad0e4`, `0x601acc44`). `0x600322a0`
+and `0x600322a8` set and clear the bypass byte (`+0x2d`, set after the constructors).
+
+Measured in the emulator (buffers given): the return is the echoes only; an impulse
+comes back after exactly Time, then every Time again, each repeat about 0.43 × the one
+before at Feedback 0.5 with the Filter open; the Filter is on every echo, the first one
+included; with PingPong the first echo is on the right, then left, then right. It costs
+about 8,000 instructions per block. `patch/masterfx`'s Tape reads these same fields
+(`+0x28` for the time, synced or not), so the knobs keep working.
 
 **The choice** fits the Config menu's option item (type 4: value pointer, count, names,
 apply callback; section 14), so a "Reverb" item in Project Settings can list Stock,

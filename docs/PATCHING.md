@@ -47,9 +47,9 @@ must be byte-identical to these builds:
 | Patch | Output file | Version text in Config | On hardware | Output SHA-256 |
 |---|---|---|---|---|
 | colorsong | `TrackerPlus_c11.ptf` | `1.2.0-c11` | tested | `cc9119abe627d994ba6010bfe0db59129e3f494611dbc8c1e5c68fcf0653ebc6` |
-| humanize | `TrackerPlus_hz8.ptf` | `1.2.0-hz8` | not yet | `ec3c30fda0d186299e39cce2be48031303f3bc0583fd1e8803600b500bf4b46f` |
-| interpolate | `TrackerPlus_ip5.ptf` | `1.2.0-ip5` | not yet | `f3d98eb18f5852dc718d41ba9311e813d056d1ab5b37b1252e87cf0341c0942a` |
-| masterfx | `TrackerPlus_mf1.ptf` | `1.2.0-mf1` | tested | `c058e26921513749d9d737477a91abe117a96cde245a788b3caaaa5968be6752` |
+| humanize | `TrackerPlus_hz8.ptf` | `1.2.0-hz8` | tested (in `all`) | `ec3c30fda0d186299e39cce2be48031303f3bc0583fd1e8803600b500bf4b46f` |
+| interpolate | `TrackerPlus_ip5.ptf` | `1.2.0-ip5` | tested (in `all`) | `f3d98eb18f5852dc718d41ba9311e813d056d1ab5b37b1252e87cf0341c0942a` |
+| masterfx | `TrackerPlus_mf4.ptf` | `1.2.0-mf4` | tested | `0f3f9cd0c0c00ceed7651aacece96bd52dd084991e82f9e03d814630b898df1a` |
 | all (colorsong + humanize + interpolate) | `TrackerPlus_MTC.ptf` | `1.2.0-MTC` | tested | `5609dff165918fa6668385622eda3b97318dcf9909bab8bbcf760f2d06971a6a` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
@@ -64,8 +64,8 @@ Each patch can be installed on its own, or several can go into one firmware:
 
 - **One patch:** use its own spec. `patch/colorsong/patch.json` gives colorsong only,
   `patch/humanize/patch.json` Humanize only, `patch/interpolate/patch.json`
-  interpolate only, `patch/masterfx/patch.json` the master reverb chosen per project
-  (Stock or Freeverb).
+  interpolate only, `patch/masterfx/patch.json` the master reverb and delay chosen per project
+  (see its README for the effects).
 - **Several patches:** use a bundle spec, which lists the patches to combine.
   `patch/all/patch.json` is the bundle that ships (colorsong + Humanize +
   interpolate):
@@ -102,9 +102,9 @@ The patches in one firmware have to fit together:
   data word only if both chain it: the hook names a `next` word in the patch, which
   the patcher fills with what the site pointed to before (the stock function, or the
   hook of the patch listed before it), and the patch calls through that word instead
-  of calling the stock function. The last patch listed runs first. Humanize and
-  interpolate chain the Project Settings menu and the Pattern and Config update
-  methods this way, so both appear in Config. Sites only one patch needs can stay
+  of calling the stock function. The last patch listed runs first. Humanize,
+  interpolate and masterfx chain the Project Settings menu and the Pattern and Config
+  update methods this way, so they all appear in Config. Sites only one patch needs can stay
   plain.
 - **RAM: handled for you.** Each patch's state variables are one block (its
   `.mt_ram` section). The patcher hands the blocks out from the free RAM regions
@@ -161,7 +161,7 @@ python tools/emu/test_colorsong.py build/TrackerPlus_c11.ptf
 python tools/emu/test_rescan.py build/TrackerPlus_c11.ptf "path/to/<project A>" "path/to/<project B>"
 python tools/emu/test_humanize.py build/TrackerPlus_hz8.ptf
 python tools/emu/test_interpolate.py build/TrackerPlus_ip5.ptf
-python tools/emu/test_masterfx.py build/TrackerPlus_mf1.ptf path/to/TrackerPlus_1.2.0.ptf out/reverb_wav
+python tools/emu/test_masterfx.py build/TrackerPlus_mf4.ptf path/to/TrackerPlus_1.2.0.ptf out/fx_wav
 ```
 
 Each test works on any firmware that contains its patch, so for a bundle run every
@@ -199,9 +199,12 @@ The test projects are copies of project folders from the SD card (`Projects/...`
 Config → Firmware → `TrackerPlus_1.2.0.ptf` → confirm. Config shows `1.2.0 Build 1504`
 again.
 
-colorsong saves each project's colors as `colorsong.bin` inside the project folder.
-Stock firmware ignores these files, and you can delete them (deleting one also resets
-that project's colors to song order).
+Some mods keep per-project settings in a small file inside the project folder:
+colorsong its colors in `colorsong.bin`, Humanize its ranges and velocities in
+`humanize.bin`, interpolate its switches in `interpolate.bin`, masterfx its effect
+choices in `masterfx.bin`. Stock firmware ignores these files, and you can delete them
+(deleting one resets that mod's settings for the project: colorsong's colors go back to
+song order, the others to their defaults).
 
 ## 5. If it doesn't boot
 

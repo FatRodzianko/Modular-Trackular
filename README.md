@@ -25,9 +25,13 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   rate capped so notes always get through. MIDI and synths each have their own
   per-project setting under Config → Project Settings → FX Interpolation (both Off by
   default). Tested on hardware. See [patch/interpolate/README.md](patch/interpolate/README.md).
-- **masterfx**: each project chooses its master reverb under Config → Project Settings →
-  Master FX → Reverb: Stock (default) or Freeverb (public domain), driven by the same
-  Master Reverb knobs. Tested on hardware. See [patch/masterfx/README.md](patch/masterfx/README.md).
+- **masterfx**: each project chooses its master effects under Config → Project Settings →
+  Master FX: Reverb, Stock (default), Freeverb (public domain), Plate (Dattorro's plate),
+  Spring or Shimmer, and Delay, Stock (default), Tape (a Space Echo style tape echo), BBD
+  (an analog bucket-brigade delay) or "Gated" (a gated reverb whose length follows the
+  delay time), driven by the same Master Reverb and Master Delay knobs. The README says
+  what each knob does for each effect, with sound samples. Tested on hardware. See
+  [patch/masterfx/README.md](patch/masterfx/README.md).
 - **all**: colorsong, humanize and interpolate in one firmware (version text
   `1.2.0-MTC`), from [patch/all/patch.json](patch/all/patch.json).
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
@@ -42,8 +46,8 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   formats, the SD-card/FatFs API, the hardware lessons learned, the sequencer and FX
   timing, the Pattern screen's buttons, selection and undo, the Config menu, and a
   map of all RAM with the regions free for patch state, what disabling the
-  built-in NES games would free, and what adding a synth engine or custom step FX,
-  or swapping the master reverb or delay, would take.
+  built-in NES games would free, what adding a synth engine or custom step FX would
+  take, and how the master reverb and delay work and are swapped.
   Function names
   with notes are in [ghidra/names_1.2.0.tsv](ghidra/names_1.2.0.tsv).
 - **Tools**: `.ptf` conversion and patching, Ghidra headless scripts, and a Unicorn
@@ -59,7 +63,7 @@ needed), copy the result to `/Firmware` on the SD card, and install it through
 Config → Firmware. You can return to stock the same way.
 
 Each mod can be installed on its own, or several can be combined into one firmware.
-`patch/all` combines colorsong and Humanize, and you can make your own mix, including
+`patch/all` combines colorsong, Humanize and interpolate, and you can make your own mix, including
 patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.md).
 
 ## Layout
@@ -73,7 +77,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/colorsong/` | Colored Song blocks: C + assembly shim, linker script, build script, patch spec, prebuilt binary |
 | `patch/humanize/` | Humanize button: C, linker script, build script, patch spec, prebuilt binary |
 | `patch/interpolate/` | CC and Macro ramps between steps |
-| `patch/masterfx/` | Master reverb per project: Stock or Freeverb |
+| `patch/masterfx/` | Master reverb and delay per project: Stock, Freeverb, Plate, Spring or Shimmer; Stock, Tape, BBD or "Gated"; sound samples in `samples/` |
 | `patch/all/` | Bundle spec: colorsong + humanize + interpolate in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
@@ -92,14 +96,14 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/test_colorsong.py`, `test_rescan.py` | colorsong rule and scenario tests on the patched firmware |
 | `tools/emu/test_ramdiag.py` | ramdiag menu, fill, scan and report tests on the patched firmware |
 | `tools/emu/test_humanize.py` | humanize button, edit-rule, Config menu and settings-file tests on the patched firmware |
-| `tools/emu/reverb_rig.py` | The master reverb object driven block by block through its update(), for the masterfx tools |
-| `tools/emu/test_masterfx.py` | masterfx: Stock identical to stock firmware, switching, start-up, Freeverb block handling, knob, level and cost tests, Config menu and settings file, and WAV renders next to the stock reverb |
-| `tools/emu/stress_masterfx.py` | masterfx stress: long randomized sessions (garbage settings, missing blocks, restarts, reverb choices) with a write watch and state checks |
+| `tools/emu/reverb_rig.py` | The master reverb and delay objects driven block by block through their update(), for the masterfx tools |
+| `tools/emu/test_masterfx.py` | masterfx: Stock identical to stock firmware, switching, start-up, each effect's block handling, knob, level and cost tests, Config menu and settings file, and WAV renders next to the stock effects |
+| `tools/emu/stress_masterfx.py` | masterfx stress: long randomized sessions through the reverb or the delay (garbage settings, missing blocks, restarts, effect choices) with a write watch and state checks |
 | `tools/emu/compare_masterfx.py` | masterfx: runs the same randomized session through two builds and compares every output sample, and measures both |
 | `tools/emu/test_interpolate.py` | interpolate ramp, MIDI-rate, cost, Config menu and settings-file tests, through the real audio block |
 | `tools/emu/seq_timing.py` | Run the stock sequencer on test patterns and print the MIDI it sends, with timing |
 | `tools/emu/check_version.py` | Print the version text a `.ptf` would show |
-| `tools/emu/layout.py` | Read where the patcher put each patch's RAM (`<firmware>.map.json`), for the tests |
+| `tools/emu/layout.py` | Read where the patcher put each patch's code and RAM (`<firmware>.map.json`), for the tests |
 
 Local-only folders (ignored by git): `work/` (converted images, exports), `out/`
 (renders), `build/` (patched `.ptf` files), `patch/*/build/`, `ghidra/projects/`.

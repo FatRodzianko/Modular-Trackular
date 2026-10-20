@@ -244,5 +244,14 @@
 600305d4	audio_receive_writable_q	(obj, input index)
 60032404	master_delay_update	delay object 0x20018fc0 (engine+0x14b8): mono send in, stereo out
 600322b0	master_delay_process	three 2^18-sample int16 ring buffers, feedback +0x2c, ping-pong +0x2e, one-pole filter
+60031f20	master_delay_set_feedback	(delay, 0..0.99): +0x2c = value x 255
+60031f80	master_delay_set_time_ms	(delay, ms up to 3500): +0x28 = ms x 44.1 samples
+60031fc0	master_delay_get_time_ms	(delay): +0x28 / 44.1
+60031fe0	master_delay_set_rate	(delay, index): with Sync (+0x2f), +0x28 = 15000/BPM ms x table 0x60042f98[index]
+60032060	master_delay_set_pingpong	(delay, on): +0x2e
+60032068	master_delay_set_sync	(delay, on): +0x2f
+60032070	master_delay_set_filter_hz	(delay, Hz): one-pole lowpass, Q10 coefficients +0x30/+0x34/+0x38, states zeroed
+600322a0	master_delay_bypass_on	+0x2d = 1
+600322a8	master_delay_bypass_off	+0x2d = 0
 60031e5c	master_reverb_update	reverb object 0x20019014 (engine+0x150c): stereo in place, bypass +0x80
 600ff800	master_reverb_process	plate-style network, 16K-sample int16 ring buffer in SDRAM, LFO-modulated taps

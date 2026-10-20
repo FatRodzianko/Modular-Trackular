@@ -2,7 +2,7 @@
  * patches listed before it, and moves it there with build/masterfx.rel. */
 MEMORY
 {
-    PATCH (rx) : ORIGIN = 0x601C4000, LENGTH = 12K
+    PATCH (rx) : ORIGIN = 0x601C4000, LENGTH = 32K
     RAM (rw)   : ORIGIN = 0x20207FC0, LENGTH = 64K     /* link address only: the patcher assigns RAM */
 }
 
