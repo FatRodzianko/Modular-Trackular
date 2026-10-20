@@ -91,6 +91,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/test_colorsong.py`, `test_rescan.py` | colorsong rule and scenario tests on the patched firmware |
 | `tools/emu/test_ramdiag.py` | ramdiag menu, fill, scan and report tests on the patched firmware |
 | `tools/emu/test_humanize.py` | humanize button, edit-rule, Config menu and settings-file tests on the patched firmware |
+| `tools/emu/compare_freeverb.py` | freeverb: runs the same randomized session through two builds and compares every output sample, and measures both |
 | `tools/emu/stress_freeverb.py` | freeverb stress: long randomized sessions (garbage settings, missing blocks, restarts) with a write watch and state checks |
 | `tools/emu/test_freeverb.py` | freeverb block handling, knob, level and cost tests through the reverb object's update(), and WAV renders next to the stock reverb |
 | `tools/emu/test_interpolate.py` | interpolate ramp, MIDI-rate, cost, Config menu and settings-file tests, through the real audio block |

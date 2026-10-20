@@ -5,7 +5,7 @@ A patch for Polyend Tracker+ firmware 1.2.0. It replaces the stock master reverb
 filters and four allpasses per channel, a darker and denser room than the stock plate.
 The reverb send, the Master Reverb page and its knobs work as before; only the sound of
 the reverb changes. Installed on its own, Config shows the firmware version as
-`1.2.0-fv4`.
+`1.2.0-fv5`.
 
 **Status:** tested on hardware.
 
@@ -61,22 +61,29 @@ Freeverb while the unit boots hangs the boot.
 - **Also kept:** the bypass flag (`+0x80`) and the level value the stock reverb writes
   after each block (`+0x70`).
 
-The code is 1,513 bytes (built with `-O2`, as it runs in the audio interrupt); the
+The code is 2,641 bytes (built with `-O2`, as it runs in the audio interrupt); the
 patcher places it after the stock image or after the patches listed before it.
 
-**CPU:** each filter runs over the whole 128-sample block at a time. In the emulator
-Freeverb takes about 76,000 instructions per block against about 34,000 for the stock
-reverb (Freeverb has 24 filters per sample, the stock plate about a dozen): roughly 2 %
-more of the processor while the reverb runs. On the device, a deliberately heavy pattern
+**CPU:** each filter runs over the whole 128-sample block at a time: the combs four at a
+time and the four allpasses together, each pass split where one of its delay lines wraps
+around, so the inner loops have no per-sample position checks. The comb outputs are
+added in the same order as one comb at a time would, so the result is the same to the
+bit. In the emulator Freeverb takes about 54,000 instructions per block against about
+34,000 for the stock reverb (Freeverb has 24 filters per sample, the stock plate about a
+dozen). On the device, a deliberately heavy pattern
 (every drum hit and all three synths, 8 voices each, sending fully to the reverb) showed
-66 % average and 86 % peak CPU with Freeverb, against 61 % and 84 % with the stock
+64–67 % average and 84 % peak CPU with Freeverb, against 61 % and 84 % with the stock
 reverb. With such large sends the stock reverb crackles; Freeverb doesn't. Firmware details are in
 [docs/FINDINGS.md](../../docs/FINDINGS.md) (section 19).
 
-Diagnostic builds (`FV_DEFS='-D<name> -DFREEVERB_VERSION="<text>"' patch/freeverb/build.sh`):
+Other builds (`FV_DEFS='-D<name> -DFREEVERB_VERSION="<text>"' patch/freeverb/build.sh`):
 `FV_PASSTHROUGH` only calls the stock `update()`; `FV_DIAG_CLEAR` runs the stock reverb but
 clears the two buffers at once on the first block, from boot on; `FV_DIAG_MUTED` runs
-Freeverb from boot on without clearing and sends the send back unchanged.
+Freeverb from boot on without clearing and sends the send back unchanged. `FV_FIXED`
+runs the combs and allpasses in integer arithmetic instead of float. It sounds nearly
+the same (samples differ by rounding, at most about 110 of 32,768) but is slower, about
+57,000 instructions per block: the Tracker+'s Cortex-M7 does a float multiply-add in one
+cycle, so fixed point gains nothing there.
 
 ## Build
 
@@ -84,7 +91,7 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/freeverb/patch.json build/TrackerPlus_fv4.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/freeverb/patch.json build/TrackerPlus_fv5.ptf
 ```
 
 To combine it with other patches, list `../freeverb/patch.json` in a bundle (see
@@ -102,7 +109,7 @@ patch/freeverb/build.sh
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_freeverb.py build/TrackerPlus_fv4.ptf path/to/TrackerPlus_1.2.0.ptf out/reverb_wav
+python tools/emu/test_freeverb.py build/TrackerPlus_fv5.ptf path/to/TrackerPlus_1.2.0.ptf out/reverb_wav
 ```
 
 It calls the reverb object's `update()` through its vtable, as the audio engine does,
@@ -123,14 +130,22 @@ level field or the stack; it also checks the state after every block, that block
 released exactly once, and that the reverb sounds again once normal settings return:
 
 ```bash
-python tools/emu/stress_freeverb.py build/TrackerPlus_fv4.ptf 20000 11 12 13 14
+python tools/emu/stress_freeverb.py build/TrackerPlus_fv5.ptf 20000 11 12 13 14
+```
+
+To compare two builds, `compare_freeverb.py` runs the same randomized session through
+both and checks that every output sample is equal (or within `--tolerance N`), and
+measures both:
+
+```bash
+python tools/emu/compare_freeverb.py build/TrackerPlus_a.ptf build/TrackerPlus_b.ptf 3000 1 2 3
 ```
 
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-fv4 Build 1504`.
+Config → Firmware → the patched file. Config should show `1.2.0-fv5 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Projects keep their reverb
 settings and play with the stock reverb again.

@@ -15,9 +15,13 @@
  * stock reverb's two 32 KB SDRAM buffers (object +0x24 and +0x28), which the stock
  * reverb no longer uses: left in the first, right in the second, and the predelay line in
  * what is left at the end of the two. The patch clears them before first use. Its own
- * state (about 300 bytes) is on-chip: the top of SDRAM, free once the unit is running,
- * hung the boot when this patch used it from the audio interrupt. Each filter runs over the whole block at a time, in sample units
- * (16-bit full scale = 32768), so the delay lines need no scaling.
+ * state (288 bytes) is on-chip.
+ *
+ * The filters run over the whole block at a time, in sample units (16-bit full scale =
+ * 32768), so the delay lines need no scaling: the combs four at a time (adding their
+ * outputs in the same order as one by one, so the result is the same to the bit), the
+ * four allpasses together, and each pass split where one of its lines wraps, so the
+ * inner loops have no per-sample position checks.
  *
  * The Master Reverb page is unchanged; its setters still write the reverb object, and
  * Freeverb reads those fields every block:
@@ -42,12 +46,15 @@
  *    the first block that has input, from boot on;
  *  - -DFV_DIAG_MUTED ("fvD"): Freeverb runs from boot on, without clearing, and its
  *    output is the send unchanged (the wet signal is computed but not used).
+ * Variant -DFV_FIXED: the combs and allpasses in integer arithmetic (the comb lowpass
+ * state with 8 extra fractional bits, Q15 coefficients through SMULWB) instead of float;
+ * the result differs from the float build only by rounding.
  */
 #include <stdint.h>
 #include <arm_acle.h>                      /* __ssat */
 
 #ifndef FREEVERB_VERSION
-#define FREEVERB_VERSION "fv4"
+#define FREEVERB_VERSION "fv5"
 #endif
 
 /* ---- firmware 1.2.0 (function pointers carry the Thumb bit) ---------------------- */
@@ -114,7 +121,7 @@ struct fv_state {
     uint32_t buf_l, buf_r;                  /* the buffers the lines were laid out in */
     struct line comb[2][COMBS];
     struct line allpass[2][ALLPASSES];
-    float comb_store[2][COMBS];             /* comb lowpass states */
+    float comb_store[2][COMBS];             /* comb lowpass states (FV_FIXED: int32, x256) */
     uint16_t pre_pos;                       /* predelay ring write position, 0..PRE_RING-1 */
     uint16_t pre_split;                     /* ring positions below this are in the left buffer */
     uint32_t pre_l, pre_r;                  /* the ring's two parts: the buffers' unused ends */
@@ -180,39 +187,186 @@ __attribute__((unused)) static int clear_step(uint32_t words)
     return end == BUFFER_SAMPLES / 2;
 }
 
-/* One comb filter over the block: acc += its output. */
-static void comb_block(struct line *c, int16_t *buf, float *store_p, const float *in, float *acc,
-                       float feedback, float damp1, float damp2)
+#define GROUP               4u              /* combs per pass */
+
+/* Samples until the first of n lines wraps, at most `left`. */
+static inline uint32_t run_length(const uint32_t *pos, const uint32_t *len, uint32_t n, uint32_t left)
 {
-    int16_t *line = buf + c->start;
-    uint32_t pos = c->pos, len = c->len;
-    float store = *store_p;
-    for (uint32_t n = 0; n < BLOCK; n++) {
-        float out = (float)line[pos];
-        store = out * damp2 + store * damp1;
-        line[pos] = sat16(in[n] + store * feedback);
-        acc[n] += out;
-        if (++pos == len)
-            pos = 0;
-    }
-    c->pos = (uint16_t)pos;
-    *store_p = store;
+    for (uint32_t j = 0; j < n; j++)
+        if (len[j] - pos[j] < left)
+            left = len[j] - pos[j];
+    return left;
 }
 
-/* One allpass over the block, in place. */
-static void allpass_block(struct line *a, int16_t *buf, float *io, float feedback)
+/* Four comb filters over the block. first: acc = their sum, else acc += their sum, with
+ * the outputs added in comb order as one comb per pass would. */
+static inline __attribute__((always_inline)) void comb_group(struct line *c, int16_t *buf, float *store_p,
+                                                             const float *in, float *acc, int first,
+                                                             float feedback, float damp1, float damp2)
 {
-    int16_t *line = buf + a->start;
-    uint32_t pos = a->pos, len = a->len;
-    for (uint32_t n = 0; n < BLOCK; n++) {
-        float in = io[n], bufout = (float)line[pos];
-        line[pos] = sat16(in + bufout * feedback);
-        io[n] = bufout - in;
-        if (++pos == len)
-            pos = 0;
+    uint32_t pos[GROUP], len[GROUP];
+    for (uint32_t k = 0; k < GROUP; k++) {
+        pos[k] = c[k].pos;
+        len[k] = c[k].len;
     }
-    a->pos = (uint16_t)pos;
+    float s0 = store_p[0], s1 = store_p[1], s2 = store_p[2], s3 = store_p[3];
+    for (uint32_t n = 0; n < BLOCK;) {
+        uint32_t run = run_length(pos, len, GROUP, BLOCK - n);
+        int16_t *q0 = buf + c[0].start + pos[0], *q1 = buf + c[1].start + pos[1];
+        int16_t *q2 = buf + c[2].start + pos[2], *q3 = buf + c[3].start + pos[3];
+        const float *x = in + n;
+        float *a = acc + n;
+        for (uint32_t k = 0; k < run; k++) {
+            float o0 = (float)q0[k], o1 = (float)q1[k], o2 = (float)q2[k], o3 = (float)q3[k];
+            s0 = o0 * damp2 + s0 * damp1;
+            q0[k] = sat16(x[k] + s0 * feedback);
+            s1 = o1 * damp2 + s1 * damp1;
+            q1[k] = sat16(x[k] + s1 * feedback);
+            s2 = o2 * damp2 + s2 * damp1;
+            q2[k] = sat16(x[k] + s2 * feedback);
+            s3 = o3 * damp2 + s3 * damp1;
+            q3[k] = sat16(x[k] + s3 * feedback);
+            float sum = first ? 0.0f + o0 : a[k] + o0;
+            a[k] = ((sum + o1) + o2) + o3;
+        }
+        for (uint32_t k = 0; k < GROUP; k++)
+            if ((pos[k] += run) == len[k])
+                pos[k] = 0;
+        n += run;
+    }
+    for (uint32_t k = 0; k < GROUP; k++)
+        c[k].pos = (uint16_t)pos[k];
+    store_p[0] = s0;
+    store_p[1] = s1;
+    store_p[2] = s2;
+    store_p[3] = s3;
 }
+
+/* The four allpasses in series over the block, in place. */
+__attribute__((unused)) static void allpass_chain(struct line *a, int16_t *buf, float *io, float feedback)
+{
+    uint32_t pos[ALLPASSES], len[ALLPASSES];
+    for (uint32_t k = 0; k < ALLPASSES; k++) {
+        pos[k] = a[k].pos;
+        len[k] = a[k].len;
+    }
+    for (uint32_t n = 0; n < BLOCK;) {
+        uint32_t run = run_length(pos, len, ALLPASSES, BLOCK - n);
+        int16_t *q0 = buf + a[0].start + pos[0], *q1 = buf + a[1].start + pos[1];
+        int16_t *q2 = buf + a[2].start + pos[2], *q3 = buf + a[3].start + pos[3];
+        float *v = io + n;
+        for (uint32_t k = 0; k < run; k++) {
+            float x = v[k], b;
+            b = (float)q0[k];
+            q0[k] = sat16(x + b * feedback);
+            x = b - x;
+            b = (float)q1[k];
+            q1[k] = sat16(x + b * feedback);
+            x = b - x;
+            b = (float)q2[k];
+            q2[k] = sat16(x + b * feedback);
+            x = b - x;
+            b = (float)q3[k];
+            q3[k] = sat16(x + b * feedback);
+            v[k] = b - x;
+        }
+        for (uint32_t k = 0; k < ALLPASSES; k++)
+            if ((pos[k] += run) == len[k])
+                pos[k] = 0;
+        n += run;
+    }
+    for (uint32_t k = 0; k < ALLPASSES; k++)
+        a[k].pos = (uint16_t)pos[k];
+}
+
+#ifdef FV_FIXED
+static inline int32_t mulw(int32_t a, int32_t q15)          /* a * q15 / 2^16 (one SMULWB) */
+{
+    int32_t r;
+    __asm__("smulwb %0, %1, %2" : "=r"(r) : "r"(a), "r"(q15));
+    return r;
+}
+
+/* Four comb filters over the block, in integers: x8 is the input x256, the lowpass
+ * state is kept x256, the coefficients are Q15 (SMULWB); acc gets the sum of the outputs. */
+static inline __attribute__((always_inline)) void comb_group_i(struct line *c, int16_t *buf, int32_t *store_p,
+                                                               const int32_t *x8, int32_t *acc, int first,
+                                                               int32_t feedback, int32_t damp1, int32_t damp2)
+{
+    uint32_t pos[GROUP], len[GROUP];
+    for (uint32_t k = 0; k < GROUP; k++) {
+        pos[k] = c[k].pos;
+        len[k] = c[k].len;
+    }
+    int32_t s0 = store_p[0], s1 = store_p[1], s2 = store_p[2], s3 = store_p[3];
+    for (uint32_t n = 0; n < BLOCK;) {
+        uint32_t run = run_length(pos, len, GROUP, BLOCK - n);
+        int16_t *q0 = buf + c[0].start + pos[0], *q1 = buf + c[1].start + pos[1];
+        int16_t *q2 = buf + c[2].start + pos[2], *q3 = buf + c[3].start + pos[3];
+        const int32_t *x = x8 + n;
+        int32_t *a = acc + n;
+        for (uint32_t k = 0; k < run; k++) {
+            int32_t o0 = q0[k], o1 = q1[k], o2 = q2[k], o3 = q3[k];
+            s0 = mulw(o0 << 9, damp2) + mulw(s0 << 1, damp1);
+            q0[k] = (int16_t)__ssat((x[k] + mulw(s0 << 1, feedback)) >> 8, 16);
+            s1 = mulw(o1 << 9, damp2) + mulw(s1 << 1, damp1);
+            q1[k] = (int16_t)__ssat((x[k] + mulw(s1 << 1, feedback)) >> 8, 16);
+            s2 = mulw(o2 << 9, damp2) + mulw(s2 << 1, damp1);
+            q2[k] = (int16_t)__ssat((x[k] + mulw(s2 << 1, feedback)) >> 8, 16);
+            s3 = mulw(o3 << 9, damp2) + mulw(s3 << 1, damp1);
+            q3[k] = (int16_t)__ssat((x[k] + mulw(s3 << 1, feedback)) >> 8, 16);
+            a[k] = (first ? 0 : a[k]) + o0 + o1 + o2 + o3;
+        }
+        for (uint32_t k = 0; k < GROUP; k++)
+            if ((pos[k] += run) == len[k])
+                pos[k] = 0;
+        n += run;
+    }
+    for (uint32_t k = 0; k < GROUP; k++)
+        c[k].pos = (uint16_t)pos[k];
+    store_p[0] = s0;
+    store_p[1] = s1;
+    store_p[2] = s2;
+    store_p[3] = s3;
+}
+
+/* The four allpasses in series, in integers (feedback Q15), in place. */
+static void allpass_chain_i(struct line *a, int16_t *buf, int32_t *io, int32_t feedback)
+{
+    uint32_t pos[ALLPASSES], len[ALLPASSES];
+    for (uint32_t k = 0; k < ALLPASSES; k++) {
+        pos[k] = a[k].pos;
+        len[k] = a[k].len;
+    }
+    for (uint32_t n = 0; n < BLOCK;) {
+        uint32_t run = run_length(pos, len, ALLPASSES, BLOCK - n);
+        int16_t *q0 = buf + a[0].start + pos[0], *q1 = buf + a[1].start + pos[1];
+        int16_t *q2 = buf + a[2].start + pos[2], *q3 = buf + a[3].start + pos[3];
+        int32_t *v = io + n;
+        for (uint32_t k = 0; k < run; k++) {
+            int32_t x = v[k], b;
+            b = q0[k];
+            q0[k] = (int16_t)__ssat(x + ((b * feedback) >> 15), 16);
+            x = b - x;
+            b = q1[k];
+            q1[k] = (int16_t)__ssat(x + ((b * feedback) >> 15), 16);
+            x = b - x;
+            b = q2[k];
+            q2[k] = (int16_t)__ssat(x + ((b * feedback) >> 15), 16);
+            x = b - x;
+            b = q3[k];
+            q3[k] = (int16_t)__ssat(x + ((b * feedback) >> 15), 16);
+            v[k] = b - x;
+        }
+        for (uint32_t k = 0; k < ALLPASSES; k++)
+            if ((pos[k] += run) == len[k])
+                pos[k] = 0;
+        n += run;
+    }
+    for (uint32_t k = 0; k < ALLPASSES; k++)
+        a[k].pos = (uint16_t)pos[k];
+}
+#endif
 
 /* lo..hi; NaN (from a corrupted project) counts as lo, so filter states never get NaN */
 static float fclamp(float v, float lo, float hi)
@@ -246,31 +400,49 @@ static float fv_process(uint8_t *obj, int16_t *left, int16_t *right, int muted)
     float wet_gain = SCALE_WET * OUTPUT_TRIM / LINE_GAIN;
 
     /* the mono send through the predelay (a ring of PRE_RING samples) */
+#ifdef FV_FIXED
+    int32_t mono[BLOCK];                    /* x256 */
+    float in_scale = 2.0f * in_gain * 256.0f;
+#else
     float mono[BLOCK];
+#endif
     uint32_t wr = FV->pre_pos;
     for (uint32_t n = 0; n < BLOCK; n++) {
         *pre_at(wr) = sat16(((float)left[n] + (float)right[n]) * 0.5f);
         uint32_t rd = wr + PRE_RING - (uint32_t)predelay;
         if (rd >= PRE_RING)
             rd -= PRE_RING;
+#ifdef FV_FIXED
+        mono[n] = (int32_t)((float)*pre_at(rd) * in_scale);
+#else
         mono[n] = (float)*pre_at(rd) * 2.0f * in_gain;
+#endif
         if (++wr == PRE_RING)
             wr = 0;
     }
     FV->pre_pos = (uint16_t)wr;
 
     float level = 0.0f;
+#ifdef FV_FIXED
+    int32_t fb_q15 = (int32_t)(feedback * 32767.0f), d1_q15 = (int32_t)(damp1 * 32767.0f);
+    int32_t d2_q15 = (int32_t)(damp2 * 32767.0f), ap_q15 = (int32_t)(ap_feedback * 32768.0f);
+    int32_t *store = (int32_t *)FV->comb_store[0];
+#endif
     for (uint32_t ch = 0; ch < 2; ch++) {
+#ifdef FV_FIXED
+        int32_t acc[BLOCK];
+        comb_group_i(&FV->comb[ch][0], buf[ch], store + ch * COMBS, mono, acc, 1, fb_q15, d1_q15, d2_q15);
+        comb_group_i(&FV->comb[ch][GROUP], buf[ch], store + ch * COMBS + GROUP, mono, acc, 0, fb_q15, d1_q15, d2_q15);
+        allpass_chain_i(FV->allpass[ch], buf[ch], acc, ap_q15);
+#else
         float acc[BLOCK];
-        for (uint32_t n = 0; n < BLOCK; n++)
-            acc[n] = 0.0f;
-        for (uint32_t i = 0; i < COMBS; i++)
-            comb_block(&FV->comb[ch][i], buf[ch], &FV->comb_store[ch][i], mono, acc, feedback, damp1, damp2);
-        for (uint32_t i = 0; i < ALLPASSES; i++)
-            allpass_block(&FV->allpass[ch][i], buf[ch], acc, ap_feedback);
+        comb_group(&FV->comb[ch][0], buf[ch], &FV->comb_store[ch][0], mono, acc, 1, feedback, damp1, damp2);
+        comb_group(&FV->comb[ch][GROUP], buf[ch], &FV->comb_store[ch][GROUP], mono, acc, 0, feedback, damp1, damp2);
+        allpass_chain(FV->allpass[ch], buf[ch], acc, ap_feedback);
+#endif
         int16_t *s = io[ch];
         for (uint32_t n = 0; n < BLOCK; n++) {
-            float wet = acc[n] * wet_gain, dry = (float)s[n];
+            float wet = (float)acc[n] * wet_gain, dry = (float)s[n];
             if (!muted)
                 s[n] = sat16(dry + (wet - dry) * amount);
             level += wet < 0 ? -wet : wet;

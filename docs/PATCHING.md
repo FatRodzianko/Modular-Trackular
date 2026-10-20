@@ -49,7 +49,7 @@ must be byte-identical to these builds:
 | colorsong | `TrackerPlus_c11.ptf` | `1.2.0-c11` | tested | `cc9119abe627d994ba6010bfe0db59129e3f494611dbc8c1e5c68fcf0653ebc6` |
 | humanize | `TrackerPlus_hz8.ptf` | `1.2.0-hz8` | not yet | `ec3c30fda0d186299e39cce2be48031303f3bc0583fd1e8803600b500bf4b46f` |
 | interpolate | `TrackerPlus_ip5.ptf` | `1.2.0-ip5` | not yet | `f3d98eb18f5852dc718d41ba9311e813d056d1ab5b37b1252e87cf0341c0942a` |
-| freeverb | `TrackerPlus_fv4.ptf` | `1.2.0-fv4` | tested | `063c64e0f66c8f392e9b45d6dee99098fd71d394d0bc9b4d4e846d1cd7347f56` |
+| freeverb | `TrackerPlus_fv5.ptf` | `1.2.0-fv5` | tested | `4d13eb2d7b6d800b2a6de611c4dee1d1ce277ec5d13fac100d6a7c5f82bea0cb` |
 | all (colorsong + humanize + interpolate) | `TrackerPlus_MTC.ptf` | `1.2.0-MTC` | tested | `5609dff165918fa6668385622eda3b97318dcf9909bab8bbcf760f2d06971a6a` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
@@ -160,7 +160,7 @@ python tools/emu/test_colorsong.py build/TrackerPlus_c11.ptf
 python tools/emu/test_rescan.py build/TrackerPlus_c11.ptf "path/to/<project A>" "path/to/<project B>"
 python tools/emu/test_humanize.py build/TrackerPlus_hz8.ptf
 python tools/emu/test_interpolate.py build/TrackerPlus_ip5.ptf
-python tools/emu/test_freeverb.py build/TrackerPlus_fv4.ptf path/to/TrackerPlus_1.2.0.ptf out/reverb_wav
+python tools/emu/test_freeverb.py build/TrackerPlus_fv5.ptf path/to/TrackerPlus_1.2.0.ptf out/reverb_wav
 ```
 
 Each test works on any firmware that contains its patch, so for a bundle run every
