@@ -126,8 +126,7 @@ time, the darker and grittier the echoes (as the chip's clock slows down).
 
 **"Gated"**: a gated reverb, in quotes because it isn't a reverb behind a noise gate but
 what the classic digital units did (the AMS RMX16's "non-linear" programs): a dense
-burst of reverb that lasts exactly the set time and then stops, the big 1980s drum
-sound. It runs on the delay, so its length can follow the tempo. There is no feedback:
+burst of reverb that lasts exactly the set time and then stops. It runs on the delay, so its length can follow the tempo. There is no feedback:
 each hit gives one burst. [Listen at 300 ms](samples/gated-300ms.wav), with a release
 (Feedback 0.6): [listen](samples/gated-300ms-release.wav), reversed at 400 ms:
 [listen](samples/gated-400ms-reverse.wav).
