@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modular-Trackular Patcher</title>
+<meta name="description" content="Patch your own Polyend Tracker+ 1.2.0 firmware with Modular-Trackular mods, in your browser. Nothing is uploaded.">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-row">
+    <div>
+      <h1>Modular-Trackular</h1>
+      <p class="sub">Firmware mods for the Polyend Tracker+, firmware 1.2.0</p>
+    </div>
+    <button id="theme" class="ghost" type="button" aria-label="Switch between light and dark theme">Theme</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <p class="lead">Add mods to <strong>your own copy</strong> of the stock Tracker+ firmware, right here in
+    your browser. Your file is read, patched and saved on this device: <strong>nothing is uploaded</strong>,
+    and this site doesn't host any Polyend firmware.</p>
+
+  <aside class="warn" role="note">
+    <strong>Use at your own risk.</strong> These are unofficial mods, not affiliated with or supported by
+    Polyend. Each mod was tested on one Tracker+, and going back to stock always worked there, but that's
+    no guarantee for your unit. Back up your whole SD card first, and read
+    <a href="#install">how to go back to stock</a> before installing.
+  </aside>
+
+  <noscript><p class="msg bad">This page needs JavaScript to patch the firmware.</p></noscript>
+  <p id="load-error" class="msg bad" hidden></p>
+
+  <section class="step" id="step-firmware" aria-labelledby="h-firmware">
+    <h2 id="h-firmware"><span class="num">1</span> Your stock firmware</h2>
+    <p>Download <strong>Tracker+ firmware 1.2.0</strong> from Polyend's website (the Tracker+ firmware
+      downloads) and choose the file here. It's called <code>TrackerPlus_1.2.0.ptf</code>.</p>
+    <label class="drop" id="drop">
+      <input id="file" type="file" accept=".ptf">
+      <span class="drop-main">Drop <code>TrackerPlus_1.2.0.ptf</code> here, or <u>choose the file</u></span>
+      <span class="drop-sub">Only the unmodified 1.2.0 file is accepted</span>
+    </label>
+    <p id="fw-status" class="msg" aria-live="polite" hidden></p>
+  </section>
+
+  <section class="step" id="step-mods" aria-labelledby="h-mods">
+    <h2 id="h-mods"><span class="num">2</span> Choose mods</h2>
+    <label class="select-all"><input id="select-all" type="checkbox"> <span id="select-all-label">Select all</span></label>
+    <div id="grid" class="grid"></div>
+    <p id="selection" class="selection" aria-live="polite"></p>
+  </section>
+
+  <section class="step" id="step-build" aria-labelledby="h-build">
+    <h2 id="h-build"><span class="num">3</span> Patch and download</h2>
+    <button id="build" class="primary" type="button" disabled>Patch firmware</button>
+    <p id="build-hint" class="hint">Choose your stock firmware and at least one mod.</p>
+    <div id="result" hidden>
+      <p id="result-status" class="msg" aria-live="polite"></p>
+      <dl id="result-facts" class="facts"></dl>
+      <a id="download" class="primary button" hidden>Download</a>
+      <details id="log-box">
+        <summary>Patcher log</summary>
+        <pre id="log"></pre>
+      </details>
+      <details id="spec-box" hidden>
+        <summary>For Python users: the bundle spec</summary>
+        <p>The same file comes out of <code>tools/patch_ptf.py</code> with this spec. Save it as
+          <code>patch/&lt;name&gt;/patch.json</code> in the repository and run
+          <code>python tools/patch_ptf.py TrackerPlus_1.2.0.ptf patch/&lt;name&gt;/patch.json out.ptf</code>.</p>
+        <pre id="spec"></pre>
+      </details>
+    </div>
+  </section>
+
+  <section class="step" id="install" aria-labelledby="h-install">
+    <h2 id="h-install"><span class="num">4</span> Install on your Tracker+</h2>
+    <ol>
+      <li><strong>Back up your SD card</strong>: the whole card, including the <code>Workspace</code> folder.</li>
+      <li>Copy the downloaded file into the card's <code>/Firmware</code> folder, next to the stock
+        <code>TrackerPlus_1.2.0.ptf</code>. Keep the stock file there. Remove other old <code>.ptf</code>
+        versions, so an emergency reflash can only pick one of these two. Keep the file name: Config only
+        lists files whose names start with <code>TrackerPlus</code> and end with <code>.ptf</code>.</li>
+      <li>On the Tracker+: <strong>Config → Firmware</strong>, choose the new file and confirm. The unit
+        updates and restarts.</li>
+      <li>Config now shows the new version text, for example <code>1.2.0-sw1 Build 1504</code>.</li>
+    </ol>
+    <h3>Back to stock</h3>
+    <p><strong>Config → Firmware → <code>TrackerPlus_1.2.0.ptf</code></strong> → confirm. Config shows
+      <code>1.2.0 Build 1504</code> again. Some mods keep per-project settings in a small file in the project
+      folder (<code>colorsong.bin</code>, <code>humanize.bin</code>, <code>interpolate.bin</code>,
+      <code>masterfx.bin</code>, <code>swing.bin</code>). Stock firmware ignores them; deleting one resets
+      that mod's settings for the project.</p>
+    <h3>If it doesn't start</h3>
+    <ol>
+      <li>On a computer, remove the patched file from <code>/Firmware</code>, so only the stock
+        <code>TrackerPlus_1.2.0.ptf</code> is left.</li>
+      <li>Put the card back, power on, and press the <strong>pinhole button next to the USB-C port</strong>
+        with a pin. The bootloader shows “Updating…” and installs the stock file. The bootloader isn't
+        touched by these mods.</li>
+    </ol>
+    <p>If the unit only freezes in one place but starts, pull the power, start it, and switch back to stock
+      through Config. If even the reflash fails, contact Polyend support.</p>
+  </section>
+</main>
+
+<footer class="wrap foot">
+  <p>Modular-Trackular is open source (<a id="repo-link" href="https://github.com/FatRodzianko/Modular-Trackular">source and
+    docs</a>, MIT license) and contains no Polyend code. Polyend and Tracker+ are trademarks of Polyend; this
+    project is not affiliated with or endorsed by Polyend.</p>
+</footer>
+</body>
+</html>

@@ -29,6 +29,32 @@ switching back to stock always worked. That is not a guarantee for your unit.
 
 ## 2. Build the patched firmware
 
+### In your browser
+
+The [web patcher](https://fatrodzianko.github.io/Modular-Trackular/) does what the
+Python command below does, without installing anything:
+
+1. Choose your stock `TrackerPlus_1.2.0.ptf`. The page checks the file's SHA-256 (the
+   one in step 1) and the image's, and refuses anything else, including a file that's
+   already patched.
+2. Tick the mods you want. One mod gives its own build, "Select all" gives the
+   `patch/all` bundle (all six, `1.2.0-MTE`), and any other mix gets the version text `M` plus two hex digits
+   that say which mods are in it (colorsong 01, humanize 02, interpolate 04, masterfx
+   08, swing 10, visualizer 20: colorsong + swing is `1.2.0-M11`).
+3. Patch and download. The page only offers the file when its SHA-256 is the one
+   `tools/patch_ptf.py` makes for that selection (`web/expected.json`), and says when
+   it's also one of the hardware-tested builds in the table below. A mix that isn't in
+   the table hasn't been tested on hardware as one firmware.
+
+Everything runs in the browser: the firmware is not uploaded, and the site serves only
+this repository's page and prebuilt patch files. For a mix, the page shows the bundle
+spec it used, so the Python command gives the same file. How it's built and tested:
+[WEB_PATCHER_PLAN.md](WEB_PATCHER_PLAN.md).
+
+Then install it as in section 3.
+
+### With Python
+
 You only need **Python 3** (standard library only, no compiler; tested with 3.15). The repository ships
 the compiled patch code in `patch/<name>/prebuilt/`, so this works out of the box:
 
@@ -37,7 +63,7 @@ python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.js
 ```
 
 Use `patch/humanize/patch.json` for Humanize alone, `patch/interpolate/patch.json` for
-interpolate alone, or `patch/all/patch.json` for all three in one firmware (see "Choosing patches" below for your own
+interpolate alone, or `patch/all/patch.json` for all six in one firmware (see "Choosing patches" below for your own
 mix).
 
 The patcher checks the stock image, checks the original bytes at every patched
@@ -47,12 +73,12 @@ must be byte-identical to these builds:
 | Patch | Output file | Version text in Config | On hardware | Output SHA-256 |
 |---|---|---|---|---|
 | colorsong | `TrackerPlus_c11.ptf` | `1.2.0-c11` | tested | `cc9119abe627d994ba6010bfe0db59129e3f494611dbc8c1e5c68fcf0653ebc6` |
-| humanize | `TrackerPlus_hz8.ptf` | `1.2.0-hz8` | tested (in `all`) | `ec3c30fda0d186299e39cce2be48031303f3bc0583fd1e8803600b500bf4b46f` |
-| interpolate | `TrackerPlus_ip5.ptf` | `1.2.0-ip5` | tested (in `all`) | `f3d98eb18f5852dc718d41ba9311e813d056d1ab5b37b1252e87cf0341c0942a` |
+| humanize | `TrackerPlus_hz8.ptf` | `1.2.0-hz8` | tested (with colorsong and interpolate) | `ec3c30fda0d186299e39cce2be48031303f3bc0583fd1e8803600b500bf4b46f` |
+| interpolate | `TrackerPlus_ip5.ptf` | `1.2.0-ip5` | tested (with colorsong and humanize) | `f3d98eb18f5852dc718d41ba9311e813d056d1ab5b37b1252e87cf0341c0942a` |
 | masterfx | `TrackerPlus_mf4.ptf` | `1.2.0-mf4` | tested | `0f3f9cd0c0c00ceed7651aacece96bd52dd084991e82f9e03d814630b898df1a` |
 | swing | `TrackerPlus_sw1.ptf` | `1.2.0-sw1` | tested | `510fe9ad078ed737f1cf3c63ea706a8a0e50f978c9d115bfbc773f4252a0e8d7` |
 | visualizer | `TrackerPlus_vz2.ptf` | `1.2.0-vz2` | tested | `8b3ddcb09de46829799f542cf9d7423d95d4f39aa76db44881f5c18eb0361736` |
-| all (colorsong + humanize + interpolate) | `TrackerPlus_MTC.ptf` | `1.2.0-MTC` | tested | `5609dff165918fa6668385622eda3b97318dcf9909bab8bbcf760f2d06971a6a` |
+| all (colorsong + humanize + interpolate + masterfx + swing + visualizer) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 
@@ -70,12 +96,13 @@ Each patch can be installed on its own, or several can go into one firmware:
   (see its README for the effects), `patch/swing/patch.json` Global Swing,
   `patch/visualizer/patch.json` the pad visualizer.
 - **Several patches:** use a bundle spec, which lists the patches to combine.
-  `patch/all/patch.json` is the bundle that ships (colorsong + Humanize +
-  interpolate):
+  `patch/all/patch.json` is the bundle that ships (all six: colorsong, Humanize,
+  interpolate, masterfx, swing and the visualizer):
 
   ```json
-  "include": ["../colorsong/patch.json", "../humanize/patch.json", "../interpolate/patch.json"],
-  "version": "MTC",
+  "include": ["../colorsong/patch.json", "../humanize/patch.json", "../interpolate/patch.json",
+              "../masterfx/patch.json", "../swing/patch.json", "../visualizer/patch.json"],
+  "version": "MTE",
   ```
 
 To make your own mix, copy `patch/all/` to a new folder (for example `patch/mymix/`)
@@ -176,9 +203,8 @@ went from the `.map.json` the patcher wrote next to the `.ptf`, so keep the two
 together.
 
 `tools/test_layout.py` checks the patcher's placement without the emulator. It builds
-each patch alone, `patch/all`, the same patches in the other order, `patch/all`'s
-patches with masterfx in both orders, all of those with swing and the visualizer in
-both orders, and two
+each patch alone, `patch/all` (all six), colorsong, humanize and interpolate in the
+other order, those three with masterfx in both orders, all six in the other order, and two
 patches on the same chained sites, and
 checks that each patch's code and RAM sit where they
 should (RAM in a region the patch may use, no two blocks overlapping), that exactly the
@@ -188,6 +214,16 @@ checks that a shared site that isn't chained by both patches is refused:
 
 ```bash
 python tools/test_layout.py path/to/TrackerPlus_1.2.0.ptf build/layout
+```
+
+`tools/test_web_patcher.py` (needs Node) runs the web patcher's code on every selection
+the page offers and on `test_layout.py`'s other bundle orders, checks each output is
+byte-identical to `patch_ptf.py`'s, and runs `test_layout.py`'s checks on them. After
+changing a patch, or the mods in `web/manifest.json`, run it with `--update` to refresh
+`web/expected.json`; the Pages workflow refuses to publish until then:
+
+```bash
+python tools/test_web_patcher.py path/to/TrackerPlus_1.2.0.ptf build/webtest --update
 ```
 
 The test projects are copies of project folders from the SD card (`Projects/...`).

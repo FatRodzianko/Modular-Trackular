@@ -99,11 +99,11 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.json build/TrackerPlus_c11.ptf
 ```
 
-With Humanize and interpolate in one firmware (`patch/all`; to choose your own set of patches, see
+With all the other mods in one firmware (`patch/all`; to choose your own set of patches, see
 "Choosing patches" in [docs/PATCHING.md](../../docs/PATCHING.md)):
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MTC.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MTE.ptf
 ```
 
 To build the patch code from source, you need the Arm GNU Toolchain

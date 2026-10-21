@@ -1,0 +1,69 @@
+{
+  "stock": {
+    "file": "TrackerPlus_1.2.0.ptf",
+    "size": 4586889,
+    "file_sha256": "d4616304f33d6d0b56516c658f34fa22517c1dd1630021c1ca89afca7b618ccd",
+    "image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b"
+  },
+  "repo": "https://github.com/FatRodzianko/Modular-Trackular",
+  "all": "patch/all/patch.json",
+  "patches": [
+    {
+      "id": "colorsong",
+      "bit": 0,
+      "spec": "patch/colorsong/patch.json",
+      "title": "Color Song",
+      "summary": "Colors the Song screen's blocks by what's in them: the same instruments share a color family, and variants get their own shades. Colors are saved per project.",
+      "status": "Tested on hardware"
+    },
+    {
+      "id": "humanize",
+      "bit": 1,
+      "spec": "patch/humanize/patch.json",
+      "title": "Humanize",
+      "summary": "A Pattern screen button that adds small random timing and volume changes to the selected notes. Ranges are set per project in Config.",
+      "status": "Tested on hardware"
+    },
+    {
+      "id": "interpolate",
+      "bit": 2,
+      "spec": "patch/interpolate/patch.json",
+      "title": "FX Interpolation",
+      "summary": "MIDI CC FX and synth Macros ramp smoothly to the next step instead of jumping. Switched on per project in Config.",
+      "status": "Tested on hardware"
+    },
+    {
+      "id": "masterfx",
+      "bit": 3,
+      "spec": "patch/masterfx/patch.json",
+      "title": "Master FX",
+      "summary": "Choose the master reverb (Freeverb, Plate, Spring, Shimmer) and delay (Tape, BBD, Gated) per project, played with the usual Master Reverb and Delay knobs.",
+      "status": "Tested on hardware"
+    },
+    {
+      "id": "swing",
+      "bit": 4,
+      "spec": "patch/swing/patch.json",
+      "title": "Global Swing",
+      "summary": "A Swing amount per project that every take and every pattern start uses. Off by default; set in Config.",
+      "status": "Tested on hardware"
+    },
+    {
+      "id": "visualizer",
+      "bit": 5,
+      "spec": "patch/visualizer/patch.json",
+      "title": "Pad Visualizer",
+      "summary": "Hold Note, Instrument, FX1 and FX2 while a pattern plays and the pads show drifting smoke with ripples from the notes.",
+      "status": "Tested on hardware"
+    }
+  ],
+  "tested_builds": {
+    "cc9119abe627d994ba6010bfe0db59129e3f494611dbc8c1e5c68fcf0653ebc6": "colorsong (1.2.0-c11)",
+    "ec3c30fda0d186299e39cce2be48031303f3bc0583fd1e8803600b500bf4b46f": "humanize (1.2.0-hz8)",
+    "f3d98eb18f5852dc718d41ba9311e813d056d1ab5b37b1252e87cf0341c0942a": "interpolate (1.2.0-ip5)",
+    "0f3f9cd0c0c00ceed7651aacece96bd52dd084991e82f9e03d814630b898df1a": "masterfx (1.2.0-mf4)",
+    "510fe9ad078ed737f1cf3c63ea706a8a0e50f978c9d115bfbc773f4252a0e8d7": "swing (1.2.0-sw1)",
+    "8b3ddcb09de46829799f542cf9d7423d95d4f39aa76db44881f5c18eb0361736": "visualizer (1.2.0-vz2)",
+    "72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982": "all six mods (1.2.0-MTE)"
+  }
+}

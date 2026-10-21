@@ -6,8 +6,8 @@ timing (Micro-move, `m`) and level (Volume/Velocity, `V`), so programmed parts s
 less robotic. How much (separately for timing and level), and whether levels change
 at all, is set per project under
 Config → Project Settings → Humanize. Installed on its own, Config shows the firmware
-version as `1.2.0-hz8`. Together with colorsong and interpolate
-([`patch/all`](../all/patch.json)) it shows `1.2.0-MTC`.
+version as `1.2.0-hz8`. Together with all the other mods
+([`patch/all`](../all/patch.json)) it shows `1.2.0-MTE`.
 
 **Status:** tested on hardware.
 
@@ -120,11 +120,11 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/humanize/patch.json build/TrackerPlus_hz8.ptf
 ```
 
-With colorsong and interpolate in one firmware (`patch/all`; to choose your own set of patches, see
+With all the other mods in one firmware (`patch/all`; to choose your own set of patches, see
 "Choosing patches" in [docs/PATCHING.md](../../docs/PATCHING.md)):
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MTC.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MTE.ptf
 ```
 
 To build the patch code from source, you need the Arm GNU Toolchain
@@ -159,14 +159,14 @@ It runs the stock code with the patch in place:
   one write a while after a change, per-project values, a damaged file, a
   single-range `HHZ1` file, and a new project's first save.
 
-The same test runs on `TrackerPlus_MTC.ptf`.
+The same test runs on `TrackerPlus_MTE.ptf`.
 
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
 Config → Firmware → the patched file. Config should show `1.2.0-hz8 Build 1504` (or
-`1.2.0-MTC Build 1504` for all mods).
+`1.2.0-MTE Build 1504` for all mods).
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Humanized patterns keep their
 FX and play the same on stock firmware. Stock firmware ignores the `humanize.bin`

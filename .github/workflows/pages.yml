@@ -1,0 +1,36 @@
+# Publishes the web patcher (web/) to GitHub Pages. Only what web/stage.py stages is
+# served: the page, and each listed mod's patch.json and prebuilt files. No firmware.
+# Needs Settings -> Pages -> Source: GitHub Actions.
+name: Web patcher
+
+on:
+  push:
+    branches: [master]
+    paths: ["web/**", "patch/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      # Refuses if web/expected.json doesn't match the patch files (see web/stage.py).
+      - run: python3 web/stage.py _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

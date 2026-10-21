@@ -40,8 +40,8 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   pattern plays and the pads show slowly drifting smoke with ripples spreading from the
   notes; press any of the four to go back. Tested on hardware. See
   [patch/visualizer/README.md](patch/visualizer/README.md).
-- **all**: colorsong, humanize and interpolate in one firmware (version text
-  `1.2.0-MTC`), from [patch/all/patch.json](patch/all/patch.json).
+- **all**: all six mods above in one firmware (version text `1.2.0-MTE`), from
+  [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
   future patches. See [patch/ramdiag/README.md](patch/ramdiag/README.md).
@@ -70,8 +70,14 @@ firmware from Polyend, check its SHA-256, run one Python command (no compiler
 needed), copy the result to `/Firmware` on the SD card, and install it through
 Config → Firmware. You can return to stock the same way.
 
+**No Python?** The [web patcher](https://fatrodzianko.github.io/Modular-Trackular/) does
+the same in your browser: choose your stock `TrackerPlus_1.2.0.ptf`, tick the mods you
+want, and download the patched file. Your firmware isn't uploaded anywhere, and the
+page only offers a download when its output is byte-identical to what
+`tools/patch_ptf.py` makes. See "In your browser" in [docs/PATCHING.md](docs/PATCHING.md).
+
 Each mod can be installed on its own, or several can be combined into one firmware.
-`patch/all` combines colorsong, Humanize and interpolate, and you can make your own mix, including
+`patch/all` combines all six, and you can make your own mix, including
 patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.md).
 
 ## Layout
@@ -88,11 +94,14 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/masterfx/` | Master reverb and delay per project: Stock, Freeverb, Plate, Spring or Shimmer; Stock, Tape, BBD or "Gated"; sound samples in `samples/` |
 | `patch/swing/` | Global Swing per project |
 | `patch/visualizer/` | Pad visualizer during playback |
-| `patch/all/` | Bundle spec: colorsong + humanize + interpolate in one firmware |
+| `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
 | `tools/ptf.py` | Read / convert / re-encode `.ptf` (Intel HEX), with a byte-exact round-trip check |
 | `tools/patch_ptf.py` | Apply a patch or bundle spec to a stock `.ptf`: places the patches in the order listed, assigns their RAM and relocates them (stock hash + original-byte checks, gap-free append) |
+| `web/` | The web patcher: `patcher.js` (a port of `ptf.py` and `patch_ptf.py`), the page, `manifest.json` (the mods it offers), `expected.json` (the output hashes it accepts), `stage.py` (assembles the site) |
+| `.github/workflows/pages.yml` | Publishes the staged web patcher to GitHub Pages |
+| `tools/test_web_patcher.py`, `tools/web_patcher_node.mjs` | Check the web patcher's output is byte-identical to `patch_ptf.py`'s for every selection it offers (needs Node) |
 | `tools/mkrel.py` | Make a patch's relocation table (code and RAM addresses) from three links of it (used by the build scripts) |
 | `tools/test_layout.py` | Check the patcher's code and RAM placement, relocation and hook chains for each patch alone and both bundle orders |
 | `tools/thumbdis.py` | Quick Thumb disassembly with literal-pool values and strings |

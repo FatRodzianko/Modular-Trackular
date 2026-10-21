@@ -6,9 +6,9 @@ it sets that Macro. So the value changes in jumps. With this patch it ramps smoo
 to the next step on that track with the same letter. CC A 0 on step 1 and CC A 127 on
 step 17 becomes a 16-step sweep; the steps in between need no FX.
 Installed on its own, Config shows the firmware version as `1.2.0-ip5`. Together with
-colorsong and humanize ([`patch/all`](../all/patch.json)) it shows `1.2.0-MTC`.
+all the other mods ([`patch/all`](../all/patch.json)) it shows `1.2.0-MTE`.
 
-**Status:** tested on hardware (in the `patch/all` build), MIDI and synths.
+**Status:** tested on hardware (in a firmware with colorsong and humanize), MIDI and synths.
 
 ## Using it
 
@@ -118,11 +118,11 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/interpolate/patch.json build/TrackerPlus_ip5.ptf
 ```
 
-With colorsong and humanize in one firmware (`patch/all`; to choose your own set of
+With all the other mods in one firmware (`patch/all`; to choose your own set of
 patches, see "Choosing patches" in [docs/PATCHING.md](../../docs/PATCHING.md)):
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MTC.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/all/patch.json build/TrackerPlus_MTE.ptf
 ```
 
 To build the patch code from source, you need the Arm GNU Toolchain
@@ -151,14 +151,14 @@ FX2, sample instruments, a channel change,
 a program-change mapping, equal values, a muted track, stopping, the per-block caps,
 sharing between ramps, and the jack's send buffer. It also checks that each setting works on its own, counts the patch's instructions
 per block, and checks the FX Interpolation folder and its two items, and the settings file. The same test
-runs on `TrackerPlus_MTC.ptf`.
+runs on `TrackerPlus_MTE.ptf`.
 
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
 Config → Firmware → the patched file. Config should show `1.2.0-ip5 Build 1504` (or
-`1.2.0-MTC Build 1504` for all mods).
+`1.2.0-MTE Build 1504` for all mods).
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Patterns are unchanged (the
 patch writes nothing into them), so they play as before, with stepped CCs. Stock

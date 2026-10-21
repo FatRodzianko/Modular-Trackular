@@ -6,8 +6,9 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
   - colorsong alone, humanize alone, interpolate alone, masterfx alone, swing alone,
     visualizer alone, ramdiag alone,
   - versiontest alone (pinned base; byte-identical to MT0),
-  - patch/all (colorsong, humanize, interpolate),
-  - the same patches the other way round (interpolate, humanize, colorsong),
+  - patch/all (colorsong, humanize, interpolate, masterfx, swing, visualizer),
+  - colorsong, humanize and interpolate the other way round (interpolate, humanize,
+    colorsong),
   - colorsong, humanize, interpolate and masterfx, both ways round, and with swing and
     visualizer too,
   - humanize and a copy of it that hooks only its chained sites (two patches on the
@@ -194,7 +195,8 @@ def main() -> int:
             ("swing alone", sw, [sw], None, None),
             ("visualizer alone", vz, [vz], None, None),
             ("ramdiag alone", rd, [rd], None, None),
-            ("patch/all: colorsong, humanize, interpolate", all_spec, [cs, hz, ip],
+            ("patch/all: colorsong, humanize, interpolate, masterfx, swing, visualizer", all_spec,
+             [cs, hz, ip, mx, sw, vz],
              json.loads(all_spec.read_text())["version"], None),
             ("reversed: interpolate, humanize, colorsong", rev_spec, [ip, hz, cs], "MTR", None),
             ("colorsong, humanize, interpolate, masterfx", with_mx_spec, [cs, hz, ip, mx], "MTX", None),
