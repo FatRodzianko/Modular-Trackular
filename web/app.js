@@ -37,13 +37,13 @@ function show(el, text, kind) {
 
 function setupTheme() {
   const btn = $("theme");
-  const current = () => document.documentElement.dataset.theme ||
-    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  // Light unless the viewer chose dark (the system setting doesn't switch it).
+  const current = () => document.documentElement.dataset.theme || "light";
   const label = () => { btn.textContent = current() === "dark" ? "Light theme" : "Dark theme"; };
   try {
     const saved = localStorage.getItem("mt-theme");
     if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
-  } catch { /* storage blocked: follow the system */ }
+  } catch { /* storage blocked: light */ }
   label();
   btn.addEventListener("click", () => {
     const next = current() === "dark" ? "light" : "dark";
@@ -51,7 +51,6 @@ function setupTheme() {
     try { localStorage.setItem("mt-theme", next); } catch { /* not remembered */ }
     label();
   });
-  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", label);
 }
 
 // ---- state ----------------------------------------------------------------------------

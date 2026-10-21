@@ -1,7 +1,7 @@
 /* An Amiga tracker look, after ProTracker 3: grey bevelled panels, a black "pattern"
    display with cyan text, a blue cursor bar and a red cursor box. Colours and fonts
-   only. The light theme is ProTracker's grey control panel; the dark theme its pattern
-   editor. */
+   only. The light theme (the default) is ProTracker's grey control panel; the dark
+   theme its pattern editor. */
 
 :root {
   /* ProTracker's own palette */
@@ -27,19 +27,7 @@
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --panel: var(--pt-black);
-    --text: var(--pt-cyan);
-    --muted: var(--pt-grey);
-    --value: var(--pt-yellow);
-    --link: var(--pt-yellow);
-    --step-hi: var(--pt-shade);
-    --step-lo: var(--pt-white);
-    color-scheme: dark;
-  }
-}
-
+/* The dark theme only when chosen with the toggle; light is the default. */
 :root[data-theme="dark"] {
   --panel: var(--pt-black);
   --text: var(--pt-cyan);

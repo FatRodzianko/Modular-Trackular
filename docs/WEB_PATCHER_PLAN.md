@@ -92,8 +92,9 @@ Plain JavaScript, no build step, no libraries, no CDN:
 - `web/app.js`: the page (file input, grid, build, download). SHA-256 from Web Crypto
   (`crypto.subtle.digest`), which GitHub Pages' HTTPS allows. The download is a
   `Blob` URL.
-- `web/index.html`, `web/style.css`: one page, system fonts, light and dark themes
-  (follows the system, with a toggle), works at phone width.
+- `web/index.html`, `web/style.css`: one page in a ProTracker-style look (CSS only,
+  system fonts), light theme by default and a dark one by toggle (remembered), works
+  at phone width.
 - `web/manifest.json`: the data (below).
 - `web/expected.json`: the expected output SHA-256 for every selection (keyed by the
   mods' ids in the manifest's order, joined with `+`), written by the test harness from
