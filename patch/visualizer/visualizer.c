@@ -33,6 +33,9 @@
  *    before the first press is selected again. While it shows, a press of any of the
  *    four switches it off and is not passed on, nor are the other presses until all
  *    four are up again.
+ *  - Stepping aside: while a bottom-row button shows its own pads (holding Pattern
+ *    shows the patterns; the screen's pad mode at +0x1354 is 0 or more, -1 normally),
+ *    the stock pads show, as with record on.
  *
  * Shared hooks go through chain words (mt_vz_next_*) that tools/patch_ptf.py fills with
  * what the site pointed to before, so other patches can hook them too.
@@ -40,7 +43,7 @@
 #include <stdint.h>
 
 #ifndef VIS_VERSION
-#define VIS_VERSION "vz1"
+#define VIS_VERSION "vz2"
 #endif
 
 /* ---- firmware addresses (1.2.0) -------------------------------------------------- */
@@ -78,6 +81,7 @@
 #define PS_RECORD           0x254u
 #define PS_COLUMN           0x255u          /* 0 Note, 1 Instrument, 2 FX1, 3 FX2 */
 #define PS_HELD             0x4C7u          /* 4 bytes: column button held (long press) */
+#define PS_PAD_MODE         0x354u          /* int8: -1 normal; 0 patterns (Pattern held), 1, 2 */
 
 typedef void (*advance_fn)(void *seq, float seconds);
 typedef uint32_t (*advance_step_fn)(void *seq, uint32_t track);
@@ -104,8 +108,10 @@ CHAIN_WORD(mt_vz_next_fx2);                 /* FX2 button 0x600e2fad */
 #define SCREEN_GONE_MS      200u            /* no Pattern screen update for this long: elsewhere */
 #define BUTTONS_STALE_MS    1500u           /* no column button event for this long: forget them */
 #define RIPPLES             12u
-#define SMOKE_LEVEL         0.30f           /* the smoke's share of full brightness */
-#define SMOKE_EASE          1.6f            /* per second: how fast the smoke follows a nudge */
+#define SMOKE_LEVEL         0.35f           /* the smoke's share of full brightness */
+#define SMOKE_EASE          0.35f           /* per second: how fast the smoke follows a nudge */
+#define RIPPLE_GAP_BEATS    0.5f            /* at least half a beat between new ripples */
+#define RIPPLE_RISE         0.5f            /* seconds a ripple takes to fade in */
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
@@ -129,6 +135,7 @@ struct vz_state {
     float phase[3], target[3];              /* smoke phase offsets and where they ease to */
     float wind;                             /* ripple centres drift along x */
     uint32_t hash;                          /* the take's history so far */
+    float last_ripple;                      /* take clock of the newest ripple */
     uint8_t was_playing;
     uint8_t next_ripple;
     uint8_t take;                           /* counts takes (the screen side resets on a new one) */
@@ -157,6 +164,7 @@ static void vz_reset_take(void)
         VZ->phase[i] = VZ->target[i] = 0.0f;
     VZ->wind = 0.0f;
     VZ->hash = 0x9E3779B9u;
+    VZ->last_ripple = -100.0f;
     VZ->next_ripple = 0;
     for (uint32_t i = 0; i < RIPPLES; i++)
         VZ->rip[i].live = 0;
@@ -247,19 +255,31 @@ static void vz_step(const uint8_t *seq, uint32_t track)
                         ^ (f2t * 0x7F4Bu) ^ (f2v * 0x2C9277u));
     VZ->hash = vz_mix(VZ->hash ^ e);        /* the history: differs on every pass */
     uint32_t h = VZ->hash;
-    float push = has_note ? 0.9f : 0.45f;   /* FX-only steps stir the smoke less */
+    float push = has_note ? 0.5f : 0.25f;   /* FX-only steps stir the smoke less */
     VZ->target[0] += vz_unit(h, 0) * push;
     VZ->target[1] += vz_unit(h, 8) * push;
     VZ->target[2] += vz_unit(h, 16) * push;
-    VZ->wind += vz_unit(h, 24) * 0.6f;
+    VZ->wind += vz_unit(h, 24) * 0.35f;
     if (VZ->wind > 1000.0f || VZ->wind < -1000.0f)
         VZ->wind = 0.0f;
     if (!has_note)
         return;
 
+    /* A new ripple only into a free slot (none is cut short) and not within half a
+     * beat of the last one: a busy pattern gives a steady flow, not a flicker. */
     float tempo = vz_tempo_scale();
-    struct ripple *r = &VZ->rip[VZ->next_ripple];
-    VZ->next_ripple = (uint8_t)((VZ->next_ripple + 1u) % RIPPLES);
+    if (VZ->clock - VZ->last_ripple < RIPPLE_GAP_BEATS * 0.5f / tempo)
+        return;
+    struct ripple *r = 0;
+    for (uint32_t i = 0; i < RIPPLES && !r; i++) {
+        struct ripple *c = &VZ->rip[(VZ->next_ripple + i) % RIPPLES];
+        if (!c->live || VZ->clock - c->born > c->life)
+            r = c;
+    }
+    if (!r)
+        return;
+    VZ->next_ripple = (uint8_t)((uint32_t)(r - VZ->rip + 1) % RIPPLES);
+    VZ->last_ripple = VZ->clock;
     float x = (float)(note % PAD_COLS) + VZ->wind;
     x -= (float)(int32_t)(x * (1.0f / PAD_COLS)) * PAD_COLS;
     if (x < 0.0f)
@@ -267,10 +287,10 @@ static void vz_step(const uint8_t *seq, uint32_t track)
     r->x = x;
     r->y = (float)(PAD_ROWS - 1u - (note / PAD_COLS) % PAD_ROWS);
     r->born = VZ->clock;
-    r->speed = (1.6f + (float)(instr % 7u) * 0.35f) * tempo;
-    r->life = (1.6f + (float)(track % 4u) * 0.3f) / (tempo < 0.5f ? 0.5f : tempo);
-    r->amp = 1.0f;
-    r->width = 0.9f;
+    r->speed = (0.45f + (float)(instr % 7u) * 0.12f) * tempo;
+    r->life = (4.5f + (float)(track % 4u) * 0.6f) / (tempo < 0.5f ? 0.5f : tempo);
+    r->amp = 0.75f;
+    r->width = 1.5f;
     r->stretch = 1.0f;
     uint32_t types[2] = {f1t, f2t}, values[2] = {f1v, f2v};
     for (int i = 0; i < 2; i++) {
@@ -278,9 +298,9 @@ static void vz_step(const uint8_t *seq, uint32_t track)
             continue;
         if (types[i] == FX_VELOCITY) {
             float v = (float)(values[i] > 100u ? 100u : values[i]) * 0.01f;
-            r->amp = 0.25f + 0.75f * v;
+            r->amp = 0.2f + 0.55f * v;
         } else {
-            r->width = 0.7f + (float)(values[i] % 6u) * 0.15f;
+            r->width = 1.1f + (float)(values[i] % 6u) * 0.15f;
             r->stretch = 0.45f + (float)(types[i] % 4u) * 0.3f;
         }
     }
@@ -369,9 +389,9 @@ void mt_vz_set_pad(void *leds, uint32_t pad, uint32_t on, uint32_t level)
 static float vz_smoke(float x, float y, float beats)
 {
     /* three slow waves, each bending the next: soft swirling bands, like smoke */
-    float w1 = vz_sin(0.52f * x + 0.80f * y + 0.70f * beats + VZ->phase[0]);
-    float w2 = vz_sin(-0.31f * x + 1.20f * y - 0.45f * beats + VZ->phase[1] + 1.1f * w1);
-    float w3 = vz_sin(0.23f * x - 0.90f * y + 0.30f * beats + VZ->phase[2] + 1.4f * w2);
+    float w1 = vz_sin(0.36f * x + 0.56f * y + 0.22f * beats + VZ->phase[0]);
+    float w2 = vz_sin(-0.22f * x + 0.84f * y - 0.15f * beats + VZ->phase[1] + 1.1f * w1);
+    float w3 = vz_sin(0.16f * x - 0.63f * y + 0.10f * beats + VZ->phase[2] + 1.4f * w2);
     float s = 0.5f + 0.5f * w3;
     return s * s * s;                       /* thin bright wisps, dark between */
 }
@@ -393,7 +413,8 @@ static float vz_ripples(float x, float y, float now)
         float dy = y - r->y;
         float d = vz_sqrt(dx * dx + dy * dy);
         float fade = 1.0f - age / r->life;
-        float env = r->amp * fade * fade * (age < 0.04f ? age * 25.0f : 1.0f);
+        float rise = age < RIPPLE_RISE ? age * (1.0f / RIPPLE_RISE) : 1.0f;
+        float env = r->amp * fade * fade * rise * rise * (3.0f - 2.0f * rise);   /* smoothstep in */
         float rad = r->speed * age;
         float ring = 1.0f - vz_abs(d - rad) / r->width;
         if (ring > 0.0f)
@@ -423,6 +444,7 @@ static void vz_draw(void)
     for (uint32_t p = 0; p < PADS; p++) {
         float x = (float)(p % PAD_COLS), y = (float)(p / PAD_COLS);
         float v = SMOKE_LEVEL * vz_smoke(x, y, beats) + vz_ripples(x, y, now);
+        v = 1.5f * v / (1.0f + 0.5f * v);   /* soft limit: overlaps glow, not clip */
         if (v > 1.0f)
             v = 1.0f;
         uint32_t level = (uint32_t)(v * (float)top + 0.5f);
@@ -433,11 +455,11 @@ static void vz_draw(void)
     }
 }
 
-/* Playing in the Pattern screen, record off, not performance mode. */
+/* Playing in the Pattern screen, record off, no bottom-row pad view, not performance mode. */
 static int vz_can_show(uint32_t now)
 {
     return FW_SEQ[SEQ_PLAYING] && !FW_SEQ[SEQ_PERFORMANCE] && !FW_PATTERN_FIELDS[PS_RECORD]
-           && now - VZ->last_update <= SCREEN_GONE_MS;
+           && (int8_t)FW_PATTERN_FIELDS[PS_PAD_MODE] < 0 && now - VZ->last_update <= SCREEN_GONE_MS;
 }
 
 /* Pattern screen vtable slot 0x600403dc (update method 0x600e1f99; chained) */

@@ -1461,6 +1461,10 @@ through `0x600cf74c(*0x200209e0, id, callback)`. Each callback is a single flash
   button has been held for more than 180 ms (`0x600e1ff4`). A release clears the mark.
 - **Other buttons.** REC (`0x1c`, `0x600e2c29`) toggles the record flag at +`0x1254`.
   Play is `0x17` (`0x600c83a9`).
+- **Pad mode.** +`0x1354` (int8) is −1 normally. While a bottom-row button that shows its
+  own pads is held, it holds that view: 0 while Pattern is held (the patterns that exist
+  are lit, the current one brighter; set by `0x600e24f5`), 1 and 2 for two other views
+  (`0x600e249d`, `0x600e2445`). The pad refresh (`0x600e1310`) lights that view first.
 - **Held query.** `0x600cf90c(*0x200209e8, id)` says whether a button is held. It goes
   through a vtable.
 

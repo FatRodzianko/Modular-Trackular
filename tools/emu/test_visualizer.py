@@ -18,7 +18,8 @@ Checks:
   come back (with what changed meanwhile) when it stops.
 - A press of any of the four stops it and isn't passed on, nor are the other presses
   until all four are up; then the buttons work again.
-- Record on, performance mode, stopping and leaving the screen hide it.
+- Record on, holding a bottom-row button (Pattern: the patterns on the pads), performance
+  mode, stopping and leaving the screen hide it.
 - Deterministic: two fresh plays of the same pattern give the same frames (to a level,
   as a step may land one audio block apart); a later pass of the loop gives different ones.
 """
@@ -46,6 +47,7 @@ GAMMA = 0x60037390
 SET_LAYER_B = 0x600ABDC8            # (mgr, on, level, pad)
 FIELDS = 0x20022770                 # Pattern screen + 0x1000
 REC, COLUMN, HELD = FIELDS + 0x254, FIELDS + 0x255, FIELDS + 0x4C7
+PAD_MODE = FIELDS + 0x354           # int8: -1 normal, 0 patterns (Pattern held), 1, 2
 SETTINGS = st.SETTINGS
 PATTERN_UPDATE_SLOT, PATTERN_UPDATE = 0x600403DC, 0x600E1F98
 BUTTON_SLOTS = [0x600DF2DC, 0x600DF2E0, 0x600DF2E4, 0x600DF2E8]
@@ -88,6 +90,7 @@ class Rig:
         self.gamma = {v: i for i, v in enumerate(m.uc.mem_read(GAMMA, 32))}
         self.cur, self.nxt = self.pattern(), self.pattern()
         m.w8(COLUMN, 1)
+        m.w8(PAD_MODE, 0xFF)                    # no bottom-row pad view
 
     def pattern(self) -> int:
         m = self.m
@@ -155,9 +158,9 @@ class Rig:
         return self.m.uc.mem_read(VZ + SHOWING, 1)[0] == 1
 
 
-# struct vz_state: magic, clock, phase[3], target[3], wind, hash, 4 bytes, 12 ripples of
+# struct vz_state: magic, clock, phase[3], target[3], wind, hash, last_ripple, 4 bytes, 12 ripples of
 # 36 bytes, last_update, last_frame, last_button, armed, showing (offsets)
-LAST_FRAME = 4 + 4 + 12 + 12 + 4 + 4 + 4 + 12 * 36 + 4
+LAST_FRAME = 4 + 4 + 12 + 12 + 4 + 4 + 4 + 4 + 12 * 36 + 4
 SHOWING = LAST_FRAME + 4 + 4 + 1
 
 
@@ -214,11 +217,12 @@ def button_checks(r: Rig) -> None:
     top = max(max(f) for f in frames)
     check(distinct > 50, f"the pads animate ({distinct} different frames in 2 s)")
     check(0 < top <= 31 and min(min(f) for f in frames) >= 0, f"levels within 0..31 (peak {top})")
-    lit = sum(1 for f in frames for v in f if v > 0) / (48 * len(frames))
-    check(0.2 < lit < 0.98, f"not all dark, not all lit ({lit:.0%} of pad-frames lit)")
+    lit = sum(1 for f in frames for v in f if v >= 8) / (48 * len(frames))
+    check(0.1 < lit < 0.9, f"not all dark, not all bright ({lit:.0%} of pad-frames at a quarter or more)")
     jumps = [max(abs(a - b) for a, b in zip(f, g)) for f, g in zip(frames, frames[1:])]
-    small = sum(1 for j in jumps if j <= 8) / len(jumps)
-    check(small > 0.8, f"smooth: {small:.0%} of frame steps change no pad by more than 8")
+    small = sum(1 for j in jumps if j <= 2) / len(jumps)
+    check(small > 0.95 and max(jumps) <= 6,
+          f"gradual: {small:.0%} of 20 ms frame steps change no pad by more than 2 levels (most {max(jumps)})")
     r.app_write(7, 25)
     r.run(0.05)
     check(m.uc.mem_read(PAD_MGR + 0x34 + 7, 1)[0] == 25, "firmware pad write while showing: kept in its layer")
@@ -256,6 +260,12 @@ def hide_checks(r: Rig) -> None:
     m.w8(REC, 0)
     r.run(0.05)
     check(r.showing(), "record off: shows again")
+    m.w8(PAD_MODE, 0)
+    r.run(0.05)
+    check(not r.showing() and r.pads()[5] == 20, "Pattern held (patterns on the pads): hidden, stock pads")
+    m.w8(PAD_MODE, 0xFF)
+    r.run(0.05)
+    check(r.showing(), "Pattern released: shows again")
     m.w8(SEQ + 0x1D, 1)
     r.run(0.05)
     check(not r.showing(), "performance mode: hidden")
