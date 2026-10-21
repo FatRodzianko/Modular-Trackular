@@ -36,6 +36,10 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   can set a Swing amount (25–75) that every take and every pattern start uses, the same
   every time; a Swing FX still changes it until the pattern starts again. Off by
   default. Tested on hardware. See [patch/swing/README.md](patch/swing/README.md).
+- **visualizer**: a pad visualizer. Hold Note, Instrument, FX1 and FX2 together while a
+  pattern plays and the pads show slowly drifting smoke with ripples spreading from the
+  notes; press any of the four to go back. Hardware test pending. See
+  [patch/visualizer/README.md](patch/visualizer/README.md).
 - **all**: colorsong, humanize and interpolate in one firmware (version text
   `1.2.0-MTC`), from [patch/all/patch.json](patch/all/patch.json).
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
@@ -83,6 +87,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/interpolate/` | CC and Macro ramps between steps |
 | `patch/masterfx/` | Master reverb and delay per project: Stock, Freeverb, Plate, Spring or Shimmer; Stock, Tape, BBD or "Gated"; sound samples in `samples/` |
 | `patch/swing/` | Global Swing per project |
+| `patch/visualizer/` | Pad visualizer during playback |
 | `patch/all/` | Bundle spec: colorsong + humanize + interpolate in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
@@ -106,6 +111,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/stress_masterfx.py` | masterfx stress: long randomized sessions through the reverb or the delay (garbage settings, missing blocks, restarts, effect choices) with a write watch and state checks |
 | `tools/emu/compare_masterfx.py` | masterfx: runs the same randomized session through two builds and compares every output sample, and measures both |
 | `tools/emu/test_swing.py` | swing timing (the sequencer run in time, step lengths measured), Config menu and settings-file tests |
+| `tools/emu/test_visualizer.py` | visualizer: the four-button switch, column kept, pads handed over and back, hiding, frames per take |
 | `tools/emu/test_interpolate.py` | interpolate ramp, MIDI-rate, cost, Config menu and settings-file tests, through the real audio block |
 | `tools/emu/seq_timing.py` | Run the stock sequencer on test patterns and print the MIDI it sends, with timing |
 | `tools/emu/check_version.py` | Print the version text a `.ptf` would show |

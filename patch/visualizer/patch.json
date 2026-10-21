@@ -1,0 +1,87 @@
+{
+  "name": "visualizer",
+  "description": "Pad visualizer: hold Note, Instrument, FX1 and FX2 while a pattern plays (Pattern screen, record off) and the pads show drifting smoke with ripples from the notes; press any of the four to go back",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "ram_startup": true,
+  "bin": "build/visualizer.bin",
+  "sym": "build/visualizer.sym",
+  "rel": "build/visualizer.rel",
+  "prebuilt_bin": "prebuilt/visualizer.bin",
+  "prebuilt_sym": "prebuilt/visualizer.sym",
+  "prebuilt_rel": "prebuilt/visualizer.rel",
+  "branches": [
+    {
+      "at": "0x600AA7F8",
+      "old": "00f02ef8",
+      "to": "mt_vz_seq_advance",
+      "next": "mt_vz_next_seq_advance",
+      "note": "app_audio_block: bl seq_advance (veneer 0x600aa858); the take's clock, a reset at each take's start, the smoke easing"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x601ACF00",
+      "old": "11d00a60",
+      "to": "mt_vz_advance_step",
+      "next": "mt_vz_next_advance_step",
+      "thumb": true,
+      "note": "ITCM image (copied to ITCM 0x1f81c at boot): the word seq_tick's veneer jumps through to seq_advance_step 0x600ad011 -> mt_vz_advance_step (a ripple per note)"
+    },
+    {
+      "at": "0x60038298",
+      "old": "f11b0a60",
+      "to": "mt_vz_set_pad",
+      "next": "mt_vz_next_set_pad",
+      "thumb": true,
+      "note": "pad LED object vtable: setPad 0x600a1bf1 -> mt_vz_set_pad (the firmware's pad writes are dropped while the visualizer shows)"
+    },
+    {
+      "at": "0x600403DC",
+      "old": "991f0e60",
+      "to": "mt_vz_pattern_update",
+      "next": "mt_vz_next_pattern_update",
+      "thumb": true,
+      "note": "Pattern screen vtable: update method 0x600e1f99 -> mt_vz_pattern_update (draws the frames, shows and hides)"
+    },
+    {
+      "at": "0x600DF2DC",
+      "old": "ad200d60",
+      "to": "mt_vz_note",
+      "next": "mt_vz_next_note",
+      "thumb": true,
+      "note": "Pattern screen buttons: Note callback 0x600d20ad (id 0x12) -> mt_vz_note"
+    },
+    {
+      "at": "0x600DF2E0",
+      "old": "95440d60",
+      "to": "mt_vz_instrument",
+      "next": "mt_vz_next_instrument",
+      "thumb": true,
+      "note": "Pattern screen buttons: Instrument callback 0x600d4495 (id 0x13) -> mt_vz_instrument"
+    },
+    {
+      "at": "0x600DF2E4",
+      "old": "8d300e60",
+      "to": "mt_vz_fx1",
+      "next": "mt_vz_next_fx1",
+      "thumb": true,
+      "note": "Pattern screen buttons: FX1 callback 0x600e308d (id 0x14) -> mt_vz_fx1"
+    },
+    {
+      "at": "0x600DF2E8",
+      "old": "ad2f0e60",
+      "to": "mt_vz_fx2",
+      "next": "mt_vz_next_fx2",
+      "thumb": true,
+      "note": "Pattern screen buttons: FX2 callback 0x600e2fad (id 0x15) -> mt_vz_fx2"
+    },
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "version": true,
+      "note": "version text 1.2.0-vz1"
+    }
+  ]
+}

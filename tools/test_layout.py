@@ -3,11 +3,13 @@
   python tools/test_layout.py <stock TrackerPlus_1.2.0.ptf> [out dir]
 
 Builds, from the repository's patch specs (local builds if present, else prebuilt):
-  - colorsong alone, humanize alone, interpolate alone, masterfx alone, swing alone, ramdiag alone,
+  - colorsong alone, humanize alone, interpolate alone, masterfx alone, swing alone,
+    visualizer alone, ramdiag alone,
   - versiontest alone (pinned base; byte-identical to MT0),
   - patch/all (colorsong, humanize, interpolate),
   - the same patches the other way round (interpolate, humanize, colorsong),
-  - colorsong, humanize, interpolate and masterfx, both ways round, and with swing too,
+  - colorsong, humanize, interpolate and masterfx, both ways round, and with swing and
+    visualizer too,
   - humanize and a copy of it that hooks only its chained sites (two patches on the
     same four sites),
 and checks that a bundle with ramdiag (standalone) is refused, and so is one where a
@@ -150,9 +152,9 @@ def main() -> int:
     stock = Path(sys.argv[1])
     outdir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(tempfile.mkdtemp())
     outdir.mkdir(parents=True, exist_ok=True)
-    cs, hz, vt, rd, ip, mx, sw = (ROOT / "patch" / n / "patch.json"
-                                  for n in ("colorsong", "humanize", "versiontest", "ramdiag", "interpolate", "masterfx",
-                                            "swing"))
+    cs, hz, vt, rd, ip, mx, sw, vz = (ROOT / "patch" / n / "patch.json"
+                                      for n in ("colorsong", "humanize", "versiontest", "ramdiag", "interpolate",
+                                                "masterfx", "swing", "visualizer"))
     all_spec = ROOT / "patch" / "all" / "patch.json"
     rev = json.loads(all_spec.read_text())
     rev.update(name="all-reversed", include=[str(ip), str(hz), str(cs)], version="MTR")
@@ -164,10 +166,10 @@ def main() -> int:
     with_mx_rev = dict(rev, name="with-masterfx-reversed", include=[str(mx), str(ip), str(hz), str(cs)], version="MTY")
     with_mx_rev_spec = outdir / "with-masterfx-reversed.json"
     with_mx_rev_spec.write_text(json.dumps(with_mx_rev, indent=2))
-    every = dict(rev, name="every", include=[str(cs), str(hz), str(ip), str(mx), str(sw)], version="MTS")
+    every = dict(rev, name="every", include=[str(cs), str(hz), str(ip), str(mx), str(sw), str(vz)], version="MTS")
     every_spec = outdir / "every.json"
     every_spec.write_text(json.dumps(every, indent=2))
-    every_rev = dict(rev, name="every-reversed", include=[str(sw), str(mx), str(ip), str(hz), str(cs)], version="MTT")
+    every_rev = dict(rev, name="every-reversed", include=[str(vz), str(sw), str(mx), str(ip), str(hz), str(cs)], version="MTT")
     every_rev_spec = outdir / "every-reversed.json"
     every_rev_spec.write_text(json.dumps(every_rev, indent=2))
     hz_spec = json.loads(hz.read_text())
@@ -190,14 +192,17 @@ def main() -> int:
             ("interpolate alone", ip, [ip], None, None),
             ("masterfx alone", mx, [mx], None, None),
             ("swing alone", sw, [sw], None, None),
+            ("visualizer alone", vz, [vz], None, None),
             ("ramdiag alone", rd, [rd], None, None),
             ("patch/all: colorsong, humanize, interpolate", all_spec, [cs, hz, ip],
              json.loads(all_spec.read_text())["version"], None),
             ("reversed: interpolate, humanize, colorsong", rev_spec, [ip, hz, cs], "MTR", None),
             ("colorsong, humanize, interpolate, masterfx", with_mx_spec, [cs, hz, ip, mx], "MTX", None),
             ("masterfx, interpolate, humanize, colorsong", with_mx_rev_spec, [mx, ip, hz, cs], "MTY", None),
-            ("colorsong, humanize, interpolate, masterfx, swing", every_spec, [cs, hz, ip, mx, sw], "MTS", None),
-            ("swing, masterfx, interpolate, humanize, colorsong", every_rev_spec, [sw, mx, ip, hz, cs], "MTT", None),
+            ("colorsong, humanize, interpolate, masterfx, swing, visualizer", every_spec,
+             [cs, hz, ip, mx, sw, vz], "MTS", None),
+            ("visualizer, swing, masterfx, interpolate, humanize, colorsong", every_rev_spec,
+             [vz, sw, mx, ip, hz, cs], "MTT", None),
             ("chained: humanize, then a copy on its four shared sites", chain_spec, [hz, copy_spec], "CHN", None)):
         out = outdir / f"{spec.stem if spec.parent == outdir else spec.parent.name}.ptf"
         if not build(stock, spec, out):

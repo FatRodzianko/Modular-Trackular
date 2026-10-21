@@ -1412,3 +1412,57 @@ D-cache must be cleaned and the I-cache invalidated); and state memory (the reve
 64 KB of buffers, the delay's 1.5 MB). A bad file can crash the unit, so the loader
 should check the header and size, the effect should start only after boot, and taking
 the file off the card should bring back the stock effect.
+
+## 20. Pad lights and the Pattern screen's column buttons (`patch/visualizer`)
+
+**The pad LED path.** The pads are single colour: one LED per pad on the IS31FL3731
+(I2C `0x74`), 48 of its 144 PWM slots.
+- **Driver.** Object at board + `0x454` (board `0x2000bedc`; vtable `0x600373b8`, one
+  method, the flush `0x60092930`). PWM frame at +8, LED enables at +`0x14e`, dirty flag
+  at +`0x14d`.
+- **Writing a pad.** `0x60092630(driver, pad, on, level)` maps the level (0..31) through
+  the gamma table at `0x60037390` (the same table as the original Tracker's) into slot
+  `pad + (pad / 12) * 4`, sets or clears the pad's enable bit, and marks the frame dirty.
+- **Flushing.** The main loop's I2C service scheduler (`0x600a0d70` on the list at
+  `0x2000ba4c`, every 500 timer ticks) calls the flush, which sends the frame when dirty.
+- **The app's interface.** The pad LED object at board + `0x450` (`0x2000c32c`) has a
+  vtable with one entry, the word at `0x60038298` = setPad `0x600a1bf1` (obj, pad, on,
+  level). It passes the call to the driver. Board vtable slot +`0x28` (`0x600a1c8d`)
+  returns this object.
+- **The pad manager.** Object `0x200171d0`, set up by `0x600abda4(mgr, 500, leds)` in the
+  app's init. It holds the interface pointer at +`0x98` and three 48-byte layers: A at
+  +4, B at +`0x34`, blink at +`0x64`. A pad shows the larger of its A and B levels.
+  - Setters: `0x600abdfc` for layer A and `0x600abdc8` for layer B, both
+    (mgr, on, level, pad).
+  - Clear: `0x600abea4`.
+  - The blink service: `0x600abe30`.
+- **What the screens use.** Screens light pads through the manager's setters. The
+  Pattern screen's pad refresh (`0x600e1310`) shows either the notes on the cursor row
+  (record off, by the "pads show notes" setting at settings + `0xd1`) or the selected
+  column's values (record on). It uses the pads brightness settings at settings +
+  `0x34` / `0x35` (0..31).
+
+**Column buttons.** In the Pattern screen, `0x600df1e4` registers the button callbacks
+through `0x600cf74c(*0x200209e0, id, callback)`. Each callback is a single flash literal:
+
+| Button | Id | Callback | Literal |
+|---|---|---|---|
+| Note | `0x12` | `0x600d20ad` | `0x600df2dc` |
+| Instrument | `0x13` | `0x600d4495` | `0x600df2e0` |
+| FX1 | `0x14` | `0x600e308d` | `0x600df2e4` |
+| FX2 | `0x15` | `0x600e2fad` | `0x600df2e8` |
+
+- **Arguments.** A callback gets the state: 1 pressed, 0 released.
+- **A press.** It selects the column (Pattern screen + `0x1255`: 0 Note, 1 Instrument,
+  2 FX1, 3 FX2). Through `0x600df168` it also marks the button "held" (+`0x14c7` +
+  column, with the press time at +`0x14cc` + 4 × column), but only if no other column
+  button is marked.
+- **Long press.** The screen's update fires a column's long-press action once its
+  button has been held for more than 180 ms (`0x600e1ff4`). A release clears the mark.
+- **Other buttons.** REC (`0x1c`, `0x600e2c29`) toggles the record flag at +`0x1254`.
+  Play is `0x17` (`0x600c83a9`).
+- **Held query.** `0x600cf90c(*0x200209e8, id)` says whether a button is held. It goes
+  through a vtable.
+
+**The timer.** `*0x20027d18` is the app's millisecond timer: vtable[0] returns ms. It is
+set in the app's init, not by static constructors.
