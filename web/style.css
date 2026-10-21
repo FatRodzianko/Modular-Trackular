@@ -1,56 +1,53 @@
+/* An Amiga tracker look, after ProTracker 3: grey bevelled panels, a black "pattern"
+   display with cyan text, a blue cursor bar and a red cursor box. Colours and fonts
+   only. The light theme is ProTracker's grey control panel; the dark theme its pattern
+   editor. */
+
 :root {
-  --bg: #f6f5f2;
-  --surface: #ffffff;
-  --text: #1c1c1e;
-  --muted: #5d5d63;
-  --border: #d9d7d1;
-  --accent: #1f5fbf;
-  --accent-text: #ffffff;
-  --ok-bg: #e5f4ea;
-  --ok-text: #14532d;
-  --bad-bg: #fbe7e6;
-  --bad-text: #8a1c14;
-  --warn-bg: #fff4d6;
-  --warn-text: #5c4100;
-  --card-on: #eaf1fc;
+  /* ProTracker's own palette */
+  --pt-grey: #aaaaaa;
+  --pt-white: #ffffff;
+  --pt-shade: #330000;
+  --pt-black: #000000;
+  --pt-cyan: #33ddff;
+  --pt-blue: #0000bb;
+  --pt-yellow: #ffdd00;
+  --pt-red: #dd0044;
+  --pt-pink: #ff5599;
+
+  /* light: the control panel */
+  --page: var(--pt-black);
+  --panel: var(--pt-grey);
+  --text: var(--pt-shade);
+  --muted: #552222;
+  --value: var(--pt-blue);
+  --link: var(--pt-blue);
+  --step-hi: var(--pt-white);
+  --step-lo: var(--pt-shade);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #151517;
-    --surface: #1f1f23;
-    --text: #ececef;
-    --muted: #a4a4ad;
-    --border: #36363d;
-    --accent: #6ea2ff;
-    --accent-text: #0b1530;
-    --ok-bg: #12301f;
-    --ok-text: #9be3b4;
-    --bad-bg: #3a1714;
-    --bad-text: #ffb4ab;
-    --warn-bg: #352a0c;
-    --warn-text: #f3d78a;
-    --card-on: #1d2a42;
+    --panel: var(--pt-black);
+    --text: var(--pt-cyan);
+    --muted: var(--pt-grey);
+    --value: var(--pt-yellow);
+    --link: var(--pt-yellow);
+    --step-hi: var(--pt-shade);
+    --step-lo: var(--pt-white);
     color-scheme: dark;
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #151517;
-  --surface: #1f1f23;
-  --text: #ececef;
-  --muted: #a4a4ad;
-  --border: #36363d;
-  --accent: #6ea2ff;
-  --accent-text: #0b1530;
-  --ok-bg: #12301f;
-  --ok-text: #9be3b4;
-  --bad-bg: #3a1714;
-  --bad-text: #ffb4ab;
-  --warn-bg: #352a0c;
-  --warn-text: #f3d78a;
-  --card-on: #1d2a42;
+  --panel: var(--pt-black);
+  --text: var(--pt-cyan);
+  --muted: var(--pt-grey);
+  --value: var(--pt-yellow);
+  --link: var(--pt-yellow);
+  --step-hi: var(--pt-shade);
+  --step-lo: var(--pt-white);
   color-scheme: dark;
 }
 
@@ -58,138 +55,285 @@
 
 body {
   margin: 0;
-  background: var(--bg);
+  background: var(--page);
   color: var(--text);
-  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 15px/1.6 "Topaz", "Topaz a1200", "Lucida Console", Consolas, "DejaVu Sans Mono", ui-monospace, "Courier New", monospace;
 }
 
-a { color: var(--accent); }
-code { font: 0.9em ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+a { color: var(--link); font-weight: 700; }
+strong { color: var(--value); }
+code { font: inherit; color: var(--value); overflow-wrap: anywhere; }
 
-.wrap { max-width: 920px; margin: 0 auto; padding: 0 16px; }
+/* Focus: ProTracker's red cursor box. */
+:focus-visible { outline: 2px solid var(--pt-red); outline-offset: 2px; }
 
-.top { border-bottom: 1px solid var(--border); background: var(--surface); }
-.top-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; padding-bottom: 14px; }
-h1 { font-size: 1.45rem; margin: 0; letter-spacing: -0.01em; }
-.sub { margin: 2px 0 0; color: var(--muted); font-size: 0.95rem; }
+.wrap { max-width: 940px; margin: 0 auto; padding: 0 16px; }
 
-.lead { font-size: 1.05rem; margin: 24px 0 14px; }
+/* Bevels: light from the top left, as on the Amiga. */
+.raised { box-shadow: inset 2px 2px 0 var(--pt-white), inset -2px -2px 0 var(--pt-shade); }
 
-.warn {
-  background: var(--warn-bg);
-  color: var(--warn-text);
-  border-radius: 10px;
-  padding: 12px 16px;
-  margin: 0 0 8px;
+/* ---- title bar ---------------------------------------------------------------- */
+
+.top { padding-top: 16px; }
+.top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--pt-grey);
+  color: var(--pt-shade);
+  padding: 10px 12px;
+  box-shadow: inset 2px 2px 0 var(--pt-white), inset -2px -2px 0 var(--pt-shade);
 }
-.warn a { color: inherit; }
+.top-row > div { flex: 1; min-width: 0; }
+h1 {
+  display: inline-block;
+  margin: 0;
+  padding: 4px 12px;
+  font-size: 1.25rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pt-shade);
+  box-shadow: inset 2px 2px 0 var(--pt-white), inset -2px -2px 0 var(--pt-shade);
+}
+.sub {
+  margin: 8px 0 0;
+  padding: 3px 10px;
+  background: var(--pt-black);
+  color: var(--pt-cyan);
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  box-shadow: inset 2px 2px 0 var(--pt-shade), inset -2px -2px 0 var(--pt-white);
+}
+
+/* ---- the page body: one grey frame, like the tracker's window ------------------ */
+
+main.wrap {
+  background: var(--pt-grey);
+  padding-top: 12px;
+  padding-bottom: 12px;
+  box-shadow: inset 2px 0 0 var(--pt-white), inset -2px -2px 0 var(--pt-shade);
+}
+
+.lead {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: inset 2px 2px 0 var(--step-hi), inset -2px -2px 0 var(--step-lo);
+}
+
+/* Status lines: a sunken black display, like ProTracker's STATUS field. */
+.warn, .msg {
+  background: var(--pt-black);
+  padding: 10px 14px;
+  box-shadow: inset 2px 2px 0 var(--pt-shade), inset -2px -2px 0 var(--pt-white);
+  overflow-wrap: anywhere;
+}
+.warn { color: var(--pt-yellow); margin: 0 0 4px; }
+.warn strong { color: var(--pt-yellow); text-transform: uppercase; }
+.warn a { color: var(--pt-cyan); }
+.msg { margin: 12px 0 0; color: var(--pt-cyan); }
+.msg.ok { color: var(--pt-cyan); }
+.msg.bad { color: var(--pt-pink); }
+.msg.info { color: var(--pt-yellow); }
+
+/* ---- steps --------------------------------------------------------------------- */
 
 .step {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 18px 20px 20px;
-  margin: 18px 0;
+  background: var(--panel);
+  color: var(--text);
+  padding: 16px 18px 18px;
+  margin: 12px 0;
+  box-shadow: inset 2px 2px 0 var(--step-hi), inset -2px -2px 0 var(--step-lo);
 }
-.step h2 { display: flex; align-items: center; gap: 10px; font-size: 1.15rem; margin: 0 0 10px; }
-.step h3 { font-size: 1rem; margin: 18px 0 6px; }
+.step h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.step h3 { font-size: 0.95rem; margin: 18px 0 6px; text-transform: uppercase; letter-spacing: 0.05em; }
 .num {
-  display: inline-grid;
-  place-items: center;
-  width: 28px; height: 28px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 26px;
+  padding: 0 6px;
+  background: var(--pt-black);
+  color: var(--pt-yellow);
   font-size: 0.9rem;
   flex: none;
+  box-shadow: inset 2px 2px 0 var(--pt-shade), inset -2px -2px 0 var(--pt-white);
 }
+.num::before { content: "0"; }
 
+/* The file drop: a sunken pattern display. */
 .drop {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
   text-align: center;
-  border: 2px dashed var(--border);
-  border-radius: 12px;
-  padding: 26px 16px;
+  padding: 24px 16px;
   cursor: pointer;
+  background: var(--pt-black);
+  color: var(--pt-cyan);
+  box-shadow: inset 2px 2px 0 var(--pt-shade), inset -2px -2px 0 var(--pt-white);
 }
-.drop:hover, .drop.over, .drop:focus-within { border-color: var(--accent); }
+.drop code { color: var(--pt-yellow); }
+.drop:hover, .drop.over { outline: 2px solid var(--pt-yellow); outline-offset: -6px; }
+.drop:focus-within { outline: 2px solid var(--pt-red); outline-offset: -6px; }
 .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.drop-main { font-weight: 600; }
-.drop-sub { color: var(--muted); font-size: 0.9rem; }
+.drop-main { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.drop-sub { color: var(--pt-grey); font-size: 0.85rem; }
 
-.msg { border-radius: 10px; padding: 10px 14px; margin: 12px 0 0; overflow-wrap: anywhere; }
-.msg.ok { background: var(--ok-bg); color: var(--ok-text); }
-.msg.bad { background: var(--bad-bg); color: var(--bad-text); }
-.msg.info { background: var(--warn-bg); color: var(--warn-text); }
+/* ---- mods ---------------------------------------------------------------------- */
 
-.select-all { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin: 0 0 12px; cursor: pointer; }
+.select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 6px 12px 6px 10px;
+  cursor: pointer;
+  background: var(--pt-grey);
+  color: var(--pt-shade);
+  font-weight: 700;
+  text-transform: uppercase;
+  box-shadow: inset 2px 2px 0 var(--pt-white), inset -2px -2px 0 var(--pt-shade);
+}
 
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+
+/* A mod: a raised grey button; ticked, it becomes ProTracker's blue cursor bar. */
 .card {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
   padding: 12px 14px;
   cursor: pointer;
+  background: var(--pt-grey);
+  color: var(--pt-shade);
+  box-shadow: inset 2px 2px 0 var(--pt-white), inset -2px -2px 0 var(--pt-shade);
 }
-.card:has(input:checked) { background: var(--card-on); border-color: var(--accent); }
-.card input { margin-top: 5px; }
-.card-title { font-weight: 650; }
-.card-body { grid-column: 2; color: var(--muted); font-size: 0.92rem; }
-.card-foot { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 0.85rem; }
-.badge { background: var(--ok-bg); color: var(--ok-text); border-radius: 999px; padding: 1px 9px; }
+.card:has(input:checked) {
+  background: var(--pt-blue);
+  color: var(--pt-white);
+  box-shadow: inset 2px 2px 0 var(--pt-shade), inset -2px -2px 0 var(--pt-white);
+}
+.card input { margin-top: 3px; }
+.card-title { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.card-body { grid-column: 2; font-size: 0.88rem; }
+.card:has(input:checked) .card-body { color: var(--pt-cyan); }
+.card-foot { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 0.8rem; }
+.card a { color: var(--pt-blue); }
+.card:has(input:checked) a { color: var(--pt-yellow); }
+.badge {
+  background: var(--pt-black);
+  color: var(--pt-cyan);
+  padding: 1px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  box-shadow: inset 1px 1px 0 var(--pt-shade), inset -1px -1px 0 var(--pt-white);
+}
 
-input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+/* Checkboxes: a small sunken display that lights up yellow. */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: none;
+  cursor: pointer;
+  background: var(--pt-black);
+  box-shadow: inset 2px 2px 0 var(--pt-shade), inset -2px -2px 0 var(--pt-white);
+}
+input[type="checkbox"]:checked {
+  background: var(--pt-yellow);
+  box-shadow: inset 2px 2px 0 var(--pt-shade), inset -2px -2px 0 var(--pt-white),
+    inset 0 0 0 5px var(--pt-black);
+}
 
 .selection { color: var(--muted); margin: 14px 0 0; }
-.selection strong { color: var(--text); }
+.selection strong { color: var(--value); }
+
+/* ---- buttons -------------------------------------------------------------------- */
 
 button, .button {
   font: inherit;
-  border-radius: 10px;
-  padding: 10px 18px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 9px 18px;
+  border: 0;
+  border-radius: 0;
+  background: var(--pt-grey);
+  color: var(--pt-shade);
   cursor: pointer;
   text-decoration: none;
   display: inline-block;
+  box-shadow: inset 2px 2px 0 var(--pt-white), inset -2px -2px 0 var(--pt-shade);
 }
-.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
-.ghost { padding: 6px 12px; font-size: 0.9rem; }
-.hint { color: var(--muted); font-size: 0.92rem; margin: 8px 0 0; }
+button:active:not(:disabled), .button:active {
+  box-shadow: inset 2px 2px 0 var(--pt-shade), inset -2px -2px 0 var(--pt-white);
+}
+.primary { color: var(--pt-blue); }
+button:disabled { color: #777777; cursor: not-allowed; }
+.ghost { padding: 6px 12px; font-size: 0.82rem; }
+.hint { color: var(--muted); font-size: 0.88rem; margin: 8px 0 0; }
 
-.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 14px 0; }
-.facts dt { color: var(--muted); }
+/* ---- result ---------------------------------------------------------------------- */
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 14px;
+  margin: 14px 0;
+  padding: 10px 14px;
+  background: var(--pt-black);
+  color: var(--pt-cyan);
+  box-shadow: inset 2px 2px 0 var(--pt-shade), inset -2px -2px 0 var(--pt-white);
+}
+.facts dt { color: var(--pt-grey); text-transform: uppercase; }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
 #download { margin: 4px 0 10px; }
 
 details { margin-top: 10px; }
-summary { cursor: pointer; color: var(--muted); }
+summary { cursor: pointer; color: var(--muted); text-transform: uppercase; font-size: 0.88rem; }
 pre {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  background: var(--pt-black);
+  color: var(--pt-cyan);
   padding: 10px;
   overflow: auto;
   max-height: 320px;
-  font: 0.8rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+  font: 0.78rem/1.45 "Lucida Console", Consolas, ui-monospace, monospace;
+  box-shadow: inset 2px 2px 0 var(--pt-shade), inset -2px -2px 0 var(--pt-white);
 }
 
-ol { padding-left: 1.3em; }
+ol { padding-left: 1.6em; }
 li { margin: 4px 0; }
+li::marker { color: var(--value); font-weight: 700; }
 
-.foot { color: var(--muted); font-size: 0.88rem; padding-bottom: 32px; }
+.foot {
+  color: var(--pt-grey);
+  font-size: 0.82rem;
+  padding-top: 12px;
+  padding-bottom: 28px;
+}
+.foot a { color: var(--pt-cyan); }
 
 @media (max-width: 560px) {
-  .step { padding: 16px 14px; }
+  body { font-size: 14px; }
+  .step { padding: 14px 12px; }
   .facts { grid-template-columns: 1fr; }
   .facts dd { margin-bottom: 6px; }
-  .lead { font-size: 1rem; }
+  h1 { font-size: 1.05rem; padding: 4px 8px; }
 }
