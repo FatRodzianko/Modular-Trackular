@@ -38,9 +38,9 @@ Python command below does, without installing anything:
    one in step 1) and the image's, and refuses anything else, including a file that's
    already patched.
 2. Tick the mods you want. One mod gives its own build, "Select all" gives the
-   `patch/all` bundle (all six, `1.2.0-MTE`), and any other mix gets the version text `M` plus two hex digits
+   `patch/all` bundle (all seven, `1.2.0-MCT`), and any other mix gets the version text `M` plus two hex digits
    that say which mods are in it (colorsong 01, humanize 02, interpolate 04, masterfx
-   08, swing 10, visualizer 20: colorsong + swing is `1.2.0-M11`).
+   08, swing 10, visualizer 20, condtrig 40: colorsong + swing is `1.2.0-M11`).
 3. Patch and download. The page only offers the file when its SHA-256 is the one
    `tools/patch_ptf.py` makes for that selection (`web/expected.json`), and says when
    it's also one of the hardware-tested builds in the table below. A mix that isn't in
@@ -63,7 +63,7 @@ python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.js
 ```
 
 Use `patch/humanize/patch.json` for Humanize alone, `patch/interpolate/patch.json` for
-interpolate alone, or `patch/all/patch.json` for all six in one firmware (see "Choosing patches" below for your own
+interpolate alone, or `patch/all/patch.json` for all seven in one firmware (see "Choosing patches" below for your own
 mix).
 
 The patcher checks the stock image, checks the original bytes at every patched
@@ -78,9 +78,12 @@ must be byte-identical to these builds:
 | masterfx | `TrackerPlus_mf4.ptf` | `1.2.0-mf4` | tested | `0f3f9cd0c0c00ceed7651aacece96bd52dd084991e82f9e03d814630b898df1a` |
 | swing | `TrackerPlus_sw1.ptf` | `1.2.0-sw1` | tested | `510fe9ad078ed737f1cf3c63ea706a8a0e50f978c9d115bfbc773f4252a0e8d7` |
 | visualizer | `TrackerPlus_vz2.ptf` | `1.2.0-vz2` | tested | `8b3ddcb09de46829799f542cf9d7423d95d4f39aa76db44881f5c18eb0361736` |
-| all (colorsong + humanize + interpolate + masterfx + swing + visualizer) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
+| condtrig | `TrackerPlus_ct1.ptf` | `1.2.0-ct1` | tested | `539328948185c4a02577ce62181fc4143a5e86dc06a33e61b469d52b21da8197` |
+| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | tested | `3682cbe40c8a546de30b02cc7378501d53a65c8379e7fa55958beb6943f632fb` |
+| the previous all (the same without condtrig) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
+| itcmtest (ITCM hooks test, on its own) | `TrackerPlus_it1.ptf` | `1.2.0-it1` | tested | `701b35dfadb4626ebe19e94ccb3af47aff9e4d604684d59b2e8b9cbf5da18d7c` |
 
 **Name the output `TrackerPlus<anything>.ptf`.** Config's firmware list only shows
 files that start with `TrackerPlus` and end with `.ptf`. Keep names short: on the
@@ -94,15 +97,17 @@ Each patch can be installed on its own, or several can go into one firmware:
   `patch/humanize/patch.json` Humanize only, `patch/interpolate/patch.json`
   interpolate only, `patch/masterfx/patch.json` the master reverb and delay chosen per project
   (see its README for the effects), `patch/swing/patch.json` Global Swing,
-  `patch/visualizer/patch.json` the pad visualizer.
+  `patch/visualizer/patch.json` the pad visualizer, `patch/condtrig/patch.json`
+  conditional trigs.
 - **Several patches:** use a bundle spec, which lists the patches to combine.
-  `patch/all/patch.json` is the bundle that ships (all six: colorsong, Humanize,
-  interpolate, masterfx, swing and the visualizer):
+  `patch/all/patch.json` is the bundle that ships (all seven: colorsong, Humanize,
+  interpolate, masterfx, swing, the visualizer and condtrig):
 
   ```json
   "include": ["../colorsong/patch.json", "../humanize/patch.json", "../interpolate/patch.json",
-              "../masterfx/patch.json", "../swing/patch.json", "../visualizer/patch.json"],
-  "version": "MTE",
+              "../masterfx/patch.json", "../swing/patch.json", "../visualizer/patch.json",
+              "../condtrig/patch.json"],
+  "version": "MCT",
   ```
 
 To make your own mix, copy `patch/all/` to a new folder (for example `patch/mymix/`)
@@ -195,6 +200,8 @@ python tools/emu/test_interpolate.py build/TrackerPlus_ip5.ptf
 python tools/emu/test_masterfx.py build/TrackerPlus_mf4.ptf path/to/TrackerPlus_1.2.0.ptf out/fx_wav
 python tools/emu/test_swing.py build/TrackerPlus_sw1.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_visualizer.py build/TrackerPlus_vz2.ptf
+python tools/emu/test_condtrig.py build/TrackerPlus_ct1.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/emu/test_itcmtest.py build/TrackerPlus_it1.ptf path/to/TrackerPlus_1.2.0.ptf
 ```
 
 Each test works on any firmware that contains its patch, so for a bundle run every
@@ -203,14 +210,18 @@ went from the `.map.json` the patcher wrote next to the `.ptf`, so keep the two
 together.
 
 `tools/test_layout.py` checks the patcher's placement without the emulator. It builds
-each patch alone, `patch/all` (all six), colorsong, humanize and interpolate in the
-other order, those three with masterfx in both orders, all six in the other order, and two
+each patch alone, `patch/all` (all seven), colorsong, humanize and interpolate in the
+other order, those three with masterfx in both orders, the six before condtrig in the other order, and two
 patches on the same chained sites, and
 checks that each patch's code and RAM sit where they
 should (RAM in a region the patch may use, no two blocks overlapping), that exactly the
 words in its relocation table moved, that each chain word holds what its site pointed
-to before, and that every hooked site points at the last patch that hooks it. It also
-checks that a shared site that isn't chained by both patches is refused:
+to before, and that every hooked site points at the last patch that hooks it. With
+itcmtest (alone, after and before all the others, and chained with a copy of itself)
+it also checks the ITCM stubs: each hooked ITCM call goes to its stub, the stub jumps
+to the last hook, the copy table copies the stubs to ITCM, and no RAM overlaps them.
+It also checks that a shared site that isn't chained by both patches is refused, and
+two patches passing different registers at one ITCM site:
 
 ```bash
 python tools/test_layout.py path/to/TrackerPlus_1.2.0.ptf build/layout
@@ -289,6 +300,17 @@ details. A patch is:
   patch, linked as 0, that the patch calls through instead of the original
   (`const volatile uint32_t` in C, so the compiler reads it; see Humanize's
   `CHAIN_WORD`).
+  Calls inside the sequencer's ITCM code go in `itcm_branches` instead: `at` is the
+  ITCM address of the `BL`, with its original bytes as in `branches`, and `args` names
+  up to two registers (r4–r12, sp) that the call site holds and the hook should get
+  as its third and fourth arguments. ITCM code can't call patch code in flash
+  directly, so the patcher puts a stub per site at the start of the ITCM tail
+  (`0x1fb40`, which is then not given out as RAM), and sets the startup copy table's
+  unused entry 3 to copy the stubs there at boot. The stub moves `args` into r2 and r3
+  and jumps to the hook, which returns straight to the ITCM caller. Chaining works as
+  for `branches`, with the original arguments plus `args` passed on through `next`, so
+  every patch on one ITCM site must name the same `args`. See
+  [patch/itcmtest/](../patch/itcmtest/).
   Optional RAM settings:
   - `"ram_startup": true` when the state is used before `main` (for example from the
     Config menu constructor, as Humanize does). The patch then never gets

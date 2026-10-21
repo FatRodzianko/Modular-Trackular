@@ -13,9 +13,12 @@ Needs Node (runs web/patcher.js through tools/web_patcher_node.mjs). It:
     equal;
   - does the same for the bundles tools/test_layout.py builds in other orders
     (reversed, masterfx first, every mod reversed, humanize with a chained copy);
+  - does the same for ITCM hooks: condtrig placed first, and condtrig with a copy of
+    itself on its ITCM sites;
   - checks both refuse the same things: another firmware version, a bundle with
-    ramdiag, a shared site not chained by both; and that the port refuses a spec
-    using a patch_ptf.py feature it doesn't have (ITCM hooks);
+    ramdiag, a shared site not chained by both, two patches passing different
+    registers at one ITCM site; and that the port refuses a spec using a key it
+    doesn't know (a patch_ptf.py feature it doesn't have yet);
   - runs tools/test_layout.py's checks (placement, RAM, relocation, chains, version
     text) on every selection's output;
   - checks the single-mod and patch/all outputs against the hardware-tested SHA-256s
@@ -127,22 +130,33 @@ def main() -> int:
                      words=[{k: v for k, v in w.items() if k != "next"} for w in copy["words"]])
     (extra / "patch/humanize-unchained").mkdir()
     (extra / "patch/humanize-unchained/patch.json").write_text(json.dumps(unchained, indent=2))
+    ct_spec = json.loads((extra / "patch/condtrig/patch.json").read_text())
+    ct_files = {k: "../condtrig/" + ct_spec[k] for k in ("bin", "sym", "rel", "prebuilt_bin", "prebuilt_sym", "prebuilt_rel")}
+    ct_copy = dict(ct_spec, name="condtrig-copy", branches=[], words=[], **ct_files)
+    (extra / "patch/condtrig-copy").mkdir()
+    (extra / "patch/condtrig-copy/patch.json").write_text(json.dumps(ct_copy, indent=2))
+    ct_args = dict(ct_copy, name="condtrig-args", itcm_branches=[dict(b, args=["r4"]) for b in ct_copy["itcm_branches"]])
+    (extra / "patch/condtrig-args").mkdir()
+    (extra / "patch/condtrig-args/patch.json").write_text(json.dumps(ct_args, indent=2))
 
     other_orders = {
         "reversed": bundle("reversed", ["interpolate", "humanize", "colorsong"], "MTR"),
         "with-masterfx-reversed": bundle("with-masterfx-reversed", ["masterfx", "interpolate", "humanize", "colorsong"], "MTY"),
         "every-reversed": bundle("every-reversed", list(reversed(ids)), "MTT"),
         "chain": bundle("chain", ["humanize", "humanize-copy"], "CHN"),
+        "condtrig-first": bundle("condtrig-first", ["condtrig", "swing", "visualizer", "interpolate"], "MCF"),
+        "itcm-chain": bundle("itcm-chain", ["condtrig", "condtrig-copy"], "CHI"),
     }
     refusals = {
         "with-ramdiag": (bundle("with-ramdiag", ["colorsong", "ramdiag"], "BAD"), stock, "standalone"),
         "unchained": (bundle("unchained", ["humanize", "humanize-unchained"], "BAD"), stock, "not chained by both"),
+        "itcm-args": (bundle("itcm-args", ["condtrig", "condtrig-args"], "BAD"), stock, 'different "args"'),
     }
     sw_spec = json.loads((extra / "patch/swing/patch.json").read_text())
-    unported = dict(sw_spec, name="swing-itcm", itcm_branches=[],
+    unported = dict(sw_spec, name="swing-future", future_hooks=[],
                     **{k: "../swing/" + sw_spec[k] for k in ("bin", "sym", "rel", "prebuilt_bin", "prebuilt_sym", "prebuilt_rel")})
-    (extra / "patch/swing-itcm").mkdir()
-    (extra / "patch/swing-itcm/patch.json").write_text(json.dumps(unported, indent=2))
+    (extra / "patch/swing-future").mkdir()
+    (extra / "patch/swing-future/patch.json").write_text(json.dumps(unported, indent=2))
     older = sorted(p for p in stock.parent.glob("TrackerPlus_*.ptf") if p.name != stock.name)
     if older:
         refusals["other-firmware"] = ("patch/swing/patch.json", older[0], "does not match")
@@ -162,7 +176,7 @@ def main() -> int:
     _, js_sel = run_js(site, stock, sel_jobs, outdir / "js")
     extra_jobs = [{"name": n, "spec": s} for n, s in other_orders.items()]
     extra_jobs += [{"name": n, "spec": s} for n, (s, st, _) in refusals.items() if st == stock]
-    extra_jobs += [{"name": "unported", "spec": "patch/swing-itcm/patch.json"}]
+    extra_jobs += [{"name": "unported", "spec": "patch/swing-future/patch.json"}]
     _, js_extra = run_js(extra, stock, extra_jobs, outdir / "js")
     if "other-firmware" in refusals:
         _, js_other = run_js(extra, refusals["other-firmware"][1], [{"name": "other-firmware", "spec": refusals["other-firmware"][0]}],
@@ -204,8 +218,8 @@ def main() -> int:
         check(not js["ok"] and why in js["error"] and pr.returncode != 0 and why in pr.stderr,
               f"{n}: both refuse ({js.get('error', '')[:70]})")
     js = js_extra["unported"]
-    check(not js["ok"] and "doesn't support itcm_branches" in js["error"],
-          "a spec using a patch_ptf.py feature the port lacks (itcm_branches) is refused")
+    check(not js["ok"] and "doesn't support future_hooks" in js["error"],
+          "a spec using a key the port doesn't know (future_hooks) is refused")
 
     print("test_layout.py checks on every selection")
     stock_img = bytes(read_ptf(stock).image)

@@ -37,6 +37,20 @@ calls through that word instead of calling the stock function itself. Several pa
 can hook the same site this way; the last one listed runs first. A site hooked by more
 than one patch must be chained by all of them, otherwise the patcher refuses.
 
+ITCM hooks: "itcm_branches" lists BL sites in the sequencer's ITCM code ("at" is the
+ITCM address; the bytes live in the ITCM image in flash, which the startup copy table
+copies to ITCM at boot). ITCM code can't BL to flash, so the patcher makes a stub per
+site: "mov r2, <args[0]>; mov r3, <args[1]>" for the registers named in "args" (up to
+two of r4-r12 and sp; none: no moves), then "ldr.w pc, [pc, #0]" and the hook's
+address. The stubs go at the start of the ITCM tail (which is then not given out as
+RAM), their bytes after the patches in flash, and entry 3 of the startup copy table
+(stock: unused, length 0) is set to copy them there at boot. The site's BL is rewritten
+to the stub; the stub jumps, so the hook returns straight to the ITCM caller with the
+caller's arguments in r0, r1 and the named registers in r2, r3. A chain word on an ITCM
+site gets the stock target or the hook (not the stub) of the patch before it, which
+the hook calls with the same four arguments; so all patches on one ITCM site must name
+the same "args".
+
 - Refuses unless the stock image matches the SHA-256 in patch.json.
 - Every branch or word site is checked against its original bytes before it is rewritten
   (as a Thumb-2 BL, or as the symbol address for words).
@@ -73,6 +87,14 @@ RAM_REGIONS = {
 }
 RAM_DEFAULT_ORDER = ["ocram_tail", "dtcm_above_heap", "sdram_top", "dtcm_after_audio"]
 
+# The startup copy table (FINDINGS sections 2 and 22): 4 x {load, exec, length}.
+COPY_TABLE = 0x600302A0
+ITCM_ENTRY = 1                      # the ITCM image: flash 0x6018d6ec -> ITCM 0x8
+STUB_ENTRY = 3                      # unused in stock firmware; carries the ITCM stubs
+STUB_ENTRY_STOCK = (0x601AD21C, 0x80000000, 0)
+ITCM_STUBS = RAM_REGIONS["itcm_tail"][0]
+ITCM_ARG_REGS = {f"r{n}": n for n in range(4, 13)} | {"sp": 13}
+
 
 def thumb_bl(at: int, target: int) -> bytes:
     """Encode a Thumb-2 BL at `at` to `target` (T1 encoding, +-16 MB)."""
@@ -98,6 +120,34 @@ def bl_target(image: bytes, base: int, at: int) -> int:
     if s:
         off -= 1 << 25
     return at + 4 + off
+
+
+def copy_entry(image: bytes, base: int, n: int) -> tuple[int, int, int]:
+    """Entry n of the startup copy table: (load, exec, length)."""
+    return struct.unpack_from("<3I", image, COPY_TABLE + 12 * n - base)
+
+
+def itcm_flash(image: bytes, base: int, at: int) -> int:
+    """Where the ITCM code at `at` (4 bytes) comes from in flash."""
+    load, exe, size = copy_entry(image, base, ITCM_ENTRY)
+    if at & 1 or not exe <= at <= exe + size - 4:
+        sys.exit(f"ITCM {at:#x} is not in the ITCM image ({exe:#x}..{exe + size:#x})")
+    return load + at - exe
+
+
+def itcm_stub(args: tuple[str, ...], hook: int) -> bytes:
+    """mov r2/r3 from the named registers (nop for a missing one), ldr.w pc, [pc, #0],
+    the hook's address. 8 bytes without args, 12 with; starts 4-byte aligned."""
+    jump = struct.pack("<HHI", 0xF8DF, 0xF000, hook | 1)
+    if not args:
+        return jump
+    moves = [0x4600 | (ITCM_ARG_REGS[r] << 3) | (2 + i) for i, r in enumerate(args)]
+    moves += [0xBF00] * (2 - len(moves))
+    return struct.pack("<HH", *moves) + jump
+
+
+def itcm_stub_size(args: tuple[str, ...]) -> int:
+    return 12 if args else 8
 
 
 def load_symbols(path: Path) -> dict[str, int]:
@@ -149,17 +199,38 @@ def load_patch(spec: dict, pdir: Path, in_bundle: bool) -> dict:
         if r not in RAM_REGIONS:
             sys.exit(f"{spec['name']}: unknown RAM region {r!r} (known: {', '.join(RAM_REGIONS)})")
     words = [wd for wd in spec.get("words", []) if not (in_bundle and wd.get("version"))]
+    for br in spec.get("itcm_branches", []):
+        args = br.get("args", [])
+        if len(args) > 2 or any(r not in ITCM_ARG_REGS for r in args):
+            sys.exit(f"{spec['name']}: ITCM site {br['at']}: \"args\" takes up to two of "
+                     f"{', '.join(ITCM_ARG_REGS)}")
     return {"name": spec["name"], "pinned": pinned, "link": rel["link"] if rel else pinned,
             "rel": rel["offsets"] if rel else None, "blob": blob, "syms": syms,
             "ram_link": rel["ram_link"] if rel else None, "ram_size": rel["ram_size"] if rel else 0,
             "ram_rel": rel["ram_offsets"] if rel else [], "ram_order": order,
             "ram_startup": bool(spec.get("ram_startup")),
-            "branches": spec["branches"], "words": words}
+            "branches": spec["branches"], "words": words,
+            "itcm_branches": spec.get("itcm_branches", [])}
 
 
-def assign_ram(parts: list[dict]) -> None:
-    """Give each patch with RAM a block from the free regions, in the order listed."""
+def itcm_sites(parts: list[dict]) -> dict[int, tuple[str, ...]]:
+    """ITCM site -> the registers its stub passes, in the order the stubs are laid out."""
+    sites: dict[int, tuple[str, ...]] = {}
+    for p in parts:
+        for br in p["itcm_branches"]:
+            at, args = int(br["at"], 16), tuple(br.get("args", []))
+            if sites.get(at, args) != args:
+                sys.exit(f"ITCM {at:#x}: hooked with different \"args\" ({', '.join(sites[at]) or 'none'} "
+                         f"and {', '.join(args) or 'none'})")
+            sites[at] = args
+    return sites
+
+
+def assign_ram(parts: list[dict], itcm_reserved: int = 0) -> None:
+    """Give each patch with RAM a block from the free regions, in the order listed.
+    The first `itcm_reserved` bytes of the ITCM tail hold the ITCM stubs."""
     free = {name: start for name, (start, _, _) in RAM_REGIONS.items()}
+    free["itcm_tail"] += (itcm_reserved + ALIGN - 1) & ~(ALIGN - 1)
     for p in parts:
         p["ram"] = None
         if not p["ram_size"]:
@@ -232,11 +303,18 @@ def main() -> int:
         parts = [load_patch(spec, pdir, in_bundle=False)]
         version = None
 
+    # The ITCM stubs (one per hooked ITCM site) take the start of the ITCM tail.
+    stub_sites = itcm_sites(parts)
+    stub_size = sum(itcm_stub_size(args) for args in stub_sites.values())
+    if ITCM_STUBS + stub_size > RAM_REGIONS["itcm_tail"][1]:
+        sys.exit(f"{len(stub_sites)} ITCM stubs ({stub_size} bytes) don't fit in the ITCM tail")
+
     # RAM: each patch's block from the free regions, in the order listed.
-    assign_ram(parts)
+    assign_ram(parts, stub_size)
 
     # Code layout: the patches in the order listed, each right after the one before
-    # (16-byte aligned), or at its fixed "base" if it has one.
+    # (16-byte aligned), or at its fixed "base" if it has one; then the ITCM stubs'
+    # bytes, which the startup copy table copies to ITCM.
     stock_end = ptf.base + len(ptf.image)
     end = stock_end
     for p in parts:
@@ -245,6 +323,10 @@ def main() -> int:
             sys.exit(f"{p['name']} at {base:#x} overlaps what comes before it (ends {end:#x})")
         place(p, base)
         end = base + len(p["blob"])
+    stub_flash = None
+    if stub_sites:
+        stub_flash = (end + ALIGN - 1) & ~(ALIGN - 1)
+        end = stub_flash + stub_size
 
     stock = bytes(ptf.image)
     image = bytearray(ptf.image)
@@ -274,6 +356,44 @@ def main() -> int:
                 chain = f", {br['next']} -> {before:#x}"
             print(f"{at:#x}: bl -> {br['to']} @ {p['syms'][br['to']]:#x}  ({old.hex()} -> {new.hex()}{chain})  {br.get('note', '')}")
 
+    # ITCM sites: chain words get the stock target or the hook before; the BL goes to
+    # the site's stub, which jumps to the last hook.
+    hooks: dict[int, tuple[int, str]] = {}           # ITCM site -> (last hook, its patch)
+    for p in parts:
+        for br in p["itcm_branches"]:
+            at = int(br["at"], 16)
+            flash = itcm_flash(stock, ptf.base, at)
+            off = claim(flash, p["name"], "next" in br)
+            old = bytes.fromhex(br["old"])
+            if stock[off:off + 4] != old:
+                sys.exit(f"ITCM {at:#x} (flash {flash:#x}): expected {old.hex()}, found {stock[off:off + 4].hex()}")
+            before = hooks[at][0] if at in hooks else bl_target(stock, ptf.base, flash) - flash + at
+            chain = ""
+            if "next" in br:
+                set_next(p, br["next"], before | 1)
+                chain = f", {br['next']} -> {before:#x}"
+            hooks[at] = (p["syms"][br["to"]], p["name"])
+            print(f"ITCM {at:#x}: bl -> stub -> {br['to']} @ {p['syms'][br['to']]:#x}  "
+                  f"(r2, r3 = {', '.join(br.get('args', [])) or '-'}{chain})  {br.get('note', '')}")
+    stubs = bytearray()
+    stub_map = []
+    for at, args in stub_sites.items():
+        stub = ITCM_STUBS + len(stubs)
+        stubs += itcm_stub(args, hooks[at][0])
+        flash = itcm_flash(stock, ptf.base, at)
+        image[flash - ptf.base:flash - ptf.base + 4] = thumb_bl(at, stub)
+        stub_map.append({"at": f"{at:#x}", "stub": f"{stub:#x}", "hook": f"{hooks[at][0]:#010x}",
+                         "patch": hooks[at][1]})
+    if stub_sites:
+        entry = COPY_TABLE + 12 * STUB_ENTRY
+        for i, (old, new) in enumerate(zip(STUB_ENTRY_STOCK, (stub_flash, ITCM_STUBS, len(stubs)))):
+            off = claim(entry + 4 * i, "ITCM stubs", False)
+            if struct.unpack_from("<I", stock, off)[0] != old:
+                sys.exit(f"copy table entry {STUB_ENTRY} isn't the unused stock entry")
+            struct.pack_into("<I", image, off, new)
+        print(f"copy table entry {STUB_ENTRY}: {len(stubs)} bytes of ITCM stubs, flash {stub_flash:#x} -> "
+              f"ITCM {ITCM_STUBS:#x}")
+
     words = [(wd, p["syms"][wd["to"]] | (1 if wd.get("thumb") else 0), p)
              for p in parts for wd in p["words"]]
     if version is not None:
@@ -302,12 +422,15 @@ def main() -> int:
         shown = value & ~1 if wd.get("thumb") else value
         print(f"{at:#x}: word -> {wd['to']} @ {shown:#x}  ({old.hex()} -> {new.hex()}{chain})  {wd.get('note', '')}")
 
-    # The patches' code (with their chain words filled), after the stock image.
+    # The patches' code (with their chain words filled), after the stock image, then the
+    # ITCM stubs.
     tail = bytearray()
     end = stock_end
     for p in parts:
         tail += b"\xff" * (p["base"] - end) + p["blob"]
         end = p["base"] + len(p["blob"])
+    if stub_sites:
+        tail += b"\xff" * (stub_flash - end) + stubs
     if version is not None:
         vaddr, text = version_text
         tail += b"\xff" * (vaddr - stock_end - len(tail)) + text
@@ -356,6 +479,9 @@ def main() -> int:
                      "end": f"{p['ram'][0] + p['ram_size']:#010x}"} if p["ram"] else None),
         } for p in parts],
     }
+    if stub_sites:
+        layout["itcm_stubs"] = {"flash": f"{stub_flash:#010x}", "itcm": f"{ITCM_STUBS:#x}",
+                                "size": len(stubs), "sites": stub_map}
     map_path = out_path.with_suffix(".map.json")
     map_path.write_text(json.dumps(layout, indent=2) + "\n", newline="\n")
     print(f"file sha256 {hashlib.sha256(out_path.read_bytes()).hexdigest()}")

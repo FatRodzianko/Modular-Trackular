@@ -55,6 +55,14 @@
       "title": "Pad Visualizer",
       "summary": "Hold Note, Instrument, FX1 and FX2 while a pattern plays and the pads show drifting smoke with ripples from the notes.",
       "status": "Tested on hardware"
+    },
+    {
+      "id": "condtrig",
+      "bit": 6,
+      "spec": "patch/condtrig/patch.json",
+      "title": "Conditional Trigs",
+      "summary": "Turn a Chance FX past 100 and it becomes a condition on how many times the pattern has played: 1st, !1s (not the first), or 1:2 to 8:8 (the A-th pass of every B), counted per track. Idea from Psygoo's CT6.",
+      "status": "Tested on hardware"
     }
   ],
   "tested_builds": {
@@ -64,6 +72,8 @@
     "0f3f9cd0c0c00ceed7651aacece96bd52dd084991e82f9e03d814630b898df1a": "masterfx (1.2.0-mf4)",
     "510fe9ad078ed737f1cf3c63ea706a8a0e50f978c9d115bfbc773f4252a0e8d7": "swing (1.2.0-sw1)",
     "8b3ddcb09de46829799f542cf9d7423d95d4f39aa76db44881f5c18eb0361736": "visualizer (1.2.0-vz2)",
-    "72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982": "all six mods (1.2.0-MTE)"
+    "539328948185c4a02577ce62181fc4143a5e86dc06a33e61b469d52b21da8197": "condtrig (1.2.0-ct1)",
+    "3682cbe40c8a546de30b02cc7378501d53a65c8379e7fa55958beb6943f632fb": "all seven mods (1.2.0-MCT)",
+    "72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982": "all six mods before condtrig (1.2.0-MTE)"
   }
 }

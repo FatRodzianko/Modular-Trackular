@@ -1,0 +1,6 @@
+601d0058 t it_init_if_needed
+601d0000 T mt_it_chance
+601d0078 T mt_it_next_chance
+601d007c T mt_it_next_play_from
+601d0034 T mt_it_play_from
+601d0080 T mt_version_fmt

@@ -40,7 +40,11 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   pattern plays and the pads show slowly drifting smoke with ripples spreading from the
   notes; press any of the four to go back. Tested on hardware. See
   [patch/visualizer/README.md](patch/visualizer/README.md).
-- **all**: all six mods above in one firmware (version text `1.2.0-MTE`), from
+- **condtrig**: conditional trigs. Turn a Chance FX (C) past 100 and it becomes a
+  condition on how many times the pattern has played: `1st`, `!1s` (not the first), or
+  `1:2` … `8:8` (the A-th pass of every B), counted per track from the start of
+  playback or of the pattern. The idea comes from Psygoo's CT6. Tested on hardware. See [patch/condtrig/README.md](patch/condtrig/README.md).
+- **all**: all seven mods above in one firmware (version text `1.2.0-MCT`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
@@ -48,6 +52,9 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
 - **versiontest**: the smallest possible mod (version text `1.2.0-MT0`), a harmless
   first check that your unit installs patched firmware. See
   [patch/versiontest/README.md](patch/versiontest/README.md).
+- **itcmtest**: a no-op test (version text `1.2.0-it1`) of hooks in the sequencer's
+  ITCM code, which upcoming patches (conditional trigs) need: it passes the Chance FX
+  and the count-in through such hooks and changes nothing else. Tested on hardware. See [patch/itcmtest/README.md](patch/itcmtest/README.md).
 - **Reverse engineering notes**: [docs/FINDINGS.md](docs/FINDINGS.md) covers the
   `.ptf` format, chip and memory map, MPU, update path and recovery, EVE display
   layer and widget library, screens, the Song screen, pattern and project file
@@ -77,7 +84,7 @@ page only offers a download when its output is byte-identical to what
 `tools/patch_ptf.py` makes. See "In your browser" in [docs/PATCHING.md](docs/PATCHING.md).
 
 Each mod can be installed on its own, or several can be combined into one firmware.
-`patch/all` combines all six, and you can make your own mix, including
+`patch/all` combines all seven, and you can make your own mix, including
 patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.md).
 
 ## Layout
@@ -94,11 +101,13 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/masterfx/` | Master reverb and delay per project: Stock, Freeverb, Plate, Spring or Shimmer; Stock, Tape, BBD or "Gated"; sound samples in `samples/` |
 | `patch/swing/` | Global Swing per project |
 | `patch/visualizer/` | Pad visualizer during playback |
+| `patch/condtrig/` | Conditional trigs: Chance FX values above 100 as conditions on the pass count |
 | `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
+| `patch/itcmtest/` | No-op test of ITCM hooks (stubs in the ITCM tail, loaded by the startup copy table) |
 | `tools/ptf.py` | Read / convert / re-encode `.ptf` (Intel HEX), with a byte-exact round-trip check |
-| `tools/patch_ptf.py` | Apply a patch or bundle spec to a stock `.ptf`: places the patches in the order listed, assigns their RAM and relocates them (stock hash + original-byte checks, gap-free append) |
+| `tools/patch_ptf.py` | Apply a patch or bundle spec to a stock `.ptf`: places the patches in the order listed, assigns their RAM and relocates them, and makes the ITCM stubs for hooks in ITCM code (stock hash + original-byte checks, gap-free append) |
 | `web/` | The web patcher: `patcher.js` (a port of `ptf.py` and `patch_ptf.py`), the page, `manifest.json` (the mods it offers), `expected.json` (the output hashes it accepts), `stage.py` (assembles the site) |
 | `.github/workflows/pages.yml` | Publishes the staged web patcher to GitHub Pages |
 | `tools/test_web_patcher.py`, `tools/web_patcher_node.mjs` | Check the web patcher's output is byte-identical to `patch_ptf.py`'s for every selection it offers (needs Node) |
@@ -121,6 +130,8 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/compare_masterfx.py` | masterfx: runs the same randomized session through two builds and compares every output sample, and measures both |
 | `tools/emu/test_swing.py` | swing timing (the sequencer run in time, step lengths measured), Config menu and settings-file tests |
 | `tools/emu/test_visualizer.py` | visualizer: the four-button switch, column kept, pads handed over and back, hiding, frames per take |
+| `tools/emu/test_condtrig.py` | condtrig: every condition in both columns, what a skipped step drops, counting and resets, encoder and grid text, Chance 0–100 as stock, cost |
+| `tools/emu/test_itcmtest.py` | itcmtest: the ITCM stubs after the boot copy, Chance FX and count-in playing exactly as stock through the hooks |
 | `tools/emu/test_interpolate.py` | interpolate ramp, MIDI-rate, cost, Config menu and settings-file tests, through the real audio block |
 | `tools/emu/seq_timing.py` | Run the stock sequencer on test patterns and print the MIDI it sends, with timing |
 | `tools/emu/check_version.py` | Print the version text a `.ptf` would show |

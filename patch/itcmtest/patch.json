@@ -1,0 +1,39 @@
+{
+  "name": "itcmtest",
+  "description": "No-op test of ITCM hooks: the Chance FX's random call and the count-in's playback start go through ITCM stubs to hooks that only count the calls; the firmware plays as stock",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "bin": "build/itcmtest.bin",
+  "sym": "build/itcmtest.sym",
+  "rel": "build/itcmtest.rel",
+  "prebuilt_bin": "prebuilt/itcmtest.bin",
+  "prebuilt_sym": "prebuilt/itcmtest.sym",
+  "prebuilt_rel": "prebuilt/itcmtest.rel",
+  "branches": [],
+  "itcm_branches": [
+    {
+      "at": "0x30CE",
+      "old": "00f011fd",
+      "to": "mt_it_chance",
+      "next": "mt_it_next_chance",
+      "args": ["r7", "r8"],
+      "note": "seq_process_track, Chance FX pre-pass: bl rand_range_q 0x3af4 -> mt_it_chance(lo, hi, column record, track)"
+    },
+    {
+      "at": "0x3752",
+      "old": "fdf77dfd",
+      "to": "mt_it_play_from",
+      "next": "mt_it_next_play_from",
+      "note": "seq_tick, end of a count-in: bl seq_play_from 0x1250 -> mt_it_play_from(seq, step)"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "version": true,
+      "note": "version text 1.2.0-it1"
+    }
+  ]
+}

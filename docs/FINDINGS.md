@@ -1470,3 +1470,157 @@ through `0x600cf74c(*0x200209e0, id, callback)`. Each callback is a single flash
 
 **The timer.** `*0x20027d18` is the app's millisecond timer: vtable[0] returns ms. It is
 set in the app's init, not by static constructors.
+
+## 22. Chance FX, loop counting and ITCM hooks (conditional trigs, emulator)
+
+Found while planning conditional trigs (`docs/CONDITIONAL_TRIGS_PLAN.md`).
+
+### The Chance pre-pass
+
+- **The loop.** In `seq_process_track` at micro-step 1, a loop at ITCM `0x2604`–`0x2616`
+  checks FX2 and then FX1:
+  - r7 = seq + 0x68·t, minus 2 for FX1, so the column's type is at `r7 + 0x73` and its
+    value at `r7 + 0x74`;
+  - r8 = t and r4 = seq.
+- **A Chance column** (type 4) branches to `0x3094`:
+  1. The value goes to `[sp, #0x24]`.
+  2. `fx_max(seq, 4)` is called at `0x30c6`.
+  3. `rand_range_q(0, max)` is called at `0x30ce` (`bl 0x3af4`).
+  4. `cmp r0, value; ble` passes (`0x3180`). Otherwise track `+0x98` = 1.
+- **Track `+0x98`** (Chance failed) is cleared at micro-step 1 right after the step copy
+  (`0x21b4`). When it is set:
+  - the FX pass skips the column (`0x2650` → `0x270a`);
+  - the note is skipped (`0x29b2`).
+
+  Two Chance FX on one step must both pass.
+- **Values above 100**, stock 1.2.0, emulator: values 101, 102, 107, 137, 200 and 255, in
+  FX1 and FX2, played on all 20 of 20 loops. `fx_value_text` shows them as plain
+  numbers, compact or not. `seq_change_selection_fx_value` turns any edit of such a cell
+  (±1, ±10) into 100.
+- **Scratch proof.** The BL at `0x30ce` was pointed at a 12-byte stub in the ITCM tail:
+  `mov r2, r7; mov r3, r8; ldr.w pc, [pc]; .word hook`. The hook returned 0 (pass) or
+  255 (fail).
+  - That decided the whole step: a failed step dropped its note and the CC in its other
+    column.
+  - The stub received r7 offsets −2 (FX1) and 0 (FX2), and r8 = track.
+
+### FX value editing and text
+
+- **The encoder's max.** `seq_change_selection_fx_value` (`0x600af0f8`) takes a cell's
+  max from `bl 0x600af2c8` at `0x600af1b2`, a flash veneer to `fx_max` (literal `0x3825`)
+  with no other caller.
+  - Arguments: r0 = selection, r1 = type, r2 = value + delta.
+  - Result: the cell gets min(max, value + delta), or 0 when that is negative.
+  - Types 13..39 have their own cases (a `tbb` at `0x600af18a`). Type 4 takes the
+    default.
+- **The `fx_max` veneers.** 43 flash veneers lead to `fx_max`, one per caller function
+  (the voice FX setters, the Fill popup, randomizers and others). A hook on one of them
+  doesn't affect the rest.
+- **`fx_value_text` callers:**
+  - the tail call in `fx_value_text_cell` (`0x600afe04`);
+  - the Fill popup texts at `0x600e3fd0` and `0x600e425c`.
+- **`fx_value_text_cell(seq, buf, size, column, track, step)`** (`0x600afdc8`):
+  - track and step are stack arguments, and a negative step means no cell;
+  - the pattern grid calls it with a 4-byte buffer at `0x600df748` (column = r5, FX1 (q))
+    and at `0x600df77c` (column 1, FX2).
+- **`seq_set_selection_fx_type_q(selection, column, type)`** (`0x600af4f0`):
+  - It stores the type. Then, unless `0x600e3288` returns the same type, or
+    `0x600e12d4` returns nonzero, it sets the value to the type's default, a byte at
+    `0x60039cd0 + type − 3`.
+  - Callers: `0x600c6e46`, `0x600d48f4`, `0x600e2e22`.
+- **`seq_set_selection_fx_scaled_q(selection, column, position)`** (`0x600af8e8`) maps a
+  position linearly into min..`fx_max` (through veneer `0x600afb20`), for every cell of
+  the selection. It is called from `0x600c6ff0`.
+
+### Starting playback
+
+- **`seq_play_from`** (ITCM `0x1250`) only sets up: after it, every track is at step 0
+  with micro-step 1 still to process, and nothing has been sent (emulator). The first
+  step is processed by `seq_tick`.
+- **Its callers:**
+  - flash code, through 4 veneers (`ldr.w pc, [pc]`, literal `0x1251` at +4):
+    `0x600ac600`, `0x600ac690`, `0x600acd30` and `0x600ad540`, reached by `b.w` from
+    `0x600ac5fc`, `0x600ac66a`, `0x600acd16` and `0x600ad518`;
+  - ITCM, once: at `0x3752` in `seq_tick`, at the end of a count-in. That code clears
+    the count-in flag `+0x6f8` and song mode `+0x1c`, calls `seq_play_from(seq, 0)` and
+    goes on processing ticks in the same call.
+- **`seq_play_selection`** (`0x600ac3d0`) is reached by `bl` from `0x600c8490` and
+  `0x600fe6ce`, and by `b.w` from `0x600ae070`, `0x600ae5b0`, `0x600ae716`,
+  `0x600ae8c2`, `0x600af25a`, `0x600afa5e`, `0x600bb98a`, `0x600d48b6` and `0x600e2b42`.
+- **Pattern end.** In `seq_advance_step`, the code from `0x600ad1ea` runs once track 16
+  has wrapped (`+0x33` set): it clears `+0x32` (Break pending) and checks `+0x28`
+  (queue active).
+
+### ITCM code from a patch
+
+- **The startup copy table** (section 2) has two unused entries:
+  - entry 2 at `0x600302b8`: `0x601ad21c` → `0x20200000`, length 0;
+  - entry 3 at `0x600302c4`: `0x601ad21c` → `0x80000000`, length 0.
+
+  The reset handler (`0x60030332`–`0x60030358`) copies whole words while the offset is
+  below the length. Nothing else references the table's entries; there are literals
+  only for its start and end. An entry pointed at patch flash and the ITCM tail
+  (`0x1fb40`–`0x1ffff`, free, section 15) would load patch code into ITCM at boot,
+  together with the stock ITCM code. `machine.py` runs the table from the image.
+- **MPU.** ITCM above 64 KB, which includes the stock veneers at `0x1f530`–`0x1fb38`,
+  lies outside region 5. It falls under region 4 (RW, exec, section 8), and the veneers
+  execute there on hardware. Code in the ITCM tail would run under the same
+  attributes.
+- **Space.** The copied ITCM image ends with the last veneer, at `0x1fb30`–`0x1fb38`,
+  and has no spare bytes inside. The stock application image ends at `0x601bab78`.
+- **`rand_range_q` callers.** ITCM code calls it with direct `bl`s from 25 sites,
+  among them `0x0ba2`, `0x0de8`–`0x0f1a` (15 sites), `0x2b4c`, `0x2c50`, `0x2d68`,
+  `0x30ce` (Chance), `0x3174`, `0x31e2`, `0x3242`, `0x33d0` and `0x354e`. Hooking the
+  function itself would affect all of them, so a hook belongs on the call site.
+- **Tested on hardware** (`patch/itcmtest`): a build with stubs in the ITCM tail, loaded
+  by copy-table entry 3, boots. With the Chance call (`0x30ce`) and the count-in's
+  `seq_play_from` (`0x3752`) going through them, C 50 steps skip about half the time
+  in normal play, with record on, and after a count-in (Record held, then Play).
+
+### Counting a track's passes
+
+- **Track `+0x8a`.** `seq_advance_step` counts a track's steps since its loop started
+  in `+0x8a` (int16), in every play mode, and sets it back to 0 when the loop starts
+  again:
+  - forward, when it passes the last step or a Break FX is pending;
+  - in performance mode (tracks 1–8 only), the backward, random and pattern-table
+    modes compare it with the track's own length.
+
+  The step itself (`+0x88`) follows the play mode. So "`+0x8a` is 0 after
+  `seq_advance_step(seq, t)`" means "track t starts a new pass" in every mode.
+  `seq_play_from(seq, step)` sets `+0x8a` = step, so starting from a later step keeps
+  the two in step (emulator: from step 3 of 4, `+0x88`/`+0x8a` go 2/2 3/3 0/0).
+- **Performance-mode lengths.** For tracks 1–8 the last step comes from `seq+0x36`
+  (int16, used when ≥ 0) or the track's own `seq + 0x38 + 2·t`. Tracks 9–16 always
+  take the normal path.
+- **The playing pattern's number.** `seq_swap_pattern_buffers` (`0x600acc68`) sets
+  `project+0x6c8` from the file manager's byte `+0x130` (`0x600c2510` reads it),
+  which the main loop's preload fills. In the emulator, with the preload request
+  stubbed, it reads 255 unless the stub sets it.
+- **Random FX value (x, 16) leaves a Chance column alone.** Next to C 105 the step
+  played 61 of 61 times, and next to C 0 it never played (stock, emulator).
+- **Synth notes in the emulator.** A synth step's note-off goes through `0x600abbe8`
+  into the synth engine, which `seq_timing.make()` doesn't set up. Without a stub for
+  it, emulation jumps to 0, in stock firmware too.
+
+### Entering and showing FX values
+
+- **Where values are shown.** Step FX values reach the screen only through
+  `fx_value_text`. Its callers are the pattern grid (through `fx_value_text_cell`, for
+  FX1 at `0x600df748` and FX2 at `0x600df77c`) and the Fill popup's from and to texts.
+  - `fx_display_value` (ITCM `0x3910`) has one caller, in the FX pass (`0x2e70`,
+    Tempo).
+  - The other users of the FX name table (`0x600e3982`, which copies a name to show,
+    and the FX list's data at `0x600cdd9c`) show names only.
+- **The grid's value calls.**
+  - The grid passes `column` = 0 for FX1 (`r5`, cleared at `0x600df716`) and 1 for
+    FX2.
+  - It ignores the result.
+  - `fx_value_text_cell` reads track and step as bytes, the step signed, and finds the
+    cell in `*(seq + 0x14)` at `+0x1f + 0x301·track + 6·step + 2·column` (type, then
+    value).
+- **Pad entry** (`seq_set_selection_fx_scaled_q`, `0x600af8e8`, `(selection, column,
+  position)`) maps position 0..47 to min..`fx_max` (emulator: the last pad gives 100
+  on a C 105 cell, pad 23 gives 49), through its own `fx_max` veneer.
+- **The encoder hook stays local.** Hooking `0x600af1b2` changes no other writer's
+  range. Pad entry, Fill and random fill use other `fx_max` veneers.

@@ -45,6 +45,7 @@ Reverse-engineering helpers:
 - `patch.json` names the hooks:
   - `branches`: Thumb-2 BL sites to retarget, each with its `old` bytes checked.
   - `words`: aligned 32-bit literals such as vtable slots, callback pointers or ITCM jump words. `"thumb": true` sets bit 0.
+  - `itcm_branches`: BL sites inside the sequencer's ITCM code (address in ITCM). ITCM can't BL to flash, so the patcher puts a stub per site at the start of the ITCM tail (`0x1fb40`), loaded at boot through the startup copy table's unused entry 3. `args` passes up to two of the caller's registers to the hook in r2/r3. See `patch/itcmtest` and `patch/condtrig`.
   - A `version` word.
 - `prebuilt/` holds the compiled output, so users need no compiler.
 

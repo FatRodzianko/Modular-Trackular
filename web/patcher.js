@@ -23,6 +23,14 @@ export const RAM_REGIONS = {
 };
 export const RAM_DEFAULT_ORDER = ["ocram_tail", "dtcm_above_heap", "sdram_top", "dtcm_after_audio"];
 
+// The startup copy table and the ITCM stubs, as in tools/patch_ptf.py.
+export const COPY_TABLE = 0x600302a0;
+export const ITCM_ENTRY = 1;
+export const STUB_ENTRY = 3;
+export const STUB_ENTRY_STOCK = [0x601ad21c, 0x80000000, 0];
+export const ITCM_STUBS = RAM_REGIONS.itcm_tail[0];
+export const ITCM_ARG_REGS = { r4: 4, r5: 5, r6: 6, r7: 7, r8: 8, r9: 9, r10: 10, r11: 11, r12: 12, sp: 13 };
+
 export class PatchError extends Error {}
 
 function fail(msg) {
@@ -211,6 +219,41 @@ export function blTarget(image, base, at) {
   return at + 4 + off;
 }
 
+function copyEntry(image, base, n) {
+  const off = COPY_TABLE + 12 * n - base;
+  return [getU32(image, off), getU32(image, off + 4), getU32(image, off + 8)];
+}
+
+// Where the ITCM code at `at` (4 bytes) comes from in flash.
+function itcmFlash(image, base, at) {
+  const [load, exe, size] = copyEntry(image, base, ITCM_ENTRY);
+  if ((at & 1) || !(exe <= at && at <= exe + size - 4)) {
+    fail(`ITCM ${hx(at)} is not in the ITCM image (${hx(exe)}..${hx(exe + size)})`);
+  }
+  return load + at - exe;
+}
+
+// mov r2/r3 from the named registers (nop for a missing one), ldr.w pc, [pc, #0], the
+// hook's address. 8 bytes without args, 12 with.
+function itcmStub(args, hook) {
+  const out = new Uint8Array(args.length ? 12 : 8);
+  const halves = [];
+  if (args.length) {
+    const moves = args.map((r, i) => 0x4600 | (ITCM_ARG_REGS[r] << 3) | (2 + i));
+    while (moves.length < 2) moves.push(0xbf00);
+    halves.push(...moves);
+  }
+  halves.push(0xf8df, 0xf000);
+  halves.forEach((h, i) => {
+    out[2 * i] = h & 0xff;
+    out[2 * i + 1] = h >> 8;
+  });
+  setU32(out, out.length - 4, (hook | 1) >>> 0);
+  return out;
+}
+
+const itcmStubSize = (args) => (args.length ? 12 : 8);
+
 export function loadSymbols(text) {
   const syms = {};
   for (const line of splitLines(text)) {
@@ -236,12 +279,12 @@ export function loadRel(text, path) {
 const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const decoder = new TextDecoder();
 
-// The spec keys this port handles. patch_ptf.py may learn new ones (e.g. ITCM hooks);
-// a spec using one is refused here until the port has it too.
+// The spec keys this port handles. patch_ptf.py may learn new ones; a spec using one is
+// refused here until the port has it too.
 const SPEC_KEYS = new Set([
   "name", "description", "firmware", "stock_image_sha256", "bin", "sym", "rel", "prebuilt_bin",
   "prebuilt_sym", "prebuilt_rel", "base", "branches", "words", "ram_startup", "ram_regions", "standalone",
-  "include", "version", "version_word",
+  "include", "version", "version_word", "itcm_branches",
 ]);
 
 function checkKeys(spec) {
@@ -272,19 +315,42 @@ async function loadPatch(spec, specUrl, inBundle, io, log) {
     if (!has(RAM_REGIONS, r)) fail(`${spec.name}: unknown RAM region ${JSON.stringify(r)} (known: ${Object.keys(RAM_REGIONS).join(", ")})`);
   }
   const words = (spec.words ?? []).filter((wd) => !(inBundle && wd.version));
+  for (const br of spec.itcm_branches ?? []) {
+    const args = br.args ?? [];
+    if (args.length > 2 || args.some((r) => !has(ITCM_ARG_REGS, r))) {
+      fail(`${spec.name}: ITCM site ${br.at}: "args" takes up to two of ${Object.keys(ITCM_ARG_REGS).join(", ")}`);
+    }
+  }
   return {
     name: spec.name, pinned, link: rel ? rel.link : pinned,
     rel: rel ? rel.offsets : null, blob: Uint8Array.from(blob), syms,
     ram_link: rel ? rel.ram_link : null, ram_size: rel ? rel.ram_size : 0,
     ram_rel: rel ? rel.ram_offsets : [], ram_order: order,
     ram_startup: Boolean(spec.ram_startup),
-    branches: spec.branches, words,
+    branches: spec.branches, words, itcm_branches: spec.itcm_branches ?? [],
   };
 }
 
-function assignRam(parts) {
+// ITCM site -> the registers its stub passes, in the order the stubs are laid out.
+function itcmSites(parts) {
+  const sites = new Map();
+  for (const p of parts) {
+    for (const br of p.itcm_branches) {
+      const at = parseHex(br.at), args = br.args ?? [];
+      if (sites.has(at) && sites.get(at).join(",") !== args.join(",")) {
+        fail(`ITCM ${hx(at)}: hooked with different "args" (${sites.get(at).join(", ") || "none"} and ` +
+             `${args.join(", ") || "none"})`);
+      }
+      sites.set(at, args);
+    }
+  }
+  return sites;
+}
+
+function assignRam(parts, itcmReserved = 0) {
   const free = {};
   for (const [name, [start]] of Object.entries(RAM_REGIONS)) free[name] = start;
+  free.itcm_tail += alignUp(itcmReserved, ALIGN);
   for (const p of parts) {
     p.ram = null;
     if (!p.ram_size) continue;
@@ -362,7 +428,15 @@ export async function patchFirmware({ stockBytes, spec, specUrl, io, outName, sh
     version = null;
   }
 
-  assignRam(parts);
+  // The ITCM stubs (one per hooked ITCM site) take the start of the ITCM tail.
+  const stubSites = itcmSites(parts);
+  let stubSize = 0;
+  for (const args of stubSites.values()) stubSize += itcmStubSize(args);
+  if (ITCM_STUBS + stubSize > RAM_REGIONS.itcm_tail[1]) {
+    fail(`${stubSites.size} ITCM stubs (${stubSize} bytes) don't fit in the ITCM tail`);
+  }
+
+  assignRam(parts, stubSize);
 
   const stockEnd = ptf.base + ptf.image.length;
   let end = stockEnd;
@@ -371,6 +445,11 @@ export async function patchFirmware({ stockBytes, spec, specUrl, io, outName, sh
     if (base < end) fail(`${p.name} at ${hx(base)} overlaps what comes before it (ends ${hx(end)})`);
     place(p, base);
     end = base + p.blob.length;
+  }
+  let stubFlash = null;
+  if (stubSites.size) {
+    stubFlash = alignUp(end, ALIGN);
+    end = stubFlash + stubSize;
   }
 
   const stock = Uint8Array.from(ptf.image);
@@ -406,6 +485,53 @@ export async function patchFirmware({ stockBytes, spec, specUrl, io, outName, sh
     }
   }
 
+  // ITCM sites: chain words get the stock target or the hook before; the BL goes to
+  // the site's stub, which jumps to the last hook.
+  const hooks = new Map();                         // ITCM site -> [last hook, its patch]
+  for (const p of parts) {
+    for (const br of p.itcm_branches) {
+      const at = parseHex(br.at);
+      const flash = itcmFlash(stock, ptf.base, at);
+      const off = claim(flash, p.name, has(br, "next"));
+      const old = fromHex(br.old);
+      const found = stock.slice(off, off + 4);
+      if (!bytesEqual(found, old)) fail(`ITCM ${hx(at)} (flash ${hx(flash)}): expected ${toHex(old)}, found ${toHex(found)}`);
+      const before = hooks.has(at) ? hooks.get(at)[0] : blTarget(stock, ptf.base, flash) - flash + at;
+      let chain = "";
+      if (has(br, "next")) {
+        setNext(p, br.next, (before | 1) >>> 0);
+        chain = `, ${br.next} -> ${hx(before)}`;
+      }
+      hooks.set(at, [symbol(p, br.to), p.name]);
+      log(`ITCM ${hx(at)}: bl -> stub -> ${br.to} @ ${hx(symbol(p, br.to))}  ` +
+          `(r2, r3 = ${(br.args ?? []).join(", ") || "-"}${chain})  ${br.note ?? ""}`);
+    }
+  }
+  const stubChunks = [];
+  let stubsLen = 0;
+  const stubMap = [];
+  for (const [at, args] of stubSites) {
+    const stub = ITCM_STUBS + stubsLen;
+    const code = itcmStub(args, hooks.get(at)[0]);
+    stubChunks.push(code);
+    stubsLen += code.length;
+    const flash = itcmFlash(stock, ptf.base, at);
+    image.set(thumbBl(at, stub), flash - ptf.base);
+    stubMap.push({ at: hx(at), stub: hx(stub), hook: hx10(hooks.get(at)[0]), patch: hooks.get(at)[1] });
+  }
+  const stubs = concat(stubChunks);
+  if (stubSites.size) {
+    const entry = COPY_TABLE + 12 * STUB_ENTRY;
+    const values = [stubFlash, ITCM_STUBS, stubs.length];
+    STUB_ENTRY_STOCK.forEach((old, i) => {
+      const off = claim(entry + 4 * i, "ITCM stubs", false);
+      if (getU32(stock, off) !== old) fail(`copy table entry ${STUB_ENTRY} isn't the unused stock entry`);
+      setU32(image, off, values[i]);
+    });
+    log(`copy table entry ${STUB_ENTRY}: ${stubs.length} bytes of ITCM stubs, flash ${hx(stubFlash)} -> ` +
+        `ITCM ${hx(ITCM_STUBS)}`);
+  }
+
   const words = [];
   for (const p of parts) {
     for (const wd of p.words) words.push([wd, (symbol(p, wd.to) | (wd.thumb ? 1 : 0)) >>> 0, p]);
@@ -439,7 +565,8 @@ export async function patchFirmware({ stockBytes, spec, specUrl, io, outName, sh
     log(`${hx(at)}: word -> ${wd.to} @ ${hx(shown)}  (${toHex(old)} -> ${toHex(neu)}${chain})  ${wd.note ?? ""}`);
   }
 
-  // The patches' code (with their chain words filled), after the stock image.
+  // The patches' code (with their chain words filled), after the stock image, then the
+  // ITCM stubs.
   const tailChunks = [];
   let tailLen = 0;
   end = stockEnd;
@@ -447,6 +574,10 @@ export async function patchFirmware({ stockBytes, spec, specUrl, io, outName, sh
     tailChunks.push(ff(p.base - end), p.blob);
     tailLen += Math.max(0, p.base - end) + p.blob.length;
     end = p.base + p.blob.length;
+  }
+  if (stubSites.size) {
+    tailChunks.push(ff(stubFlash - end), stubs);
+    tailLen += Math.max(0, stubFlash - end) + stubs.length;
   }
   if (versionText !== null) {
     const [vaddr, text] = versionText;
@@ -490,6 +621,9 @@ export async function patchFirmware({ stockBytes, spec, specUrl, io, outName, sh
       ram: p.ram ? { region: p.ram[1], start: hx10(p.ram[0]), end: hx10(p.ram[0] + p.ram_size) } : null,
     })),
   };
+  if (stubSites.size) {
+    layout.itcm_stubs = { flash: hx10(stubFlash), itcm: hx(ITCM_STUBS), size: stubs.length, sites: stubMap };
+  }
   return { ptf: out, image: fullImage, base: ptf.base, map: JSON.stringify(layout, null, 2) + "\n" };
 }
 
