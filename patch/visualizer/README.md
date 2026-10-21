@@ -6,7 +6,7 @@ ripples swelling and spreading out from the notes that play. It uses brightness 
 are single colour. Installed on its own, Config shows the firmware version as
 `1.2.0-vz2`.
 
-**Status:** tested in the emulator; hardware test pending.
+**Status:** tested on hardware.
 
 ## Using it
 

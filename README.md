@@ -38,7 +38,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   default. Tested on hardware. See [patch/swing/README.md](patch/swing/README.md).
 - **visualizer**: a pad visualizer. Hold Note, Instrument, FX1 and FX2 together while a
   pattern plays and the pads show slowly drifting smoke with ripples spreading from the
-  notes; press any of the four to go back. Hardware test pending. See
+  notes; press any of the four to go back. Tested on hardware. See
   [patch/visualizer/README.md](patch/visualizer/README.md).
 - **all**: colorsong, humanize and interpolate in one firmware (version text
   `1.2.0-MTC`), from [patch/all/patch.json](patch/all/patch.json).
