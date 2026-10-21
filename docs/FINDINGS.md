@@ -393,7 +393,15 @@ A micro-step is `seq_master_micro` (ITCM `0x1de8`), then for t = 0..15:
 - **Same grid as the original Tracker:** 12 ticks per micro-step, 48 micro-steps per
   step, 576 ticks per step. `seq_tick_period_us` (ITCM `0x1084`) = 312500 / bpm / 12
   (217.0 µs at 120 BPM). With swing on it is (s + 50) × 3125 / bpm / 12, with s and
-  100 − s alternating per step. `seq_step_ms` (ITCM `0x1014`) = 125 ms at 120 BPM. Tempo
+  100 − s alternating per step. The Swing FX (`0x2f10`) only sets swing on (`+0x60`)
+  and the amount (`+0x64`); `seq_advance_step` toggles the pair (`+0x61`) when track
+  16 ends a step. Nothing resets them when playback starts (`seq_play_from` leaves
+  them), so a take starts with the swing that played last, and a Swing FX on a muted
+  track is skipped (emulator). `patch/swing` sets them at every take and pattern start.
+  `seq_tick` reaches `seq_advance_step` through a veneer in ITCM (`0x1f818`) that jumps
+  through a word at ITCM `0x1f81c`, copied at boot from flash `0x601acf00` (the ITCM
+  image is copied from `0x6018d6e4` + offset), so a patch can hook it by replacing that
+  flash word. `seq_step_ms` (ITCM `0x1014`) = 125 ms at 120 BPM. Tempo
   source: Tempo FX override (`seq+0x58`/`+0x5c`), external clock BPM (`+0x7d4`) or the
   project tempo (`0x20204774`).
 - **The real resolution is the audio block.** All ticks due in a block are processed in

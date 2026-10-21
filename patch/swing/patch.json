@@ -1,0 +1,76 @@
+{
+  "name": "swing",
+  "description": "Global Swing: with Config > Project Settings > Global Swing > Global swing On, every take and every pattern start uses the project's Swing amount (25-75); a Swing FX still changes it until the pattern starts again",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "ram_startup": true,
+  "bin": "build/swing.bin",
+  "sym": "build/swing.sym",
+  "rel": "build/swing.rel",
+  "prebuilt_bin": "prebuilt/swing.bin",
+  "prebuilt_sym": "prebuilt/swing.sym",
+  "prebuilt_rel": "prebuilt/swing.rel",
+  "branches": [
+    {
+      "at": "0x600AA7F8",
+      "old": "00f02ef8",
+      "to": "mt_sw_seq_advance",
+      "next": "mt_sw_next_seq_advance",
+      "note": "app_audio_block: bl seq_advance (veneer 0x600aa858); first the global swing at a take's start or a settings change"
+    },
+    {
+      "at": "0x600BC27A",
+      "old": "00f02df8",
+      "to": "mt_sw_render_advance",
+      "next": "mt_sw_next_render_advance",
+      "note": "render loop: bl seq_advance (veneer 0x600bc2d8); the same, so renders swing too"
+    },
+    {
+      "at": "0x60118B00",
+      "old": "fff748fc",
+      "to": "mt_sw_settings_folder",
+      "next": "mt_sw_next_folder",
+      "note": "Config menu constructor: Project Settings folder, room for one more item"
+    },
+    {
+      "at": "0x601193E6",
+      "old": "fef7ffff",
+      "to": "mt_sw_last_item",
+      "next": "mt_sw_next_last_item",
+      "note": "Config menu constructor: last item (Licenses); then adds the Global Swing folder (Global swing, Swing amount) to Project Settings"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x601ACF00",
+      "old": "11d00a60",
+      "to": "mt_sw_advance_step",
+      "next": "mt_sw_next_advance_step",
+      "thumb": true,
+      "note": "ITCM image (copied to ITCM 0x1f81c at boot): the word seq_tick's veneer jumps through to seq_advance_step 0x600ad011 -> mt_sw_advance_step (the global swing again when a pattern starts)"
+    },
+    {
+      "at": "0x600403DC",
+      "old": "991f0e60",
+      "to": "mt_sw_pattern_update",
+      "next": "mt_sw_next_pattern_update",
+      "thumb": true,
+      "note": "Pattern screen vtable: update method 0x600e1f99 -> mt_sw_pattern_update (settings file load/save)"
+    },
+    {
+      "at": "0x6003B5F8",
+      "old": "75640c60",
+      "to": "mt_sw_config_update",
+      "next": "mt_sw_next_config_update",
+      "thumb": true,
+      "note": "Config screen vtable: update method 0x600c6475 -> mt_sw_config_update (settings file load/save)"
+    },
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "version": true,
+      "note": "version text 1.2.0-sw1"
+    }
+  ]
+}

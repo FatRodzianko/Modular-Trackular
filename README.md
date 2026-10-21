@@ -32,6 +32,10 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   delay time), driven by the same Master Reverb and Master Delay knobs. The README says
   what each knob does for each effect, with sound samples. Tested on hardware. See
   [patch/masterfx/README.md](patch/masterfx/README.md).
+- **swing**: Global Swing. Under Config → Project Settings → Global Swing, each project
+  can set a Swing amount (25–75) that every take and every pattern start uses, the same
+  every time; a Swing FX still changes it until the pattern starts again. Off by
+  default. Tested on hardware. See [patch/swing/README.md](patch/swing/README.md).
 - **all**: colorsong, humanize and interpolate in one firmware (version text
   `1.2.0-MTC`), from [patch/all/patch.json](patch/all/patch.json).
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
@@ -78,6 +82,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/humanize/` | Humanize button: C, linker script, build script, patch spec, prebuilt binary |
 | `patch/interpolate/` | CC and Macro ramps between steps |
 | `patch/masterfx/` | Master reverb and delay per project: Stock, Freeverb, Plate, Spring or Shimmer; Stock, Tape, BBD or "Gated"; sound samples in `samples/` |
+| `patch/swing/` | Global Swing per project |
 | `patch/all/` | Bundle spec: colorsong + humanize + interpolate in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
@@ -100,6 +105,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/test_masterfx.py` | masterfx: Stock identical to stock firmware, switching, start-up, each effect's block handling, knob, level and cost tests, Config menu and settings file, and WAV renders next to the stock effects |
 | `tools/emu/stress_masterfx.py` | masterfx stress: long randomized sessions through the reverb or the delay (garbage settings, missing blocks, restarts, effect choices) with a write watch and state checks |
 | `tools/emu/compare_masterfx.py` | masterfx: runs the same randomized session through two builds and compares every output sample, and measures both |
+| `tools/emu/test_swing.py` | swing timing (the sequencer run in time, step lengths measured), Config menu and settings-file tests |
 | `tools/emu/test_interpolate.py` | interpolate ramp, MIDI-rate, cost, Config menu and settings-file tests, through the real audio block |
 | `tools/emu/seq_timing.py` | Run the stock sequencer on test patterns and print the MIDI it sends, with timing |
 | `tools/emu/check_version.py` | Print the version text a `.ptf` would show |
