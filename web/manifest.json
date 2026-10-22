@@ -63,6 +63,14 @@
       "title": "Conditional Trigs",
       "summary": "Turn a Chance FX past 100 and it becomes a condition on how many times the pattern has played: 1st, !1s (not the first), or 1:2 to 8:8 (the A-th pass of every B), counted per track. Idea from Psygoo's CT6.",
       "status": "Tested on hardware"
+    },
+    {
+      "id": "synths",
+      "bit": 7,
+      "spec": "patch/synths/patch.json",
+      "title": "WAVE Synth",
+      "summary": "A wavetable synth that takes the place of one synth model per project (Config > Project Settings > Synth Engines): wavetables, a super saw, ladder and OB filters, two LFOs and a Mod Matrix, with its own controls and patches.",
+      "status": "Tested on hardware"
     }
   ],
   "tested_builds": {
@@ -75,6 +83,7 @@
     "8b3ddcb09de46829799f542cf9d7423d95d4f39aa76db44881f5c18eb0361736": "the previous visualizer (1.2.0-vz2)",
     "539328948185c4a02577ce62181fc4143a5e86dc06a33e61b469d52b21da8197": "condtrig (1.2.0-ct1)",
     "72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982": "all six mods before condtrig (1.2.0-MTE)",
-    "6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437": "all seven mods (1.2.0-MCT)"
+    "6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437": "all seven mods before synths (1.2.0-MCT)",
+    "2fca2e07bb19ef4e539328152af27c173067ec6088604c45d9f28b96aa876e97": "synths (1.2.0-sy4)"
   }
 }

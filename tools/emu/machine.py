@@ -42,7 +42,8 @@ MAPS = [  # (base, size)
     (0x20200000, 0x8000),       # OCRAM: the one FlexRAM bank set up as OCRAM (32 KB).
                                 # Nothing else exists here on this unit: an access to
                                 # 0x20280000 froze the device.
-    (0x60000000, 0x200000),     # FlexSPI flash window
+    (0x60000000, 0x800000),     # FlexSPI flash: 8 MB of the unit's 16 MB, the image size
+                                # tested on hardware (FINDINGS section 8)
     (0x80000000, 0x4000000),    # SDRAM 64 MB
     (STUB_BASE, 0x1000),
 ]

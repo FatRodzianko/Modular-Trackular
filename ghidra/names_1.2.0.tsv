@@ -255,5 +255,66 @@
 600322a8	master_delay_bypass_off	+0x2d = 0
 60031e5c	master_reverb_update	reverb object 0x20019014 (engine+0x150c): stereo in place, bypass +0x80
 600ff800	master_reverb_process	plate-style network, 16K-sample int16 ring buffer in SDRAM, LFO-modulated taps
+600b1440	synth_slot_set_model	(S, slot, model id): new patch object ("Init"), caps polyphony, slot setPatch with the audio IRQ off; returns if unchanged
+600b13cc	synth_slot_set_polyphony	(S, slot, n): slot vtable +0x1c with the audio IRQ off; no cap check
+600b1400	synth_slot_max_polyphony	(S, slot): min(model max at container +0x40, 8 - the other slots' voices)
+600b2080	synth_slots_apply_project_q	(S, 0x202046c4, reset): per slot record: polyphony +4, model index +8 (table 0x200006b4), name
+60036634	synth_output_update	graph object update: per slot, manager render into float buffers, x32767 to 16-bit blocks, transmit
+60125fb8	synth_manager_render_slot	synth manager vtable +0x4c: renders one slot through synth_slot_render
+0001f0d8	synth_slot_render	every voice's render (+0x10) every block, summed through the slot scratch (+0x17c/+0x37c); voice 0's +0x14 last
+0001e484	synth_slot_set_voices	slot vtable +0x1c: creates voices with the model's factory or deletes extras; deletes all on a model change; then pushes all params
+0001e648	synth_slot_set_patch	slot vtable +0x00: stores the patch shared_ptr (+0x5a4), sets every voice's +4/+8, synth_slot_set_voices
+0001e40c	synth_slot_push_params	(slot, mode): every parameter of the patch to every voice
+0001e2ac	synth_slot_send_param	(slot, index, value*, mode, voice*): voice +0x0c for one voice or all (0x80000000)
+60111234	synth_router_note_on	host vtable +0x20 (thunk 0x6011122c): message type 9 to every subscribed slot
+60111450	synth_router_note_off	host vtable +0x24 (thunk 0x60111448)
+601110d0	synth_router_pitchbend	host vtable +0x1c (thunk 0x60111178): message type 8
+60110f14	synth_router_cc	host vtable +0x0c (thunk 0x60110fd8): message type 6; CC 110/111 kept in the router
+6014a958	vap_voice_new	VAP factory invoker (literal 0x6014dca8): 0x398-byte voice, ITCM constructor 0xba50, vtable 0x600667e4
+6014a9a8	vap_voice_midi	VAP voice +0x08: (voice, ctx, msg) type 0/1 core, 4 note on, 5 note off, 8 pitch bend
+6014a8f0	vap_voice_set_param	VAP voice +0x0c: (voice, index, float*) through the std::function table at 0x2002d1a4
+6014a8b0	vap_voice_render	VAP voice +0x10: ITCM core 0xc078 on voice+0xc; mono, overwrites L
+6014a81c	vap_voice_sounding	VAP voice +0x18: byte +0x114, cleared by the render when the amp release ends
+0000ba50	vap_voice_core_ctor_q	VAP voice core constructor (voice+0xc)
+0000c078	vap_voice_core_render_q	VAP voice core render
+6014dea0	synth_model_vap_params	VAP parameter builder (descriptor's first std::function): 60 parameters and the editor pages
+601482e0	synth_model_acd_params	ACD parameter builder (descriptor's first std::function)
+6015cab8	synth_model_fat_params	FAT parameter builder
+60161ed8	synth_model_wtfm_params	WTFM parameter builder
+60145e80	acd_voice_new	ACD factory: 0x26c-byte voice, ITCM constructor 0xd2f8, vtable 0x600662f0
+6015b268	fat_voice_new	FAT factory: 0x344-byte voice, vtable 0x600674e4
+6015ef98	wtfm_voice_new	WTFM factory: 0x3a4-byte voice, vtable 0x60067814
+601524a0	perc_voice_new	PERC factory: 0x17ac-byte voice, vtable 0x60066f90
+6011139c	synth_router_note_off_body	host +0x24 (thunk 0x60111448) branches here: message type 5 to every subscribed slot
+0000416c	synth_fx_apply_pending_q	(engine): each synth's pending FX columns (dirty bits engine + 0x1a48) through 0x40e8
+000040e8	synth_fx_apply_column_q	(engine, synth, column type): Macro a-f -> midi_send_cc CC 102-107; sends/pan -> 0x3e68 / 0x3c68 / 0x3fa8
+0000781c	vap_lfo_clock_tick_q	VAP core + 0x1c8: message type 0 (MIDI clock) for the tempo-synced LFO
+00007928	vap_lfo_transport_start_q	VAP core + 0x1c8: message type 1 (MIDI start)
+6014ce58	vap_fmt_filter_type	VAP Type formatter: names from the DTCM table 0x20003ea8
 600af4f0	seq_set_selection_fx_type_q	(selection, column, type): stores the type; value -> default byte 0x60039cd0[type - 3] unless 0x600e3288 / 0x600e12d4 say keep
 600af8e8	seq_set_selection_fx_scaled_q	(selection, column, position): value mapped linearly into min..fx_max for every cell of the selection (veneer 0x600afb20)
+600b16b8	synth_slot_title_q	(ret string, S, slot): "Synth {} ({})" with the model name from the manager (+0x34), or "Off"
+600b1270	synth_slot_load_workspace_patch_q	(S, slot, out): Workspace <slot>.patch; on a model id mismatch, Patches <model>/<name>.patch, then writes <slot>.patch
+600b1018	synth_slot_save_patch_q	(S, slot): Patches storage +0x10 with the slot's name and patch
+60116350	project_load_synths_q	apply records (0x600b2080), then each slot's Workspace patch, then 0x600bce14
+6012fd2c	synth_registry_find	(&shared_ptr, registry, id): unordered_map find
+60124fc8	patch_storage_save	storage vtable +0x10: <model name>/<name>.patch, folder made if missing, ITCM 0x1c398 writes it
+60124b38	patch_storage_load_by_name	opens <name> + ".patch", ITCM 0x177f4 reads field 1 (model id)
+6013cf60	pb_decode_tag_q	nanopb: field number = tag >> 3, wire type = tag & 7
+6013cebc	pb_decode_varint64_q	nanopb varint
+6011ae60	scr_synth_settings_setup	Model / Polyphony / Gain / Panning / Reverb send / Delay send / Load / Edit patch columns
+60105fac	disp_list_ctrl_init	list control, vtable 0x60046a2c, data: count +4, selection +6, text items +0xc, image ids +0x18
+6010652c	disp_list_ctrl_draw	image ids -> 0x6010645c (bitmaps), else text -> 0x601062d4
+6014d160	vap_macro_defaults	container +0x2c std::function invoker (functor, &Macros): VAP's Macro targets, called once the 8 Macros exist
+6010645c	disp_list_draw_images	(ctrl, x0, x1, y, step): a list control's image items (ids < 0x24) from the image table
+6011fa20	eve_cmd_text_body	CMD_TEXT: header words through display +0x18, the string through display +0x40
+6014d008	vap_fmt_lfo_ratio_q	(ret, functor = Sync index, accessor, &value): Sync off "{:.2f} Hz" below 10, "{:.1f} Hz" from 10; on: one of 16 divisions at 0x60066cb0
+6011e764	scr_edit_patch_setup_q	Edit Patch screen: label +0x93 shows the model logo from 0x600615d8 by model index; its text set at 0x6011ea58
+0001d2d0	patch_rebuild_q	(patch): the descriptor's builder again, new Macros swapped in, the old freed; twice while a patch is made, and from set_value on an entry with byte +0x24 set
+0001d39c	patch_set_value	patch vtable +0x10: (patch, index, float *value, source): values[index] (no bounds check), rebuild if entry +0x24, then to the voices (0x17944) unless patch +0xe0
+00016f14	patch_init_param_arrays_q	patch vtable +0x38: patch +0x30 (1.0 if entry +0x21) and +0x3c (8 floats) for each parameter
+00017944	patch_push_value_q	(patch, index, value, source): a value to the patch's voices (their set_param)
+00018790	patch_file_load_q	parses a patch file into an existing patch; set_value (source 2) for min(file values, parameter count)
+60148028	vec_param_default_append_q	(vector<parameter entry> *, n): _M_default_append, as VAP's builder grows the vector to 60
+6014dcb0	vap_param_register_q	(builder state, index, &entry, ...): moves the entry into params[index] (index < count) and sets VAP's set handler (table 0x2002d1a4, 60 x 16 bytes)
+60124f38	patch_storage_load_into	storage vtable +0x0c: (storage, &path, patch, 1) -> 1 when loaded; Workspace <slot>.patch (0x600b12d2) and Patches <model>/<name>.patch (0x600b0e9c)

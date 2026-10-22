@@ -38,9 +38,9 @@ Python command below does, without installing anything:
    one in step 1) and the image's, and refuses anything else, including a file that's
    already patched.
 2. Tick the mods you want. One mod gives its own build, "Select all" gives the
-   `patch/all` bundle (all seven, `1.2.0-MCT`), and any other mix gets the version text `M` plus two hex digits
+   `patch/all` bundle (all eight, `1.2.0-MSY`), and any other mix gets the version text `M` plus two hex digits
    that say which mods are in it (colorsong 01, humanize 02, interpolate 04, masterfx
-   08, swing 10, visualizer 20, condtrig 40: colorsong + swing is `1.2.0-M11`).
+   08, swing 10, visualizer 20, condtrig 40, synths 80: colorsong + swing is `1.2.0-M11`).
 3. Patch and download. The page only offers the file when its SHA-256 is the one
    `tools/patch_ptf.py` makes for that selection (`web/expected.json`), and says when
    it's also one of the hardware-tested builds in the table below. A mix that isn't in
@@ -63,7 +63,7 @@ python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.js
 ```
 
 Use `patch/humanize/patch.json` for Humanize alone, `patch/interpolate/patch.json` for
-interpolate alone, or `patch/all/patch.json` for all seven in one firmware (see "Choosing patches" below for your own
+interpolate alone, or `patch/all/patch.json` for all eight in one firmware (see "Choosing patches" below for your own
 mix).
 
 The patcher checks the stock image, checks the original bytes at every patched
@@ -80,8 +80,10 @@ must be byte-identical to these builds:
 | visualizer | `TrackerPlus_vz5.ptf` | `1.2.0-vz5` | tested | `46970bb1689414fd711cadc6cfd149da458145aafcd9f6d274f10759dce9bdbd` |
 | the previous visualizer (the same animation, every pad update a full flush) | `TrackerPlus_vz2.ptf` | `1.2.0-vz2` | tested | `8b3ddcb09de46829799f542cf9d7423d95d4f39aa76db44881f5c18eb0361736` |
 | condtrig | `TrackerPlus_ct1.ptf` | `1.2.0-ct1` | tested | `539328948185c4a02577ce62181fc4143a5e86dc06a33e61b469d52b21da8197` |
-| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | tested | `6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437` |
-| the previous all (the same without condtrig) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
+| synths | `TrackerPlus_sy4.ptf` | `1.2.0-sy4` | tested | `2fca2e07bb19ef4e539328152af27c173067ec6088604c45d9f28b96aa876e97` |
+| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths) | `TrackerPlus_MSY.ptf` | `1.2.0-MSY` | emulator only (synths was tested on hardware with the six before condtrig) | `f3fee2dd07e88d3b8810cd1d9b371e0636f7ad4920c777f021b28da2afd2fd99` |
+| the previous all (the same without synths) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | tested | `6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437` |
+| the all before that (without condtrig and synths) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 | itcmtest (ITCM hooks test, on its own) | `TrackerPlus_it1.ptf` | `1.2.0-it1` | tested | `701b35dfadb4626ebe19e94ccb3af47aff9e4d604684d59b2e8b9cbf5da18d7c` |
@@ -99,16 +101,16 @@ Each patch can be installed on its own, or several can go into one firmware:
   interpolate only, `patch/masterfx/patch.json` the master reverb and delay chosen per project
   (see its README for the effects), `patch/swing/patch.json` Global Swing,
   `patch/visualizer/patch.json` the pad visualizer, `patch/condtrig/patch.json`
-  conditional trigs.
+  conditional trigs, `patch/synths/patch.json` the WAVE synth.
 - **Several patches:** use a bundle spec, which lists the patches to combine.
-  `patch/all/patch.json` is the bundle that ships (all seven: colorsong, Humanize,
-  interpolate, masterfx, swing, the visualizer and condtrig):
+  `patch/all/patch.json` is the bundle that ships (all eight: colorsong, Humanize,
+  interpolate, masterfx, swing, the visualizer, condtrig and synths):
 
   ```json
   "include": ["../colorsong/patch.json", "../humanize/patch.json", "../interpolate/patch.json",
               "../masterfx/patch.json", "../swing/patch.json", "../visualizer/patch.json",
-              "../condtrig/patch.json"],
-  "version": "MCT",
+              "../condtrig/patch.json", "../synths/patch.json"],
+  "version": "MSY",
   ```
 
 To make your own mix, copy `patch/all/` to a new folder (for example `patch/mymix/`)
@@ -203,6 +205,7 @@ python tools/emu/test_swing.py build/TrackerPlus_sw1.ptf path/to/TrackerPlus_1.2
 python tools/emu/test_visualizer.py build/TrackerPlus_vz5.ptf
 python tools/emu/test_condtrig.py build/TrackerPlus_ct1.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_itcmtest.py build/TrackerPlus_it1.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/emu/test_synths.py build/TrackerPlus_sy4.ptf path/to/TrackerPlus_1.2.0.ptf [wav folder]
 ```
 
 Each test works on any firmware that contains its patch, so for a bundle run every
@@ -211,8 +214,8 @@ went from the `.map.json` the patcher wrote next to the `.ptf`, so keep the two
 together.
 
 `tools/test_layout.py` checks the patcher's placement without the emulator. It builds
-each patch alone, `patch/all` (all seven), colorsong, humanize and interpolate in the
-other order, those three with masterfx in both orders, the six before condtrig in the other order, and two
+each patch alone, `patch/all` (all eight), colorsong, humanize and interpolate in the
+other order, those three with masterfx in both orders, the six before condtrig in the other order, the six with synths in both orders, and two
 patches on the same chained sites, and
 checks that each patch's code and RAM sit where they
 should (RAM in a region the patch may use, no two blocks overlapping), that exactly the

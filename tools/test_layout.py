@@ -6,16 +6,18 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
   - colorsong alone, humanize alone, interpolate alone, masterfx alone, swing alone,
     visualizer alone, ramdiag alone,
   - versiontest alone (pinned base; byte-identical to MT0),
-  - patch/all (colorsong, humanize, interpolate, masterfx, swing, visualizer),
+  - patch/all (colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig,
+    synths),
   - colorsong, humanize and interpolate the other way round (interpolate, humanize,
     colorsong),
   - colorsong, humanize, interpolate and masterfx, both ways round, and with swing and
     visualizer too,
+  - synths alone, and after and before all of those,
   - humanize and a copy of it that hooks only its chained sites (two patches on the
     same four sites),
-  - itcmtest (ITCM hooks) alone, after and before all the others, and with
+  - itcmtest (ITCM hooks) alone, after and before all the others but synths, and with
     a copy of it on the same two ITCM sites,
-  - condtrig alone, after and before all the others but itcmtest, and after
+  - condtrig alone, after and before all the others but itcmtest and synths, and after
     itcmtest (both on the same two ITCM sites),
 and checks that a bundle with ramdiag (standalone) is refused, and so is one where a
 shared site isn't chained by both patches, and one where two patches pass different
@@ -221,6 +223,15 @@ def main() -> int:
     every_rev = dict(rev, name="every-reversed", include=[str(vz), str(sw), str(mx), str(ip), str(hz), str(cs)], version="MTT")
     every_rev_spec = outdir / "every-reversed.json"
     every_rev_spec.write_text(json.dumps(every_rev, indent=2))
+    sy = ROOT / "patch" / "synths" / "patch.json"
+    with_sy = dict(rev, name="every-synths", include=[str(cs), str(hz), str(ip), str(mx), str(sw), str(vz), str(sy)],
+                   version="MTU")
+    with_sy_spec = outdir / "every-synths.json"
+    with_sy_spec.write_text(json.dumps(with_sy, indent=2))
+    with_sy_rev = dict(rev, name="every-synths-reversed",
+                       include=[str(sy), str(vz), str(sw), str(mx), str(ip), str(hz), str(cs)], version="MTV")
+    with_sy_rev_spec = outdir / "every-synths-reversed.json"
+    with_sy_rev_spec.write_text(json.dumps(with_sy_rev, indent=2))
     hz_spec = json.loads(hz.read_text())
     copy = dict(hz_spec, name="humanize-copy",
                 branches=[b for b in hz_spec["branches"] if "next" in b],
@@ -272,9 +283,10 @@ def main() -> int:
             ("masterfx alone", mx, [mx], None, None),
             ("swing alone", sw, [sw], None, None),
             ("visualizer alone", vz, [vz], None, None),
+            ("synths alone", sy, [sy], None, None),
             ("ramdiag alone", rd, [rd], None, None),
-            ("patch/all: colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig", all_spec,
-             [cs, hz, ip, mx, sw, vz, ct],
+            ("patch/all: colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig, synths",
+             all_spec, [cs, hz, ip, mx, sw, vz, ct, sy],
              json.loads(all_spec.read_text())["version"], None),
             ("reversed: interpolate, humanize, colorsong", rev_spec, [ip, hz, cs], "MTR", None),
             ("colorsong, humanize, interpolate, masterfx", with_mx_spec, [cs, hz, ip, mx], "MTX", None),
@@ -283,6 +295,10 @@ def main() -> int:
              [cs, hz, ip, mx, sw, vz], "MTS", None),
             ("visualizer, swing, masterfx, interpolate, humanize, colorsong", every_rev_spec,
              [vz, sw, mx, ip, hz, cs], "MTT", None),
+            ("colorsong, humanize, interpolate, masterfx, swing, visualizer, synths", with_sy_spec,
+             [cs, hz, ip, mx, sw, vz, sy], "MTU", None),
+            ("synths, visualizer, swing, masterfx, interpolate, humanize, colorsong", with_sy_rev_spec,
+             [sy, vz, sw, mx, ip, hz, cs], "MTV", None),
             ("chained: humanize, then a copy on its four shared sites", chain_spec, [hz, copy_spec], "CHN", None),
             ("itcmtest alone (ITCM hooks)", it, [it], None, None),
             ("colorsong, humanize, interpolate, masterfx, swing, visualizer, itcmtest", with_it_spec,

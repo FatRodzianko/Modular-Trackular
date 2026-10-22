@@ -251,6 +251,21 @@ sweep, per region:
 Caveat: the bootloader's maximum image size is unknown (1.2.0 is 1.6 MB and grew
 28 KB over 1.0.3). `patch/versiontest` exists to test exactly that on hardware.
 
+**The flash is 16 MB** (read on hardware with a read-only probe build): the FlexSPI
+configuration block at the start of flash (tag `FCFB` at `0x60000000`, `sflashA1Size`
+at `+0x50`) and the FlexSPI controller (`FLSHA1CR0`, `0x402a8060`, in KB) both say
+16,384 KB, as the MPU's 16 MB flash region does. So an image may reach `0x61000000`:
+about 15.8 MB from `0x60030000`, against 1.6 MB for stock. Whether the bootloader writes
+an image that large is a separate question, tested with padded builds that check their
+own contents.
+
+**An image up to 8 MB of flash is written whole (hardware).** Padded builds whose images
+end at `0x601fe3b4`, `0x603fe3b4` and `0x607fe3b4` (2, 4 and 8 MB of flash; `.ptf` files
+of 5.1, 10.7 and 22 MB) each installed through Config → Firmware, booted, and read back
+their whole padding (269, 2,317 and 6,413 KB of pseudo-random words) without a wrong
+word. The 8 MB one took a few minutes to install. Larger images (up to the chip's 16 MB)
+are untested.
+
 ### MPU (`BOARD_ConfigMPU`, `0x600932a4`, decoded by running it in the emulator)
 
 `MPU_CTRL = 5` (enabled, privileged default map as background). Regions:
@@ -1089,6 +1104,8 @@ startup constructor can stay: without a game they do nothing. Not built yet.
 
 Static analysis plus the slot-record check below; no engine has been run in the
 emulator (the synth host is created at runtime, after the static constructors).
+Section 21 now runs the synth system in the emulator, with the voice interface, the
+parameters and the per-voice costs.
 
 ### Models and the registry
 
@@ -1480,6 +1497,241 @@ through `0x600cf74c(*0x200209e0, id, callback)`. Each callback is a single flash
 **The timer.** `*0x20027d18` is the app's millisecond timer: vtable[0] returns ms. It is
 set in the app's init, not by static constructors.
 
+## 21. Synth engines at runtime: system, slots, voices (emulator)
+
+Section 17 worked from static analysis. Here the synth system runs in the emulator. After
+the static constructors, `synth_audio_setup_q(app + 8, hal, fn)` (`0x600b2118`) and then
+the audio setup `0x600b421c(0x20017b08, hal, app + 8)` are called the way the app's init
+(`0x600aa3c8`) calls them:
+- `hal` is a fake object whose vtable `+0x4c` returns a fake file system, and whose
+  `+0x18`, `+0x1c` and `+0x58` return fake objects (the codec and two others).
+- `fn` is the `std::function` the app passes: `{0x200170e0, 0, 0x600aa711,
+  0x600aa791}`.
+- The audio setup also runs `audio_memory_init`.
+
+After that, the real synth host, slots and voices exist. Notes can be played through the
+host, and the synth output object renders them inside the audio graph (`0x6003061c`). The
+setup takes about 16 KB of heap in the emulator. The plan built on this is in
+[SYNTH_ENGINES_PLAN.md](SYNTH_ENGINES_PLAN.md).
+
+### The synth system object (`S` = app + 8 = `0x200170e8`)
+
+| Field | What |
+|---|---|
+| `S + 0x30 × i` (slot i = 0..2) | Model id of slot i (1 ACD, 2 FAT, 4 VAP, 5 WTFM, 6 PERC). The project record's model index 0..4 maps to these ids through the table at DTCM `0x200006b4` (`.data`) |
+| `+ 0x04 / 0x08` | The slot object, and its `shared_ptr` control block |
+| `+ 0x0c / 0x10` | The slot's patch object (the parameters), and its control block |
+| `+ 0x14` | The patch name (`std::string`, "Init" at start) |
+| `S + 0x90` | The synth manager (vtable `0x600631b4`). `+0x4c` renders one slot (`0x60125fb9`); `+0x2c` registers a storage folder (id 2 "Patches", id 0 "Workspace") |
+| `S + 0x9c` | The model registry wrapper. vtable[0] creates a patch object for a model id |
+| `S + 0xac` | The MIDI router (0x48 bytes, vtable `0x6005ed5c`). Its interface at `+8` (vtable `0x6005ed98`) is the "host" that `seq_note_on_out_q` uses |
+| `S + 0xb0` | The file system object (hal `+0x4c`) |
+
+The functions on `S`:
+- `synth_slot_set_model(S, slot, id)` (`0x600b1440`) returns early if the id is
+  unchanged. Otherwise it makes a new patch object (named "Init"), caps the polyphony,
+  and calls the slot's `setPatch` with the audio interrupt off.
+- `synth_slot_set_polyphony(S, slot, n)` (`0x600b13cc`) calls the slot's vtable `+0x1c`
+  with the interrupt off. It does no cap check.
+- `synth_slot_max_polyphony(S, slot)` (`0x600b1400`) returns min(the model's maximum,
+  container `+0x40`, 8 − the other two slots' voices). **All three slots share 8
+  voices.**
+- `0x600b2080(S, 0x202046c4, reset)` applies the project's three slot records: polyphony
+  `+4`, model index `+8`, and the name.
+
+### The router (host)
+
+The host's methods turn calls into 4-byte messages: `{type, channel − 1, data1, data2}`.
+Each message goes to every subscribed slot.
+
+| Host vtable | Function | Message |
+|---|---|---|
+| `+0x20` | note on (note, velocity, channel), `0x60111234` | type 9 |
+| `+0x24` | note off, `0x60111450` | |
+| `+0x1c` | pitch bend, `0x601110d0` | type 8, 16-bit value |
+| `+0x0c` | CC, `0x60110f14` | type 6. CC 110 and 111 are kept in the router itself |
+| `+0x18` | `0x601112e8` | Asks every voice "any key held" |
+
+The channel is the slot + 1.
+
+### The slot (class vtable `0x6006441c`, methods in ITCM, 0x5bc bytes)
+
+| Offset | What |
+|---|---|
+| `+0x14` | 8 voice records of 0x2c bytes. Word 0 is the voice object |
+| `+0x174` | Number of voices |
+| `+0x178` | The model id the voices were made for |
+| `+0x17c` / `+0x37c` | Scratch L / R: 128 floats each |
+| `+0x590` | The model registry |
+| `+0x5a4` / `+0x5a8` | The patch (`shared_ptr`) |
+
+The slot's vtable:
+- `+0x00` `synth_slot_set_patch` (`0x1e649`).
+- `+0x18` voice count (`0x1dc6d`).
+- `+0x1c` `synth_slot_set_voices` (`0x1e645` → `0x1e484`).
+
+How the slot manages voices:
+- `synth_slot_set_voices(slot, n)` looks up the model's descriptor for the patch's model
+  id.
+  - If the id differs from `+0x178`, it first deletes every voice.
+  - It then creates voices with the descriptor's factory (`std::function` at descriptor
+    `+0x28`, invoker `+0x34`, called with the voice index), or deletes the extra ones.
+  - Each new voice gets `voice + 4/+8` = the patch's `shared_ptr`. So **`voice + 4` is the
+    slot's patch object**, which is `S + 0x0c + 0x30 × slot`.
+  - Last, it pushes every parameter to every voice: `synth_slot_push_params` (`0x1e40c`)
+    → `synth_slot_send_param` (`0x1e2ac`) → voice `+0x0c`.
+- Note on: the slot asks voices `+0x18` in order and gives the note to the first one
+  that is not sounding. It sets parameter 39 (Volume) to velocity / 127 on that voice,
+  then sends it message `04 00 note velocity`.
+- Note off: the slot asks `+0x1c(note)` on each voice. The one holding the note gets
+  `05 00 note velocity`, then `+0x28`.
+
+### The audio path
+
+1. The synth output object's `update()` (`0x60036634`, a graph object whose `+0x14` is
+   `S`) handles each slot whose voice count is not 0. It calls the manager's render
+   (`0x60125fb8`) into float buffers, scales by 32767 (`0x60036970`) into 16-bit blocks,
+   and transmits them. When the patch's channel count (container `+0x28`) is 1, the left
+   buffer is used for both sides.
+2. `synth_slot_render` (`0x1f0d8`) calls **every voice's render (`+0x10`) every block,
+   playing or not**.
+   - With one voice, the voice writes straight into the output (`0x200278e4` /
+     `0x20027ae4`).
+   - With more, each voice writes into the slot's scratch, which the slot copies and adds
+     into the output (a 512-byte `memcpy_small` per buffer per voice).
+   - Last, it calls voice 0's `+0x14`.
+3. The render call is `render(voice, ctx, 0, 0, [sp] 0, [sp+4] L, [sp+8] R, [sp+0xc] 2)`:
+   - `ctx[0]` is a float tempo (130.0 in the emulator).
+   - L and R hold 128 floats at 44,100 Hz.
+   - A voice **overwrites** its 128 samples, at about ±1.0 full scale.
+   - The mono models write only L. The VAP voice leaves R untouched.
+
+### The voice interface (VAP: vtable `0x600667e4`, used only by the VAP factory)
+
+The other models' voice vtables have the same layout: ACD `0x600662f0`, FAT `0x600674e4`,
+WTFM `0x60067814`, PERC `0x60066f90`.
+
+| Slot | VAP | What |
+|---|---|---|
+| `+0x00` / `+0x04` | `0x6014b5e5` / `0x6014b725` | Destructor / deleting destructor |
+| `+0x08` | `0x6014a9a9` `vap_voice_midi` | `(voice, ctx, msg)`. Message type 0 and 1 go to the core (`0xbf71` / `0xbf69`, on core + `0x1c8`); 4 note on (note, velocity / 127); 5 note off; 8 pitch bend (±2 semitones) |
+| `+0x0c` | `0x6014a8f1` `vap_voice_set_param` | `(voice, index, float *value)`, through a per-parameter `std::function` table at `0x2002d1a4` |
+| `+0x10` | `0x6014a8b1` `vap_voice_render` | Calls the ITCM core `0xc078` on voice + `0xc` |
+| `+0x14` | `0x6014a811` | Nothing (VAP) |
+| `+0x18` | `0x6014a81d` `vap_voice_sounding` | Byte `+0x114`. Set by a note on; cleared by the render when the amp release ends (about 0.5 s after note off at the Init patch), not by the note off |
+| `+0x1c` / `+0x20` | `0x6014a829` / `0x6014a851` | Holds this note / holds any note: a held-note list of 8-byte entries at `+0x18`, count `+0x58` |
+| `+0x24` / `+0x28` | `0x6014a85d` / `0x6014a869` | Note queries the slot uses for mono and legato |
+| `+0x2c` | `0x6014a8a1` | Core `0xe445` (note-list cleanup) |
+
+The VAP factory invoker is `0x6014a959` (literal `0x6014dca8` in the descriptor builder).
+It allocates 0x398 bytes and runs the ITCM constructor `0xba50`. The construction-time
+vtable `0x600667ac` lists the same methods; finished voices carry `0x600667e4`.
+
+### The parameters
+
+The patch object (VAP: vtable `0x6006307c`, ITCM methods) returns its parameter container
+from vtable `+0x50`:
+- `+0x00` a vector of 0x38-byte parameter entries. Each entry has a `std::string` name,
+  a float value at `+0x18`, the min and max as half floats at `+0x1c` / `+0x1e`, flags
+  at `+0x20` (byte 3: the MIDI CC, or 0xff), and a display formatter (`std::function`)
+  at `+0x28`.
+- `+0x0c` 8 Macro entries of 0x28 bytes.
+- `+0x24` the model id.
+- `+0x28` the output channels (1, or 2 for PERC).
+- `+0x40` the maximum polyphony (unlimited, or 1 for PERC).
+
+The voice's `set_param` index is the entry's position. VAP has 60:
+
+| Index | Parameters |
+|---|---|
+| 0–11 | Shape 1, Shape 2 (0..1), PW 1, PW 2 (−0.5..0.5), Mix (−1..1), Tune 1, Tune 2 (−36..36 st), Detune (0..100), Finetune (−100..100), Reset 1, Reset 2, Type (filter, 0..14) |
+| 12–14 | Cutoff (20..20000 Hz, default 400), Resonance (0..1.5), Env Amt (−1..1) |
+| 15–18, 19–22, 23–26 | Three ADSRs: Attack, Decay, Release 0..10, Sustain 0..1. By their defaults 15–18 is the amp envelope (S 1.0), 19–22 the filter's (S 0, with Env Amt) and 23–26 Envelope 2 |
+| 27–34 | Two LFOs: Ratio, Waveform, Retrigger, Sync |
+| 35–41 | Glide Mode, Glide Time, Note Track, Mix Env Amt, Volume (0..2: velocity, set per note), Sync, Noise |
+| 42–59 | A 6-slot matrix: Src, Dest, Amt |
+
+The other models' parameter builders are the descriptor's first `std::function`:
+- ACD `0x601482e0` (section 17 called it the factory). Its factory is the lambda
+  `0x60145e80`.
+- VAP `0x6014dea0`, FAT `0x6015cab8`, WTFM `0x60161ed8`.
+
+They also lay out the editor's pages ("Oscillators", "Envelope 1", "Matrix", "(1/2)"...),
+so the Instrument screen's synth pages follow the parameter list.
+
+### Cost and memory per voice (emulator)
+
+Instructions per voice per 128-sample block (rendered through the real graph). Heap is
+measured with `mallinfo` around raising a slot's polyphony.
+
+| Model | Voice object | Heap per voice | Instructions, idle | Instructions, playing |
+|---|---|---|---|---|
+| ACD | 0x26c | 3,140 B | 47,746 | 48,923 |
+| FAT | 0x344 | 3,028 B | 51,751 | 55,249 |
+| VAP | 0x398 | 6,472 B | 60,804 | 66,195 |
+| WTFM | 0x3a4 | 6,484 B | 57,024 | 60,571 |
+| PERC | 0x17ac | 6,068 B | 4,333 | 34,905 |
+
+- The four synth models cost the same idle as playing. Only PERC skips silent voices.
+- A whole graph block with 8 VAP voices playing and two idle ACD voices took 883,878
+  instructions. With three idle ACD voices it took 356,619.
+- In the emulator the heap is at `0x20041f38` after the two setups (64,816 bytes below
+  its limit).
+
+### Found while building `patch/synths` (emulator)
+
+- **VAP's amp envelope is parameters 19–22, not 15–18.** An Attack on 19 slows the
+  onset, Sustain 21 holds the note, and Release 22 sets the tail; 15–18 change nothing
+  with the filter open, so they are the filter envelope (with Env Amt). VAP's default
+  patch is a pluck: amp Sustain 0, Decay 0.5. The Init patch's Macros agree: Macro a
+  ("Attack") moves 19 and Macro b ("Decay/Release") moves 20 and 22; c is empty, d moves
+  Cutoff (12), e Resonance (13), f Env Amt (14).
+- **VAP's envelope times** (open filter, velocity 127): the attack reaches full level at
+  about Attack seconds. With Sustain 1, Release R falls 20 dB after about 0.37 R and
+  60 dB after 0.97 R (R = 0.5), 0.85 R (R = 1) or 0.64 R (R = 3); "sounding" clears just
+  after. Decay is timed the same way. The output is linear in velocity.
+- **The render call has five stack arguments**, not four: `render(voice, ctx, a1, a2,
+  [sp] a3, [sp+4] L, [sp+8] R, [sp+0xc] count, [sp+0x10] buffers)`, where `buffers` points
+  at the output buffer pointers and `count` is 2 (`synth_slot_render`, `0x1f1a4`–`0x1f1de`).
+  No float register arguments. VAP's own render reads only voice, ctx and L.
+- **Message types 0 and 1 are MIDI realtime messages.** The host's `+0x08` (thunk
+  `0x60111514`) is `0x60111450`: it takes a realtime status byte and broadcasts, to every
+  slot, `0xF8` clock as type 0, `0xFA` start as type 1, `0xFC` stop as type 2 and `0xFB`
+  continue as type 3. The slot passes types 0, 1 and 7 to all its voices. VAP sends
+  0 and 1 to its tempo-synced LFO (`0x781c` counts clock ticks, `0x7928` restarts the
+  count); they change nothing audible on the Init patch. Neither the sequencer's play and
+  stop nor the host's other methods sent them in the emulator. The note off is
+  `0x6011139c` (thunk `0x60111448`); the table above and `names_1.2.0.tsv` give
+  `0x60111450` for it.
+- **Pitch bend:** VAP plays the message's signed 16-bit value as value × 2 ×
+  1.0173768e-5 octaves, so ±8192 is ±2 semitones (and ±32767 about ±8).
+- **Macros reach a synth as CCs 102–107.** `synth_apply_fx_q` only marks the FX pending;
+  `0x416c` (from the engine's block update) applies it through `0x40e8`, which sends a
+  Macro FX a–f to the router as CC 102–107 on the synth's channel (`midi_send_cc` `0xacc`).
+  Delay send, panning and reverb send go to `0x3e68`, `0x3c68` and `0x3fa8`. CC 74 is
+  Cutoff, 71 Resonance (the parameter entries' CC bytes).
+- **VAP's display names** (the formatters, called as `invoker(ret string, functor, 0,
+  float *value)`): Type 0–14 are LP MG 24dB, LP OB 24dB, LP OB 12dB, LP SVF 24dB, LP SVF
+  12dB, HP OB 24dB, HP OB 12dB, HP SVF 24dB, HP SVF 12dB, BP OB 24dB, BP OB 12dB, BP SVF
+  24dB, BP SVF 12dB, Notch SVF 24dB, Notch SVF 12dB (table at DTCM `0x20003ea8`). Glide
+  Mode 0–3: Always, Overlap, Legato, Legato O. Times show as seconds, Detune as cents,
+  Env Amt, Note Track, Resonance, Noise and Volume as percent.
+- **Stock VAP faults on some garbage values**, in stock firmware too: a NaN, infinite or
+  huge LFO Ratio (27, 31) makes its render loop for ever (`0x7744`), and a huge matrix
+  Dest (43, 46, …, 58) makes its `set_param` read unmapped memory (`0xc5f8`). The UI
+  keeps them in range.
+- **The heap holds about 13 VAP voices** in the emulator after the setups (8 + 4 + 1;
+  one more runs it out, stock firmware too), more than the 8-voice cap, which only
+  `synth_slot_set_model` applies. With the heap run (nearly) full, a VAP voice made by a
+  model change left the heap corrupt after its next block (stock code at `0x7400` writing
+  near the heap top, then `mallinfo` faulting), so a full heap is not survived.
+- The synth output object is `0x20019168` (vtable `0x60043078`). It sends each slot's
+  block to outputs `slot` and `slot + 3`, and its right block to `slot + 6` and
+  `slot + 9`. Its `update()` alone costs about 191,000 instructions with 8 Wavetable
+  voices playing (3 + 3 + 2): about 96,000 of it the voices, the rest the slots' scratch
+  copies and the 16-bit conversion, which 8 stock VAP voices pay on top of their
+  roughly 530,000.
+
 ## 22. Chance FX, loop counting and ITCM hooks (conditional trigs, emulator)
 
 Found while planning conditional trigs (`docs/CONDITIONAL_TRIGS_PLAN.md`).
@@ -1633,3 +1885,291 @@ Found while planning conditional trigs (`docs/CONDITIONAL_TRIGS_PLAN.md`).
   on a C 105 cell, pad 23 gives 49), through its own `fx_max` veneer.
 - **The encoder hook stays local.** Hooking `0x600af1b2` changes no other writer's
   range. Pad entry, Fill and random fill use other `fx_max` veneers.
+
+## 23. Synth models end to end: registry, patches, files and the Instrument screen (emulator)
+
+Mapped for a swappable engine: a custom engine that replaces one of the five stock
+models in the Instrument screen's Model list and shows its own name and controls.
+Sections 17 and 21 cover the registry and the voices. Everything here is from the
+synth rig (`tools/emu/synth_rig.py`) and Ghidra, on stock 1.2.0.
+
+### The descriptor and the model id
+
+A descriptor is 0x38 bytes:
+- `+0x00`: the name (`std::string`, "VAP").
+- `+0x18`: the parameter builder (`std::function`). The functor is a plain function
+  (VAP `0x6014dea1`), and the invoker `0x60144955` calls `builder(a, b)`. `b` is the
+  container's parameter vector; the builder registers each entry at its index.
+- `+0x28`: the voice factory (`std::function`). The invoker (VAP `0x6014a959`) takes
+  `(unique_ptr<voice> *ret, …)`, mallocs the voice (VAP 0x398 bytes), and leaves
+  `voice + 4/+8` (the patch's `shared_ptr`) empty for the slot to fill.
+
+`0x6012fd2c(&shared_ptr, registry, id)` is the registry's `find`. The manager's vtable
+`+0x34` returns a model's name by id.
+
+The project's slot record stores a model **index** 0–4 (record `+8`), not an id. The
+table at DTCM `0x200006b4` (`.data`, writable) maps an index to an id: `{1, 2, 4, 5,
+6}`. It is read in four places:
+
+| Where | What |
+|---|---|
+| `0x600b20b2` | Applying a project's records (`synth_slots_apply_project_q`) |
+| `0x600b23de` | The synth system's start-up models |
+| `0x600d400e`, `0x600d40a2` | The UI's PERC special case (`table[index] == 6`) |
+| `0x6011b63c` | The Model list: a selection calls `synth_slot_set_model(S, slot, table[index])` and writes the index into the record |
+
+So changing one table entry swaps that index's model everywhere, and the record keeps a
+stock index. Id 3 is free (no registered model).
+
+### The patch object (one class for every model)
+
+Every model's patch object has vtable `0x6006307c`. Its container sits at patch
+`+0x54` and is returned by vtable `+0x50`. A builder fills it in:
+
+| Container | What |
+|---|---|
+| `+0x00` | Parameters: a vector of 0x38-byte entries (VAP 60, ACD 29, FAT 25) |
+| `+0x0c` | Macros: 8 entries of 0x28 bytes, each a `std::string` name, a vector of targets at `+0x18`, and flags at `+0x24`. VAP's are Attack, Decay/Release, (empty), Filter Cutoff, Filter Resonance, Filter Env Amount, Velocity, Pressure |
+| `+0x24` / `+0x28` / `+0x40` | Model id; output channels; maximum polyphony |
+| `+0x2c` | A `std::function` |
+| `+0x44` | Groups: 0x48-byte entries, each a name, an empty short name, and a vector of 0x24-byte sub-entries (a name and three words). VAP's are Oscillator, Filter, Modulation, Matrix, FX, Voice. Their consumer isn't mapped yet |
+| `+0x50` | Pages: 0x48-byte entries, each a name (`+0x00`), a short name (`+0x18`, "Osc", "Amp Env"; empty when the name fits) and an item vector at `+0x3c` |
+
+**Page items** are 8 bytes each: `{1, parameter index}`, or `{0, −1}` for an empty
+cell. VAP has nine pages:
+
+| Page | Items |
+|---|---|
+| Oscillators | 0, 1, 2, 3, 5, 6, 8, 7, 41, 40, 9, 10 |
+| Filter | 12, 13, 11, 14, 37 |
+| Amp Envelope | 19–22 |
+| Envelope 1 | 23–26 |
+| Envelope 2 | 15–18 |
+| LFO 1 | (empty), 30, 27, 28, 29 |
+| LFO 2 | 34, 31, 32, 33 |
+| Modulation | 42–59 |
+| Voice | 35, 36, 39 |
+
+ACD has five pages (Oscillator, Filter, Amplifier, Modulation, Voice). FAT's include
+Amp Envelope and Filter Envelope.
+
+**A parameter entry** is 0x38 bytes:
+- `+0x00`: the name (`std::string`).
+- `+0x18`: the value.
+- `+0x1c` / `+0x1e`: the minimum and maximum, as half floats.
+- `+0x20`: flags. Byte 3 is the MIDI CC (0xff for none); byte 2 is 1 on stepped
+  parameters such as Tune.
+- `+0x28`: the display formatter (`std::function`). Its invoker runs as
+  `(std::string *ret, functor, 0, float *value)`. Some functors are malloc'd
+  `{kind, format string, scale}` records, for example `{9, "{:.0f} st", 1.0}`.
+
+The VAP builder (`0x6014dea0`) fills one temporary entry for each parameter: it sets
+the name with `0x60145ff0`, then the default, range, flags and formatter. It registers
+the entry with `0x6014dcb0`, which also takes VAP's per-parameter set handler (the
+`std::function` table at `0x2002d1a4` that `vap_voice_set_param` calls).
+
+### Patch files: protocol buffers (nanopb), values by position
+
+A patch file is a nanopb protocol buffer: tags and varints are decoded by `0x6013cf60`
+and `0x6013cebc`. `VAP/Init.patch` as the firmware writes it is 2,033 bytes:
+- field 1: the model id (varint; 4 for VAP);
+- fields 2, 4 and 5: varints whose values look like uninitialized words;
+- field 6, repeated: a message `{1: float value}`, one per parameter, in parameter
+  order, with no names;
+- then the Macros and the rest.
+
+Parsing and writing run in ITCM: `0x18790` loads a file into an existing patch,
+`0x1c398` writes one, and `0x177f4` reads only field 1. The storage class (vtable
+`0x60062fd4`) has `+0x10` save (`0x60124fc9`), load by name (`0x60124b39`) and load
+into a patch (`0x60124f39`). Its file system object, at storage `+0xc`, has:
+- `+0x04` open(`&{handle, ok}`, fs, `&path`, mode: 0 read, 1 write);
+- `+0x08` close;
+- `+0x0c` write(fs, handle, n, buf);
+- `+0x10` read(fs, handle, n, buf);
+- `+0x18` make a folder.
+
+There are two storages:
+- **Patches** (`S + 0x9c`, the registry wrapper): `<model name>/<patch name>.patch`,
+  for example `VAP/Init.patch`. The folder is the descriptor's name, created when
+  missing. The UI's Save goes through `0x600b1018(S, slot)` to its `+0x10`.
+- **Workspace** (`S + 0xa4`): the project's own copy of each slot's patch, as
+  `0.patch`, `1.patch` and `2.patch`, with no model folder.
+
+`0x600b1270(S, slot, out)` loads a slot's patch:
+1. It opens `<slot>.patch` from the Workspace.
+2. When the file's model id is not the slot's (or the file is missing), it loads
+   `<model>/<name>.patch` from Patches instead, falls back to Init, and writes the
+   result back to `<slot>.patch`.
+
+**Stock firmware is safe with an unknown model id** (emulator, an ACD slot):
+- A `0.patch` whose field 1 is 7 (not registered), or 4 (VAP), is rejected. The slot
+  plays ACD's Init patch.
+- A `0.patch` claiming 1 (ACD) but holding VAP's 60 values is accepted, and the slot
+  plays silence.
+
+So a custom engine must save its patches under a model id of its own, never the id of
+the model it stands in for.
+
+### Loading a project (`0x60116350`)
+
+1. `synth_slots_apply_project_q(S, records, 1)` (`0x600b2080`): polyphony, model (from
+   the index table) and patch name for each slot.
+   `synth_slot_set_model` returns early when the id is unchanged, so a slot on the same
+   id keeps its patch object.
+2. For each slot, `0x600b1270` loads its Workspace patch. When that fails, `0x600b17ec`
+   resets the slot.
+3. `0x600bce14` loads the rest of the project.
+
+A per-project setting read before step 1 can swap a model before the project's
+patches are parsed.
+
+### The synth settings screen (Model, Polyphony, …)
+
+`0x6011ae60` sets up the screen object `0x20020c74`. Its columns are Model, Polyphony,
+Gain, Panning, Reverb send, Delay send, and Load and Edit for the patch.
+
+**The Model list** (screen `+0xf8`) is a list control. It is created by `0x600d85e0`,
+constructed by `0x60105fac` (vtable `0x60046a2c`) and drawn by `0x6010652c`. Its data
+(screen `+0xfc`) has:
+- the item count (5) at `+4` and the selection at `+6`;
+- text items (`char **`) at `+0xc`;
+- image ids at `+0x18`. The screen sets `+0xc` to 0 and `+0x18` to `0x60061488` =
+  `{9, 10, 11, 12, 24}`.
+
+With ids, `0x6010645c` draws each item as a bitmap from the image table at
+`DAT_60106528` (0x14 bytes per image, ids below 0x24). The model names in that list are
+logos. With text items, `0x601062d4` draws them with `eve_cmd_text_q`. So a sixth name
+needs that list in text mode, or a draw hook that mixes the logos with text.
+
+**Model names elsewhere** are text from the registry: `0x600b16b8` builds the
+instrument title "Synth {} ({})" (for example "Synth 1 (VAP)") with the manager's
+`+0x34`, or "Off" when the slot has no voices.
+
+The instrument screens' headers include "Synth Parameters 1/2", "Synth Macros 2/2" and
+"Edit Patch: %s" (`0x600d5ffc`).
+
+Running these screens in the emulator needs the app's globals:
+- `*0x20027d18`: a clock object, whose vtable `+0` is called;
+- `*0x200209e4`: S;
+- `*0x200209f0`: the title bar object (its `+0x60` holds S).
+
+Their controls are created elsewhere, so nothing is drawn yet.
+
+### Found while building WAVE (`patch/synths` sy2, emulator)
+
+- **A patch's current values are a separate `vector<float>` at patch `+0x0c`.** The
+  entries' `+0x18` floats are the defaults (the Init values). The current values are
+  what new voices are pushed and what a patch file saves. They start as copies of the
+  defaults when the patch is made. Writing an entry's `+0x18` changes neither.
+- **The Macros come after the builder.** VAP's builder leaves the Macro vector empty
+  and puts a `std::function` at container `+0x2c` (manager `0x6014a7dd`, invoker
+  `0x6014d161`). ITCM code (return address `0x1d945`) makes the 8 Macro entries, then
+  calls it with `(the function's own storage, &Macros)`. It fills in the model's Macro
+  defaults: VAP's Attack → 19 and 23, Decay/Release → 20, 24, 22, 26, and so on. A
+  model with other Macros replaces that `std::function`.
+- **Registering a model:** `0x6012fd78(registry, id, &descriptor)` takes the pointer and
+  clears it. When the id already exists, it leaves the pointer, and the caller frees the
+  descriptor. The builder's `std::function` holds a plain function pointer: manager
+  `0x6014495d`, invoker `0x60144955`, called as `builder(patch, container)`. A
+  descriptor's `std::function`s use the firmware's managers, and an empty functor's
+  manager only answers "functor pointer" (operation 1).
+- **A value display returns its text as an `std::string`.** Up to 15 characters fit the
+  local buffer, so a display needs no allocation. Stock displays index their name
+  tables without bounds checks: Glide Mode with 14 hangs.
+- **Model id 3 in stock code:** the instrument title, the synth settings screen's setup
+  (`0x6011ae60`), patch save and load (Patches and Workspace), set_model and voice
+  creation all handle it. The record's model index is written only by the Model list
+  (`0x6011b634`). Applying records reads the index table, and nothing turns a live id
+  back into an index.
+- **`0x600b175c` resets a record; it doesn't copy the live slot.** It copies the slot's
+  default record (flash `0x6003a098` + 0x40 × slot), takes the Macro states from the
+  patch's Macros (entry `+0x24` → 0x3f or 0), and sets the name "Init". Section 17
+  calls it a copy of the live state, and `names_1.2.0.tsv` names it
+  `synth_slot_record_store`.
+- **Drawing text:** `eve_cmd_text_q` (`0x6011fa88` → `0x6011fa20`) writes `CMD_TEXT`
+  (`0xffffff0c`), `x | y << 16`, `font | options << 16` through the display's vtable
+  `+0x18`. It then hands the string to vtable `+0x40` (which returns the bytes written)
+  and advances by that plus 12 (`+0x14`). The emulator's fake display needs a `+0x40`
+  for text.
+- **The list control** (vtable `0x60046a2c`):
+  - `+0x24` (`0x60105edd`) takes the data.
+  - `+0` (`0x6010652d`) draws it. With image ids, the items are drawn by `0x6010645c`
+    (called at `0x60106606`); ids of `0x24` and up draw nothing.
+  - An item's image is centred in the column and on the row's centre line.
+
+### Found while building WAVE's LFOs and Edit Patch label (`patch/synths` sy3, emulator)
+
+- **VAP's LFO Ratio display reads another parameter.** Its invoker (`0x6014d008`) runs
+  as `(std::string *ret, functor, accessor, float *value)`. The functor holds Sync's
+  parameter index, and the accessor's vtable `+0` returns that parameter's value.
+  - Sync 0 (or no float back): the rate in Hz, `{:.2f} Hz` below 10, `{:.1f} Hz` from 10.
+  - Sync not 0: the value rounded and clamped to 0–15 picks a name from the table at
+    `0x60066cb0`: 1, 1/2 D, 1/2, 1/4 D, 1 T, 1/4, 1/8 D, 1/2 T, 1/8, 1/16 D, 1/4 T,
+    1/16, 1/8 T, 1/32, 1/16 T, 1/32 T.
+- **The Edit Patch screen's model logo** (set up by `0x6011e764`) is a label control
+  (`disp_create_label_q`, vtable `0x6004694c`), whose id the screen keeps at `+0x93`:
+  - Its data is a list of 6-byte icons: x and y (16-bit each), then the image id at
+    `+4`. An id of 0 draws nothing.
+  - The icon's id comes from the table `0x600615d8` = `{13, 14, 15, 16, 26}`, indexed
+    by the slot's model index (as the Model list's `0x60061488`).
+  - The label's text is set to `""` by `disp_ctrl_set_text` at `0x6011ea58`. The label
+    draws its text with `CMD_TEXT`, so a hook on that call can give it a name instead
+    of the logo.
+
+### Adding parameters to a model (`patch/synths` sy4, emulator)
+
+WAVE adds two parameters after VAP's 60 (the LFOs' Polarity). Everything that handles a
+patch's parameters works from the live count, with one constraint: the count must be the
+same after every build of a patch.
+
+- **The patch's per-parameter arrays** are sized once, when the patch is made, from the
+  count the builder leaves (ITCM, right after the first build at `0x1d776`):
+  - the values (`vector<float>`, patch `+0x0c`);
+  - `+0x30`: a float per parameter;
+  - `+0x3c`: 32 bytes (8 floats) per parameter;
+  - `+0x48`: a byte per parameter.
+
+  Loops over the parameters later (`0x16f14`, patch vtable `+0x38`, and the voice
+  pushes) take the count from the parameter vector. So a build that left more entries
+  than the first would make them write past these arrays.
+- **The builder runs more than once.** `0x1d2d0` runs the descriptor's builder, swaps in
+  the new Macros and frees the old ones. It runs twice while a patch is made (`0x1d776`,
+  `0x1db5e`), and from set_value on an entry whose byte `+0x24` is set (VAP: Sync, 30 and
+  34, as the Ratio display depends on it). Loading a patch file sets those too.
+- **VAP's builder resizes the vector to its 60 first:**
+  - a shorter one grows through `0x60148028(vector, n)` (`_M_default_append`);
+  - a longer one shrinks: the extra entries are destroyed (`0x60150362`: the display's
+    manager with "destroy", then the name).
+
+  It then fills each entry by index through `0x6014dcb0`, which checks the index against
+  the count and also writes VAP's per-parameter set handler. That table, at
+  `0x2002d1a4`, has 60 entries of 16 bytes, with a guard word at `+0x3c0`.
+  `vap_voice_set_param` indexes the same table, so no index past 59 may reach a VAP
+  voice.
+- **Growing the vector doubles its room** (libstdc++): 60 entries to 62 allocates 120
+  (6.7 KB). When that allocation fails, the append writes the entries from address 0 on,
+  as VAP's builder does after a failed allocation. In the 20,000-block stress run (busy
+  heap) it failed. WAVE's builder therefore makes a new patch's vector 62 long before
+  VAP's builder runs. VAP's then trims it to 60, which keeps the room.
+- **set_value** is patch vtable `+0x10` (`0x1d39d`): `(patch, index, float *value,
+  source)`. It stores `values[index]` without a bounds check. It rebuilds when the entry's
+  byte `+0x24` is set, and then hands the value to the voices (`0x17944`) unless patch
+  byte `+0xe0` is set. The loader passes source 2.
+- **Loading a patch file** goes through the patch storage's vtable `+0x0c` (`0x60124f39`):
+  `(storage, &path, patch, 1)`, which returns 1 when loaded.
+  - It is called for a slot's Workspace `<slot>.patch` (`0x600b12d2`) and for
+    `Patches/<model>/<name>.patch` (`0x600b0e9c`).
+  - The parser (`0x18790`) then calls set_value for the first min(file values, the
+    patch's count) values (`0x18324`).
+  - Extra values in the file are ignored (stock firmware: 62 values into VAP's 60).
+  - The patch's last values keep what they were before the load when the file holds
+    fewer.
+- **The pages (container `+0x50`) are the Edit Patch screen's** (hardware, `sy4`): its
+  tiles (Osc, Filter, Amp Env, Env 1, Env 2, LFO 1, LFO 2, Mod, Voice, then the Macros
+  M1-M7) open lists of each page's cells, empty cells skipped. VAP's LFO 1 page
+  `{-1, 30, 27, 28, 29}` shows Sync, Ratio, Waveform, Retrigger. (Earlier notes here call
+  them the Macro editor's pages.) The tile labels don't come from the pages' names: they
+  read Env 1 and Env 2 where WAVE names the pages Mod Envelope and Filter Envelope.
+- **An entry's flag bytes:** `+0x21` picks the starting value of the patch's `+0x30`
+  array (1.0 when set; `0x16f14`). `+0x22` is "stepped" and `+0x23` the MIDI CC.
+  `+0x24` is "rebuild on change".

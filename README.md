@@ -44,8 +44,16 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   condition on how many times the pattern has played: `1st`, `!1s` (not the first), or
   `1:2` … `8:8` (the A-th pass of every B), counted per track from the start of
   playback or of the pattern. The idea comes from Psygoo's CT6. Tested on hardware. See [patch/condtrig/README.md](patch/condtrig/README.md).
-- **all**: all seven mods above in one firmware (version text `1.2.0-MCT`), from
-  [patch/all/patch.json](patch/all/patch.json). Tested on hardware, made with the web
+- **synths**: WAVE, a wavetable synth that takes the place of one of the five synth
+  models per project (Config → Project Settings → Synth Engines → WAVE replaces). The
+  Model list then shows WAVE, with its own controls: two oscillators on 7 wavetable
+  banks, a super saw or a saw, Digital mode, ladder, OB and SVF filters, three
+  envelopes, two LFOs (bipolar or unipolar) and a 6-slot Mod Matrix. Its patches save
+  and load like any model's. Tested on hardware. See
+  [patch/synths/README.md](patch/synths/README.md).
+- **all**: all eight mods above in one firmware (version text `1.2.0-MSY`), from
+  [patch/all/patch.json](patch/all/patch.json). Tested in the emulator; the previous
+  all (the seven before synths, `1.2.0-MCT`) was tested on hardware, made with the web
   patcher.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
@@ -85,7 +93,7 @@ page only offers a download when its output is byte-identical to what
 `tools/patch_ptf.py` makes. See "In your browser" in [docs/PATCHING.md](docs/PATCHING.md).
 
 Each mod can be installed on its own, or several can be combined into one firmware.
-`patch/all` combines all seven, and you can make your own mix, including
+`patch/all` combines all eight, and you can make your own mix, including
 patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.md).
 
 ## Layout
@@ -103,7 +111,8 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/swing/` | Global Swing per project |
 | `patch/visualizer/` | Pad visualizer during playback |
 | `patch/condtrig/` | Conditional trigs: Chance FX values above 100 as conditions on the pass count |
-| `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer in one firmware |
+| `patch/synths/` | WAVE, a wavetable synth in place of one synth model per project; its table generator `gen_wavetables.py` |
+| `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
 | `patch/itcmtest/` | No-op test of ITCM hooks (stubs in the ITCM tail, loaded by the startup copy table) |
@@ -132,6 +141,8 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/test_swing.py` | swing timing (the sequencer run in time, step lengths measured), Config menu and settings-file tests |
 | `tools/emu/test_visualizer.py` | visualizer: the four-button switch, column kept, pads handed over and back, hiding, frames per take |
 | `tools/emu/test_condtrig.py` | condtrig: every condition in both columns, what a skipped step drops, counting and resets, encoder and grid text, Chance 0–100 as stock, cost |
+| `tools/emu/synth_rig.py` | The firmware's synth system (host, slots, voices, the audio graph) driven block by block, for the synth tools |
+| `tools/emu/test_synths.py` | synths: stock output unchanged, the swap, the WAVE model and its pages, Model list and Edit Patch drawing, settings and patch files, oscillators, filters, envelopes, LFOs and Mod Matrix, banks, voices, stress, and WAV renders |
 | `tools/emu/test_itcmtest.py` | itcmtest: the ITCM stubs after the boot copy, Chance FX and count-in playing exactly as stock through the hooks |
 | `tools/emu/test_interpolate.py` | interpolate ramp, MIDI-rate, cost, Config menu and settings-file tests, through the real audio block |
 | `tools/emu/seq_timing.py` | Run the stock sequencer on test patterns and print the MIDI it sends, with timing |
