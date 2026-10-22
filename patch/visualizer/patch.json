@@ -37,6 +37,14 @@
       "note": "pad LED object vtable: setPad 0x600a1bf1 -> mt_vz_set_pad (the firmware's pad writes are dropped while the visualizer shows)"
     },
     {
+      "at": "0x600373B8",
+      "old": "31290960",
+      "to": "mt_vz_flush",
+      "next": "mt_vz_next_flush",
+      "thumb": true,
+      "note": "pad LED driver vtable: flush 0x60092931 -> mt_vz_flush (while the visualizer shows, only the changed brightness bytes go out over I2C)"
+    },
+    {
       "at": "0x600403DC",
       "old": "991f0e60",
       "to": "mt_vz_pattern_update",
@@ -81,7 +89,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-vz2"
+      "note": "version text 1.2.0-vz5"
     }
   ]
 }

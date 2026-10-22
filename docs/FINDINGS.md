@@ -1425,6 +1425,15 @@ the file off the card should bring back the stock effect.
   `pad + (pad / 12) * 4`, sets or clears the pad's enable bit, and marks the frame dirty.
 - **Flushing.** The main loop's I2C service scheduler (`0x600a0d70` on the list at
   `0x2000ba4c`, every 500 timer ticks) calls the flush, which sends the frame when dirty.
+  It blocks the main loop while it runs. It first checks 13 function-page registers
+  (`0x600927f8`: for each, select page `0x0B`, read the register, rewrite it if it differs
+  from the copy at +`0x160`), then selects the frame page (+`0x99`) and writes all 180
+  bytes from register 0 (enables, blink, PWM): about 28 transactions and 260 bytes on the
+  400 kHz bus (the LPI2C master configs at `0x600373e0` hold 400000 for both buses).
+  Bus writes are the bus object's vtable +`0xc` (bus, address, register, 1, buffer,
+  length), reads +`0x10`; both return 0 when done. If the page select fails, the flush
+  re-initialises the chip (`0x600928f8`). Updating the pads every frame this way made the
+  screen lag, so `patch/visualizer` sends only the changed PWM bytes while it shows.
 - **The app's interface.** The pad LED object at board + `0x450` (`0x2000c32c`) has a
   vtable with one entry, the word at `0x60038298` = setPad `0x600a1bf1` (obj, pad, on,
   level). It passes the call to the driver. Board vtable slot +`0x28` (`0x600a1c8d`)

@@ -8,7 +8,10 @@ app_audio_block, 2 ms at a time), the Pattern screen's update method is called e
 timer object gives the milliseconds, and the four stock column button callbacks are
 replaced by stand-ins that select the column and set the screen's "held" flag as the
 stock ones do, and log their calls. What the pads show is read back from the real pad
-LED driver's PWM frame, which the stock setPad writes.
+LED driver's PWM frame, which the stock setPad writes. The driver's I2C bus is a fake that
+logs every transaction and keeps what the chip would hold; the driver's flush (the
+patched vtable word) is called after each screen update while a pad has changed, as the
+main loop's scheduler does.
 
 Checks:
 - Stopped: the four buttons work as in stock firmware; the visualizer doesn't start.
@@ -20,6 +23,10 @@ Checks:
   until all four are up; then the buttons work again.
 - Record on, holding a bottom-row button (Pattern: the patterns on the pads), performance
   mode, stopping and leaving the screen hide it.
+- I2C: while it shows, each flush after the first sends only the changed brightness
+  bytes in one burst (no register reads), the chip ends up with exactly the driver's
+  frame and every pad enabled, and the bus is busy a small share of the time; hidden,
+  the stock flush runs.
 - Deterministic: two fresh plays of the same pattern give the same frames (to a level,
   as a step may land one audio block apart); a later pass of the loop gives different ones.
 """
@@ -50,6 +57,10 @@ REC, COLUMN, HELD = FIELDS + 0x254, FIELDS + 0x255, FIELDS + 0x4C7
 PAD_MODE = FIELDS + 0x354           # int8: -1 normal, 0 patterns (Pattern held), 1, 2
 SETTINGS = st.SETTINGS
 PATTERN_UPDATE_SLOT, PATTERN_UPDATE = 0x600403DC, 0x600E1F98
+FLUSH_SLOT = 0x600373B8             # pad LED driver vtable: flush
+DRV_DIRTY = 0x14D
+I2C_BIT_S = 1 / 400_000             # the pad bus runs at 400 kHz
+I2C_TXN_S = 30e-6                   # start, address, stop and driver overhead per transaction (estimate)
 BUTTON_SLOTS = [0x600DF2DC, 0x600DF2E0, 0x600DF2E4, 0x600DF2E8]
 STOCK_BUTTONS = [0x600D20AC, 0x600D4494, 0x600E308C, 0x600E2FAC]
 NAMES = ["Note", "Instrument", "FX1", "FX2"]
@@ -89,6 +100,20 @@ class Rig:
         self.advance = bl_target(image, 0x60000000, AUDIO_CALL) | 1
         self.gamma = {v: i for i, v in enumerate(m.uc.mem_read(GAMMA, 32))}
         self.cur, self.nxt = self.pattern(), self.pattern()
+        # the fake I2C bus: write (vtable +0xc) and read (+0x10) of (bus, addr, reg, 1, buf, len)
+        self.txns: list[tuple[str, int, int]] = []
+        self.chip = bytearray(0xB4)                 # frame page 0: enables, blink, PWM
+        self.chip_page = 0
+        bus, bvt = m.alloc(0x10), m.alloc(0x40)
+        m.w32(bus, bvt)
+        nothing = m.add_stub(lambda mm: 0)
+        for k in range(16):
+            m.w32(bvt + 4 * k, nothing)
+        m.w32(bvt + 0xC, m.add_stub(self._i2c_write))
+        m.w32(bvt + 0x10, m.add_stub(self._i2c_read))
+        m.w32(DRIVER + 4, bus)
+        self.flush = m.r32(FLUSH_SLOT)
+        self.flushes: list[tuple[bool, list]] = []  # (showing, its transactions)
         m.w8(COLUMN, 1)
         m.w8(PAD_MODE, 0xFF)                    # no bottom-row pad view
 
@@ -105,6 +130,21 @@ class Rig:
             if s == 7:
                 st.set_step(m, p, 3, s, -1, 4, (9, 40))   # FX only
         return p
+
+    def _i2c_write(self, mm) -> int:
+        reg, buf, n = mm.arg(2), mm.arg(4), mm.arg(5)
+        data = bytes(mm.uc.mem_read(buf, n))
+        self.txns.append(("w", reg, n))
+        if reg == 0xFD:
+            self.chip_page = data[0]
+        elif self.chip_page == 0 and reg + n <= 0xB4:
+            self.chip[reg:reg + n] = data
+        return 0
+
+    def _i2c_read(self, mm) -> int:
+        self.txns.append(("r", mm.arg(2), mm.arg(5)))
+        mm.write(mm.arg(4), bytes(mm.arg(5)))
+        return 0
 
     def _stock_button(self, col: int, state: int) -> int:
         m = self.m
@@ -142,6 +182,10 @@ class Rig:
             if screen and self.ms >= next_update:
                 next_update += UPDATE_MS
                 m.call(self.update, 0x20021770, 0, 0, 0)
+                if m.uc.mem_read(DRIVER + DRV_DIRTY, 1)[0]:
+                    self.txns = []
+                    m.call(self.flush, DRIVER)
+                    self.flushes.append((self.showing(), self.txns))
                 if frames is not None and self.m.r32(VZ + LAST_FRAME) == self.ms:
                     clock = struct.unpack("<f", bytes(m.uc.mem_read(VZ + 4, 4)))[0]
                     frames.append((round(clock, 3), self.pads()))   # a frame was just drawn
@@ -247,6 +291,38 @@ def button_checks(r: Rig) -> None:
     m.w8(COLUMN, 1)
 
 
+def i2c_checks(r: Rig) -> None:
+    m = r.m
+    print("I2C cost")
+    r.flushes.clear()
+    r.run(4.0)
+    shown = [t for showing, t in r.flushes if showing][1:]
+    reads = sum(1 for t in shown for kind, _, _ in t if kind == "r")
+    most = max(len(t) for t in shown)
+    check(reads == 0 and most <= 2,
+          f"showing: {len(shown)} flushes in 4 s, each at most {most} writes (page select + brightness), {reads} reads")
+    pwm = bytes(m.uc.mem_read(DRIVER + 8, 144))
+    check(bytes(r.chip[0x24:0xB4]) == pwm, "the chip holds exactly the driver's frame")
+    enabled = all(r.chip[(p + p // 12 * 4) >> 3] >> ((p + p // 12 * 4) & 7) & 1 for p in range(48))
+    check(enabled, "every pad enabled (dark pads are brightness 0)")
+    nbytes = sum(n + 2 for t in shown for _, _, n in t)
+    ntx = sum(len(t) for t in shown)
+    busy = (nbytes * 9 * I2C_BIT_S + ntx * I2C_TXN_S) / 4.0
+    r.flushes.clear()
+    m.w8(REC, 1)                                # hidden: the stock flush
+    r.run(0.1)
+    stock = [t for showing, t in r.flushes if not showing]
+    stock_tx = max(len(t) for t in stock) if stock else 0
+    stock_bytes = max(sum(n + 2 for _, _, n in t) for t in stock) if stock else 0
+    check(stock_tx > 20 and bytes(r.chip[0x24:0xB4]) == bytes(m.uc.mem_read(DRIVER + 8, 144)),
+          f"hidden: the stock flush ({stock_tx} transactions, {stock_bytes} bytes), the chip holds the stock pads")
+    stock_busy = (stock_bytes * 9 * I2C_BIT_S + stock_tx * I2C_TXN_S) * 1000 / 30
+    check(busy < 0.05, f"showing: the pad bus busy {busy:.1%} of the time"
+          f" (the stock flush at the same frame rate would be {stock_busy:.0%})")
+    m.w8(REC, 0)
+    r.run(0.1)
+
+
 def hide_checks(r: Rig) -> None:
     m = r.m
     print("hiding")
@@ -304,9 +380,9 @@ def determinism_checks(r: Rig) -> None:
     check(len(common) > 100 and worst <= 2,
           f"two fresh plays: the same frames ({same} of {len(common)} identical, the rest within {worst} levels)")
     later = []
-    for c, f in first.items():                  # the frame one loop later (to 10 ms)
+    for c, f in first.items():                  # the frame one loop later (to half a frame)
         if c < loop:
-            near = [c2 for c2 in first if abs(c2 - c - loop) < 0.011]
+            near = [c2 for c2 in first if abs(c2 - c - loop) < 0.016]
             if near:
                 later.append((f, first[near[0]]))
     differ = sum(1 for a, b in later if a != b)
@@ -321,6 +397,14 @@ def main() -> int:
     r = Rig(ptf)
     button_checks(r)
     hide_checks(r)
+    r.start()
+    r.run(0.1)
+    if not r.showing():                         # still switched on from before: it shows at once
+        enter(r)
+        release_all(r)
+    i2c_checks(r)
+    r.stop()
+    r.run(0.1)
     determinism_checks(r)
     print(f"{len(failures)} failure(s)")
     return 1 if failures else 0

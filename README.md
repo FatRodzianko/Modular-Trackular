@@ -45,7 +45,9 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   `1:2` … `8:8` (the A-th pass of every B), counted per track from the start of
   playback or of the pattern. The idea comes from Psygoo's CT6. Tested on hardware. See [patch/condtrig/README.md](patch/condtrig/README.md).
 - **all**: all seven mods above in one firmware (version text `1.2.0-MCT`), from
-  [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
+  [patch/all/patch.json](patch/all/patch.json). Each mod is tested on hardware, and so was
+  this bundle with the previous visualizer (vz2); with vz5 it's not yet tested as one
+  firmware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
   future patches. See [patch/ramdiag/README.md](patch/ramdiag/README.md).

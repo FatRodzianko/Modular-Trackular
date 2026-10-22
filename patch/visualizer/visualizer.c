@@ -23,8 +23,17 @@
  *    keeps its layers, so the stock pads come back exactly when it stops); the
  *    visualizer writes through the original method.
  *  - Drawing: mt_vz_pattern_update, on the Pattern screen's update method (vtable word
- *    0x600403dc, chained), draws a frame every 20 ms while it shows, and hides it when
+ *    0x600403dc, chained), draws a frame every 30 ms while it shows, and hides it when
  *    playback stops, record goes on or performance mode starts.
+ *  - Sending the frame: the pad LED driver's flush (its one vtable word, 0x600373b8 =
+ *    0x60092931, chained) runs from the main loop whenever a pad changed, and it blocks
+ *    the main loop while it talks to the IS31FL3731 over I2C: it reads back and checks
+ *    13 of the chip's control registers, one transaction each, then sends all 180 bytes
+ *    of enables, blink bits and brightness. Fine for the stock pads, which change now
+ *    and then; at a frame every few tens of ms it starves the screen. So while the
+ *    visualizer shows, mt_vz_flush sends only the brightness bytes that changed, in one
+ *    burst (every pad stays enabled; dark is brightness 0). The first flush after it
+ *    appears, and every flush once it's hidden, is the stock one.
  *  - The buttons: the Pattern screen's Note, Instrument, FX1 and FX2 callbacks (flash
  *    literals 0x600df2dc..0x600df2e8, used only when that screen registers them) are
  *    wrapped. With two or more of the four held while it could show, the screen's
@@ -43,7 +52,7 @@
 #include <stdint.h>
 
 #ifndef VIS_VERSION
-#define VIS_VERSION "vz2"
+#define VIS_VERSION "vz5"
 #endif
 
 /* ---- firmware addresses (1.2.0) -------------------------------------------------- */
@@ -83,12 +92,25 @@
 #define PS_HELD             0x4C7u          /* 4 bytes: column button held (long press) */
 #define PS_PAD_MODE         0x354u          /* int8: -1 normal; 0 patterns (Pattern held), 1, 2 */
 
+/* The IS31FL3731 driver object (pad LED object + 4) */
+#define DRV_BUS             0x04u           /* pointer: the I2C bus object (vtable +0xc: write) */
+#define DRV_PWM             0x08u           /* 144 brightness bytes, slot = pad + pad / 12 * 4 */
+#define DRV_ADDR            0x98u           /* byte: I2C address (0x74) */
+#define DRV_PAGE            0x99u           /* byte: the frame page the PWM bytes go to */
+#define DRV_DIRTY           0x14Du          /* byte: a pad changed since the last flush */
+#define CHIP_PAGE_REG       0xFDu
+#define CHIP_PWM_REG        0x24u
+#define BUS_WRITE           0x0Cu           /* bus vtable offset */
+
 typedef void (*advance_fn)(void *seq, float seconds);
 typedef uint32_t (*advance_step_fn)(void *seq, uint32_t track);
 typedef void (*update_fn)(void *screen, void *a1, void *a2, void *a3);
 typedef void (*set_pad_fn)(void *leds, uint32_t pad, uint32_t on, uint32_t level);
 typedef void (*button_fn)(uint32_t state);
 typedef uint32_t (*ms_fn)(void *timer);
+typedef uint32_t (*flush_fn)(void *driver);
+typedef uint32_t (*i2c_write_fn)(void *bus, uint32_t addr, uint32_t reg, uint32_t reg_size,
+                                 const void *buf, uint32_t len);     /* 0 done, else failed */
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
  * compiler must read them, not assume the 0 they are linked with. */
@@ -101,10 +123,11 @@ CHAIN_WORD(mt_vz_next_note);                /* Note button 0x600d20ad */
 CHAIN_WORD(mt_vz_next_instrument);          /* Instrument button 0x600d4495 */
 CHAIN_WORD(mt_vz_next_fx1);                 /* FX1 button 0x600e308d */
 CHAIN_WORD(mt_vz_next_fx2);                 /* FX2 button 0x600e2fad */
+CHAIN_WORD(mt_vz_next_flush);               /* pad LED driver flush 0x60092931 */
 
 /* ---- tuning ---------------------------------------------------------------------- */
 
-#define FRAME_MS            20u             /* a frame every 20 ms while it shows */
+#define FRAME_MS            30u             /* a frame every 30 ms while it shows */
 #define SCREEN_GONE_MS      200u            /* no Pattern screen update for this long: elsewhere */
 #define BUTTONS_STALE_MS    1500u           /* no column button event for this long: forget them */
 #define RIPPLES             12u
@@ -153,6 +176,9 @@ struct vz_state {
     uint8_t saved_col;                      /* the column before the first press */
     uint8_t pad1[2];
     uint8_t sent[PADS];                     /* level last written per pad (0xFF: none) */
+    uint8_t dirty_lo, dirty_hi;             /* PWM slots changed since the last flush */
+    uint8_t full_flush;                     /* the next flush is the stock one (enables too) */
+    uint8_t pad2;
 };
 static struct vz_state vz_state_ram __attribute__((section(".mt_ram")));
 #define VZ (&vz_state_ram)
@@ -183,6 +209,9 @@ static void vz_init_if_needed(void)         /* RAM outside .bss holds garbage at
     VZ->saved_col = 0;
     for (uint32_t i = 0; i < PADS; i++)
         VZ->sent[i] = 0xFF;
+    VZ->dirty_lo = 0xFF;
+    VZ->dirty_hi = 0;
+    VZ->full_flush = 1;
     VZ->magic = VZ_MAGIC;
 }
 
@@ -354,11 +383,21 @@ static void *vz_leds(void)
     return *(void *const volatile *)(FW_PAD_MGR + MGR_LEDS);
 }
 
+/* While it shows, every pad stays enabled (dark is brightness 0), so only brightness
+ * bytes change; the slots that did are noted for mt_vz_flush. */
 static void vz_put(uint32_t pad, uint32_t level)
 {
     void *leds = vz_leds();
-    if (leds)
-        ((set_pad_fn)mt_vz_next_set_pad)(leds, pad, level != 0, level);
+    if (!leds)
+        return;
+    ((set_pad_fn)mt_vz_next_set_pad)(leds, pad, VZ->showing ? 1u : level != 0, level);
+    if (VZ->showing) {
+        uint32_t slot = pad + pad / PAD_COLS * 4u;
+        if (slot < VZ->dirty_lo)
+            VZ->dirty_lo = (uint8_t)slot;
+        if (slot > VZ->dirty_hi)
+            VZ->dirty_hi = (uint8_t)slot;
+    }
 }
 
 /* Back to the stock pads: what the pad manager's layers hold now. */
@@ -370,6 +409,35 @@ static void vz_hide(void)
         vz_put(p, a > b ? a : b);
         VZ->sent[p] = 0xFF;
     }
+}
+
+/* the pad LED driver's flush (vtable word 0x600373b8, chained), called from the main
+ * loop while a pad has changed: while the visualizer shows, only the changed
+ * brightness bytes go out, in one burst after the page select */
+uint32_t mt_vz_flush(void *driver)
+{
+    uint8_t *d = (uint8_t *)driver;
+    if (VZ->magic == VZ_MAGIC && VZ->showing && !VZ->full_flush && d[DRV_DIRTY]) {
+        void *bus = *(void **)(d + DRV_BUS);
+        i2c_write_fn write = bus ? (i2c_write_fn)(*(uint32_t **)bus)[BUS_WRITE / 4u] : 0;
+        uint32_t lo = VZ->dirty_lo, hi = VZ->dirty_hi;
+        if (write && (lo > hi || hi >= 144u
+                      || (write(bus, d[DRV_ADDR], CHIP_PAGE_REG, 1, d + DRV_PAGE, 1) == 0
+                          && write(bus, d[DRV_ADDR], CHIP_PWM_REG + lo, 1, d + DRV_PWM + lo, hi - lo + 1u) == 0))) {
+            VZ->dirty_lo = 0xFF;
+            VZ->dirty_hi = 0;
+            d[DRV_DIRTY] = 0;
+            return 1;
+        }
+        VZ->full_flush = 1;                 /* a write failed: the stock flush recovers */
+    }
+    uint32_t r = ((flush_fn)mt_vz_next_flush)(driver);
+    if (VZ->magic == VZ_MAGIC && r && !d[DRV_DIRTY]) {
+        VZ->full_flush = 0;                 /* everything sent: from now on, the short way */
+        VZ->dirty_lo = 0xFF;
+        VZ->dirty_hi = 0;
+    }
+    return r;
 }
 
 /* the pad LED object's setPad (vtable word 0x60038298, chained): the firmware's own pad
@@ -477,6 +545,7 @@ void mt_vz_pattern_update(void *screen, void *a1, void *a2, void *a3)
     int show = VZ->armed && vz_can_show(now);
     if (show && !VZ->showing) {
         VZ->showing = 1;
+        VZ->full_flush = 1;                 /* the first frame enables every pad: send it all */
         for (uint32_t i = 0; i < PADS; i++)
             VZ->sent[i] = 0xFF;
         VZ->last_frame = now - FRAME_MS;

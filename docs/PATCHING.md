@@ -77,9 +77,10 @@ must be byte-identical to these builds:
 | interpolate | `TrackerPlus_ip5.ptf` | `1.2.0-ip5` | tested (with colorsong and humanize) | `f3d98eb18f5852dc718d41ba9311e813d056d1ab5b37b1252e87cf0341c0942a` |
 | masterfx | `TrackerPlus_mf4.ptf` | `1.2.0-mf4` | tested | `0f3f9cd0c0c00ceed7651aacece96bd52dd084991e82f9e03d814630b898df1a` |
 | swing | `TrackerPlus_sw1.ptf` | `1.2.0-sw1` | tested | `510fe9ad078ed737f1cf3c63ea706a8a0e50f978c9d115bfbc773f4252a0e8d7` |
-| visualizer | `TrackerPlus_vz2.ptf` | `1.2.0-vz2` | tested | `8b3ddcb09de46829799f542cf9d7423d95d4f39aa76db44881f5c18eb0361736` |
+| visualizer | `TrackerPlus_vz5.ptf` | `1.2.0-vz5` | tested | `46970bb1689414fd711cadc6cfd149da458145aafcd9f6d274f10759dce9bdbd` |
+| the previous visualizer (the same animation, every pad update a full flush) | `TrackerPlus_vz2.ptf` | `1.2.0-vz2` | tested | `8b3ddcb09de46829799f542cf9d7423d95d4f39aa76db44881f5c18eb0361736` |
 | condtrig | `TrackerPlus_ct1.ptf` | `1.2.0-ct1` | tested | `539328948185c4a02577ce62181fc4143a5e86dc06a33e61b469d52b21da8197` |
-| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | tested | `3682cbe40c8a546de30b02cc7378501d53a65c8379e7fa55958beb6943f632fb` |
+| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | not yet as one firmware (each mod tested; the same with visualizer vz2 tested) | `6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437` |
 | the previous all (the same without condtrig) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
@@ -199,7 +200,7 @@ python tools/emu/test_humanize.py build/TrackerPlus_hz8.ptf
 python tools/emu/test_interpolate.py build/TrackerPlus_ip5.ptf
 python tools/emu/test_masterfx.py build/TrackerPlus_mf4.ptf path/to/TrackerPlus_1.2.0.ptf out/fx_wav
 python tools/emu/test_swing.py build/TrackerPlus_sw1.ptf path/to/TrackerPlus_1.2.0.ptf
-python tools/emu/test_visualizer.py build/TrackerPlus_vz2.ptf
+python tools/emu/test_visualizer.py build/TrackerPlus_vz5.ptf
 python tools/emu/test_condtrig.py build/TrackerPlus_ct1.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_itcmtest.py build/TrackerPlus_it1.ptf path/to/TrackerPlus_1.2.0.ptf
 ```

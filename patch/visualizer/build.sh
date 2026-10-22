@@ -30,7 +30,7 @@ CFLAGS=(-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -Os -std=c11
 link() {                               # link <linker script> <elf> <map>
     "$ARM_GCC_BIN/arm-none-eabi-gcc" -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 \
         -nostdlib -nostartfiles -T "$1" -Wl,--gc-sections \
-        -Wl,--undefined=mt_vz_seq_advance -Wl,--undefined=mt_vz_advance_step -Wl,--undefined=mt_vz_set_pad -Wl,--undefined=mt_vz_pattern_update -Wl,--undefined=mt_vz_note -Wl,--undefined=mt_vz_instrument -Wl,--undefined=mt_vz_fx1 -Wl,--undefined=mt_vz_fx2 -Wl,--undefined=mt_version_fmt \
+        -Wl,--undefined=mt_vz_seq_advance -Wl,--undefined=mt_vz_advance_step -Wl,--undefined=mt_vz_set_pad -Wl,--undefined=mt_vz_pattern_update -Wl,--undefined=mt_vz_note -Wl,--undefined=mt_vz_instrument -Wl,--undefined=mt_vz_fx1 -Wl,--undefined=mt_vz_fx2 -Wl,--undefined=mt_vz_flush -Wl,--undefined=mt_version_fmt \
         -Wl,-Map="$3" "$OUT/visualizer.o" -o "$2"
 }
 link "$HERE/link.ld" "$OUT/visualizer.elf" "$OUT/visualizer.map"
