@@ -52,8 +52,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   and load like any model's. Tested on hardware. See
   [patch/synths/README.md](patch/synths/README.md).
 - **all**: all eight mods above in one firmware (version text `1.2.0-MSY`), from
-  [patch/all/patch.json](patch/all/patch.json). Tested in the emulator; the previous
-  all (the seven before synths, `1.2.0-MCT`) was tested on hardware, made with the web
+  [patch/all/patch.json](patch/all/patch.json). Tested on hardware, made with the web
   patcher.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for

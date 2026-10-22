@@ -81,7 +81,7 @@ must be byte-identical to these builds:
 | the previous visualizer (the same animation, every pad update a full flush) | `TrackerPlus_vz2.ptf` | `1.2.0-vz2` | tested | `8b3ddcb09de46829799f542cf9d7423d95d4f39aa76db44881f5c18eb0361736` |
 | condtrig | `TrackerPlus_ct1.ptf` | `1.2.0-ct1` | tested | `539328948185c4a02577ce62181fc4143a5e86dc06a33e61b469d52b21da8197` |
 | synths | `TrackerPlus_sy4.ptf` | `1.2.0-sy4` | tested | `2fca2e07bb19ef4e539328152af27c173067ec6088604c45d9f28b96aa876e97` |
-| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths) | `TrackerPlus_MSY.ptf` | `1.2.0-MSY` | emulator only (synths was tested on hardware with the six before condtrig) | `f3fee2dd07e88d3b8810cd1d9b371e0636f7ad4920c777f021b28da2afd2fd99` |
+| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths) | `TrackerPlus_MSY.ptf` | `1.2.0-MSY` | tested (made with the web patcher) | `f3fee2dd07e88d3b8810cd1d9b371e0636f7ad4920c777f021b28da2afd2fd99` |
 | the previous all (the same without synths) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | tested | `6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437` |
 | the all before that (without condtrig and synths) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
