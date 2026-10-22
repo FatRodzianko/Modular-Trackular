@@ -56,6 +56,9 @@ the same "args".
   (as a Thumb-2 BL, or as the symbol address for words).
 - The patch binaries are appended after the stock image. Gaps up to each base address
   are filled with 0xFF and written as data, so the output has no hole.
+- An output that would end within the first 256 bytes of a 4 KB flash sector gets
+  0xFF bytes up to 16 bytes into the sector's second page: the bootloader doesn't
+  erase a sector whose data stop in its first page (FINDINGS section 26).
 - The stock record layout is kept (changed records get new data and checksums), the
   new data goes in 16-byte records before the start/end records, and the output is
   read back and compared with the intended image.
@@ -74,6 +77,8 @@ from ptf import Record, encode_ptf, read_ptf  # noqa: E402
 VERSION_PREFIX = b"%d.%d.%d-"
 VERSION_MAX = 3                     # "1.2.0-" + 3 characters: longer text doesn't show
 ALIGN = 16                          # where a patch may start (keeps 4-byte literal alignment)
+FLASH_SECTOR = 0x1000               # flash erase sector
+FLASH_PAGE = 0x100                  # flash program page
 
 # Free RAM for patches (FINDINGS section 15), all checked on hardware with ramdiag.
 # name: (start, end, flags). "startup": usable before main; "opt_in": only when a spec
@@ -434,6 +439,12 @@ def main() -> int:
     if version is not None:
         vaddr, text = version_text
         tail += b"\xff" * (vaddr - stock_end - len(tail)) + text
+    # Never end inside the first 256-byte page of a 4 KB flash sector: the bootloader
+    # leaves such a sector unerased, so that last page comes out ANDed with what an
+    # earlier firmware left there (FINDINGS section 26). Pad with 0xFF into page 1.
+    end = stock_end + len(tail)
+    if 0 < end % FLASH_SECTOR <= FLASH_PAGE:
+        tail += b"\xff" * (end - end % FLASH_SECTOR + FLASH_PAGE + ALIGN - end)
 
     patched = ptf
     patched.image = image                         # same length as stock; records re-encoded

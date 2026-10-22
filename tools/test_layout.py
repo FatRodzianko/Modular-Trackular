@@ -38,6 +38,8 @@ For each output it reads the image back and its .map.json, and checks:
     last patch's hook, the stubs' bytes follow the last patch (16-byte aligned, 0xFF
     gap), startup copy table entry 3 copies them there (and is stock without ITCM
     hooks), and no RAM block overlaps them;
+  - the image doesn't end in the first 256-byte page of a flash sector (the patcher
+    pads it: the bootloader leaves such a sector unerased);
   - the version text is the bundle's (or the patch's own when alone).
 The emulator tests (tools/emu/test_*.py) then check that the firmware works.
 """
@@ -191,6 +193,10 @@ def verify(label: str, out: Path, specs: list[Path], version: str | None, stock:
         end = flash_at + len(stubs)
     else:
         check(entry == STUB_ENTRY_STOCK, "no ITCM hooks: copy table entry 3 is stock")
+    img_end = base0 + len(img)
+    check(not 0 < img_end % 0x1000 <= 0x100,
+          f"the image ends at {img_end:#x}, not in the first 256-byte page of a flash sector "
+          f"(the bootloader leaves such a sector unerased)")
     vptr =struct.unpack_from("<I", img, 0x600CBF9C - base0)[0]
     text = img[vptr - base0:].split(b"\0")[0].decode()
     if version:

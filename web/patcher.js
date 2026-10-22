@@ -12,6 +12,8 @@
 export const VERSION_PREFIX = "%d.%d.%d-";
 export const VERSION_MAX = 3;
 export const ALIGN = 16;
+export const FLASH_SECTOR = 0x1000;   // flash erase sector, as in tools/patch_ptf.py
+export const FLASH_PAGE = 0x100;      // flash program page
 
 // Same as RAM_REGIONS in tools/patch_ptf.py (the harness checks they agree).
 export const RAM_REGIONS = {
@@ -583,7 +585,13 @@ export async function patchFirmware({ stockBytes, spec, specUrl, io, outName, sh
     const [vaddr, text] = versionText;
     tailChunks.push(ff(vaddr - stockEnd - tailLen), text);
   }
-  const tail = concat(tailChunks);
+  let tail = concat(tailChunks);
+  // Never end inside the first 256-byte page of a 4 KB flash sector: the bootloader
+  // leaves such a sector unerased (FINDINGS section 26). Pad with 0xFF into page 1.
+  const tailEnd = stockEnd + tail.length;
+  if (tailEnd % FLASH_SECTOR > 0 && tailEnd % FLASH_SECTOR <= FLASH_PAGE) {
+    tail = concat([tail, ff(tailEnd - (tailEnd % FLASH_SECTOR) + FLASH_PAGE + ALIGN - tailEnd)]);
+  }
 
   // The tail as 16-byte data records (+ type 04 records when the upper half changes).
   const endRecords = ptf.records.filter((r) => r.kind === 5 || r.kind === 1);

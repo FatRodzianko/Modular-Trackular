@@ -2173,3 +2173,29 @@ same after every build of a patch.
 - **An entry's flag bytes:** `+0x21` picks the starting value of the patch's `+0x30`
   array (1.0 when set; `0x16f14`). `+0x22` is "stepped" and `+0x23` the MIDI CC.
   `+0x24` is "rebuild on change".
+
+## 26. The bootloader doesn't erase a sector whose data stop in its first page (hardware)
+
+Found when `TrackerPlus_cp1.ptf` (copypattern alone) boot-looped while the same code
+worked inside a bundle. Its image ended at `0x601bb0d5`: only `0xd5` bytes into the
+4 KB flash sector `0x601bb000`, all inside that sector's first 256-byte page. On boot
+the version text (in those last bytes) showed as just "v", and the hooks jumped
+through chain words stored there, so the unit reset in a loop.
+
+- **Test:** `TrackerPlus_cpV.ptf`, a pass-through build (every hook only calls the
+  original) with all code before `0x601bb000` and only its version text in page 0 of
+  that sector (image end `0x601bb01a`). It booted, and the version text came out
+  garbled. The text was plain `1.2.0-cpV` (no `%` conversions), so stale bytes couldn't
+  make sprintf read memory.
+- **Every image that worked** ends either inside the stock image's last sector
+  (`0x601ba000`), or at least one full page into a new sector: versiontest (`MT0`,
+  `0x601bb10d`) and ramdiag (`RD2`, `0x601bb191`) end in page 1, the others further in.
+- **What it means:** the bootloader programs 256-byte pages and erases a sector only on
+  the way through a full page; a last, partial first page is programmed without an
+  erase, so it comes out ANDed with what an earlier firmware left in that sector (flash
+  programming only clears bits). The exact rule inside the bootloader is unknown; the
+  observed boundary is "ends in page 0: broken, ends in page 1 or later: fine".
+- **Fix:** `tools/patch_ptf.py` and `web/patcher.js` pad an image that would end within
+  the first 256 bytes of a sector with `0xFF` up to 16 bytes into the second page (like
+  `MT0` and `RD2`). `tools/test_layout.py` checks every output. No hardware-tested build
+  ended in a first page, so their outputs are unchanged.

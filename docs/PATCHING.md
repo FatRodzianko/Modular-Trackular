@@ -135,7 +135,10 @@ The patches in one firmware have to fit together:
   "../humanize/patch.json", "../colorsong/patch.json"]` puts them the other way round
   (`tools/test_layout.py` checks both orders, and both were tested on hardware). A patch whose spec has a fixed
   `base` and no relocation table (like versiontest) stays exactly there, and must not
-  overlap what comes before it.
+  overlap what comes before it. An output that would end within the first 256 bytes of
+  a 4 KB flash sector gets `0xFF` padding into the sector's second page: the bootloader
+  doesn't erase a sector whose data stop in its first page, and a build that ended there
+  boot-looped (FINDINGS section 26).
 - **Hook sites: shared ones must be chained.** Two patches can hook the same call or
   data word only if both chain it: the hook names a `next` word in the patch, which
   the patcher fills with what the site pointed to before (the stock function, or the
