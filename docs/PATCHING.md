@@ -80,7 +80,7 @@ must be byte-identical to these builds:
 | visualizer | `TrackerPlus_vz5.ptf` | `1.2.0-vz5` | tested | `46970bb1689414fd711cadc6cfd149da458145aafcd9f6d274f10759dce9bdbd` |
 | the previous visualizer (the same animation, every pad update a full flush) | `TrackerPlus_vz2.ptf` | `1.2.0-vz2` | tested | `8b3ddcb09de46829799f542cf9d7423d95d4f39aa76db44881f5c18eb0361736` |
 | condtrig | `TrackerPlus_ct1.ptf` | `1.2.0-ct1` | tested | `539328948185c4a02577ce62181fc4143a5e86dc06a33e61b469d52b21da8197` |
-| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | not yet as one firmware (each mod tested; the same with visualizer vz2 tested) | `6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437` |
+| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | tested | `6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437` |
 | the previous all (the same without condtrig) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |

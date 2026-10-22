@@ -45,9 +45,8 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   `1:2` … `8:8` (the A-th pass of every B), counted per track from the start of
   playback or of the pattern. The idea comes from Psygoo's CT6. Tested on hardware. See [patch/condtrig/README.md](patch/condtrig/README.md).
 - **all**: all seven mods above in one firmware (version text `1.2.0-MCT`), from
-  [patch/all/patch.json](patch/all/patch.json). Each mod is tested on hardware, and so was
-  this bundle with the previous visualizer (vz2); with vz5 it's not yet tested as one
-  firmware.
+  [patch/all/patch.json](patch/all/patch.json). Tested on hardware, made with the web
+  patcher.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
   future patches. See [patch/ramdiag/README.md](patch/ramdiag/README.md).
@@ -199,6 +198,12 @@ original-Tracker projects that showed the way:
 [Tracker-Firmware-Mod](https://github.com/mranthropology/Tracker-Firmware-Mod),
 [polyend-tracker-re](https://github.com/sandlbn/polyend-tracker-re) and
 [SidTracker](https://github.com/sandlbn/SidTracker).
+
+[TrackerPlus-CT-Web](https://github.com/Psygoo/TrackerPlus-CT-Web/) by Psygoo built
+Conditional Trigs for the Tracker+ on this project's tools, with a web patcher that
+inspired this repository's own (it was in turn based on the
+[Modded-Cycles flasher](https://18nelli18.github.io/Modded-Cycles/flasher/) for the
+Elektron Model:Cycles).
 
 ## License
 
