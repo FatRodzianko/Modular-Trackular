@@ -1,4 +1,4 @@
-"""Check the legato patch: MIDI notes with a Glide FX (G) play legato.
+"""Check the legato patch: MIDI and synth notes with a Glide FX (G) play legato.
 
   python tools/emu/test_legato.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf>
 
@@ -28,6 +28,14 @@ blocks come at 120 BPM, so only the patch's own end-of-block work runs there.
    in the patch's RAM is ended by the end of the audio block and by the next note.
 7. Two tracks on one channel: as stock firmware.
 8. Cost: instructions per tick with G on every step of 16 MIDI tracks, against stock.
+9. Synth slots (the real synth system, tools/emu/synth_rig.py): with G on a synth note the
+   host gets the new note-on before the old note-off; the stock order when the notes are
+   on different slots, a MIDI and a synth note, the same pitch, or after a gate; without
+   G as stock. Played through the sequencer and rendered: with Polyphony 1 and Glide Mode
+   Legato or Legato O, ACD, FAT, VAP and WTFM (and WAVE, when the firmware has
+   patch/synths) don't retrigger their envelopes on a G note and do without G; with
+   Glide Mode Always or Polyphony 4 they retrigger either way. PERC sounds the same with
+   G as without (it ignores note offs).
 """
 from __future__ import annotations
 
@@ -46,6 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from patch_ptf import bl_target  # noqa: E402
 from layout import patch_ram  # noqa: E402
 import seq_timing as st  # noqa: E402
+import synth_rig as sr  # noqa: E402
 
 SEQ, PROJECT, SETTINGS = st.SEQ, st.PROJECT, st.SETTINGS
 MICRO_MOVE, ROLL, CHANCE, RANDOM_NOTE, CC_A = 2, 3, 4, 5, 8
@@ -387,6 +396,132 @@ def cost_checks(ptf: Path, stock: Path) -> None:
     check(extra <= 16 * PER_TRACK_LIMIT, f"at most {PER_TRACK_LIMIT} more per track at the worst tick ({extra} in all: {text})")
 
 
+# ---- synth slots -----------------------------------------------------------------------
+
+ENVELOPES = {"Attack": 0.0, "Decay": 0.05, "Sustain": 0.15, "Release": 0.3, "Glide Time": 0.0}
+
+
+def synth_rig(ptf: Path, model: int | None, poly: int, params: dict[str, float]):
+    """The synth system with slot 0 on `model` (WAVE in VAP's place for None) at `poly`
+    voices, the named parameters set (every one of that name), and the host's note calls
+    logged in m.events as (tick, "on"/"off", channel, note)."""
+    if model is None:
+        import test_synths as ts
+        from machine import Machine
+        ts.WHERE = ts.ram_map(Machine(ptf), ptf)
+        rig = ts.Rig(ptf)
+        rig.configure((sr.VAP, sr.ACD, sr.ACD), (1, 1, 1))
+        rig.swap(sr.VAP)
+        rig.pattern()                       # a Pattern screen update: WAVE's unit boots
+    else:
+        rig = sr.SynthRig(ptf)
+        rig.configure((model, sr.ACD, sr.ACD), (1, 1, 1))
+    rig.set_poly(0, poly)
+    m = rig.m
+    for i, q in enumerate(rig._entries(0)):
+        name = bytes(m.uc.mem_read(m.r32(q), min(m.r32(q + 4), 40))).decode("latin-1")
+        if name in params:
+            rig.set_param(0, i, params[name])
+    m.events = []
+    vt = m.r32(rig.host)
+    for off, what in ((sr.H_NOTE_ON, "on"), (sr.H_NOTE_OFF, "off")):
+        a = m.r32(vt + off) & ~1
+
+        def hook(uc, a_, size, u, what=what):
+            m.events.append((m.ticks, what, m.arg(3), m.arg(1)))
+        m.uc.hook_add(UC_HOOK_CODE, hook, begin=a, end=a)
+    return rig
+
+
+def synth_play(rig, steps, n_steps: int, render: bool = True):
+    """Play steps through the sequencer, a 128-frame block rendered after every 13 ticks.
+    Returns slot 0's (left, right) output as int16 arrays."""
+    import numpy as np
+    m = rig.m
+    cur, nxt = st.pattern(m, 15), st.pattern(m, 15)
+    for s_ in steps:
+        st.set_step(m, cur, *s_)
+    m.w32(SEQ + 0x14, cur)
+    m.w32(SEQ + 0x18, nxt)
+    m.call(st.SEQ_PLAY_FROM, SEQ, 0)
+    m.events.clear()
+    m.ticks = 0
+    left, right = [], []
+    for _ in range(STEP * n_steps // BLOCK):
+        for _ in range(BLOCK):
+            m.ticks += 1
+            m.call(st.SEQ_TICK, SEQ, max_insns=5_000_000)
+        if render:
+            out = rig.synth_block()[0]
+            left.append(out[0])
+            right.append(out[1])
+    if not left:
+        return np.zeros(0, "<i2"), np.zeros(0, "<i2")
+    return np.concatenate(left), np.concatenate(right)
+
+
+def retrigger(rig, glide: bool) -> tuple[bool, int, int]:
+    """60 on step 1, 64 on step 3 (with G or not): does 64 bring a new envelope peak?
+    The peak level in the 20 blocks before and after the block that plays step 3."""
+    import numpy as np
+    left, _ = synth_play(rig, [(0, 0, 60, 64), (0, 2, 64, 64, G if glide else (0, 0))], 3)
+    at = (12 + 2 * STEP - 1) // BLOCK * 128
+    w = 20 * 128
+    before = int(np.max(np.abs(left[at - w:at].astype(np.int32))))
+    after = int(np.max(np.abs(left[at:at + w].astype(np.int32))))
+    return after > 2 * before + 200, before, after
+
+
+def synth_checks(ptf: Path, stock: Path) -> None:
+    import numpy as np
+    print("Synth slots: the order the synth host gets")
+    cases = [
+        ("G on S1 after S1", [(0, 0, 60, 64), (0, 1, 62, 64, G)], [("on", 1, 62), ("off", 1, 60)]),
+        ("S1 without G", [(0, 0, 60, 64), (0, 1, 62, 64)], None),
+        ("G on S2 after S1", [(0, 0, 60, 64), (0, 1, 62, 65, G)], None),
+        ("G on S1 after a MIDI note", [(0, 0, 60, 48), (0, 1, 62, 64, G)], None),
+        ("G on a MIDI note after S1", [(0, 0, 60, 64), (0, 1, 62, 48, G)], None),
+        ("G on S1, the same pitch", [(0, 0, 60, 64), (0, 1, 60, 64, G)], None),
+        ("G on S1 after a gated S1 note (q 50)", [(0, 0, 60, 64, (GATE, 50)), (0, 1, 62, 64, G)], None),
+    ]
+    for what, steps, want in cases:
+        runs = []
+        for path in (ptf, stock):
+            rig = synth_rig(path, sr.VAP, 1, {})
+            synth_play(rig, steps, 2, render=False)
+            runs.append(list(rig.m.events))
+        got = [(k, c, n) for t, k, c, n in runs[0] if t == 12 + STEP]
+        if want is None:
+            check(runs[0] == runs[1], f"{what}: as stock firmware ({got})")
+        else:
+            check(got == want and sorted(runs[0]) == sorted(runs[1]), f"{what}: on 62, then off 60 ({got})")
+
+    print("Synth slots: envelopes, played through the sequencer (60 on step 1, 64 on step 3)")
+    models = [(sr.ACD, "ACD"), (sr.FAT, "FAT"), (sr.VAP, "VAP"), (sr.WTFM, "WTFM")]
+    if any(p["name"] == "synths" for p in json.loads(ptf.with_suffix(".map.json").read_text())["patches"]):
+        models.append((None, "WAVE"))
+    for model, name in models:
+        res = {}
+        for poly, mode, glide in ((1, 2, False), (1, 2, True), (1, 3, True), (1, 0, True), (4, 2, True)):
+            rig = synth_rig(ptf, model, poly, dict(ENVELOPES, **{"Glide Mode": float(mode)}))
+            res[poly, mode, glide] = retrigger(rig, glide)
+        ok = (res[1, 2, False][0] and not res[1, 2, True][0] and not res[1, 3, True][0]
+              and res[1, 0, True][0] and res[4, 2, True][0])
+        text = ", ".join(f"poly {p} mode {md}{' G' if g else ''}: {'retrigger' if r[0] else 'legato'} {r[1]}->{r[2]}"
+                         for (p, md, g), r in res.items())
+        check(ok, f"{name}: legato only with G, Polyphony 1, Glide Mode Legato or Legato O ({text})")
+
+    print("PERC (it ignores note offs)")
+    outs = []
+    for glide in (False, True):
+        rig = synth_rig(ptf, sr.PERC, 1, {})
+        g = G if glide else (0, 0)
+        outs.append(synth_play(rig, [(0, 0, 60, 64), (0, 1, 62, 64, g), (0, 2, 60, 64), (0, 3, 66, 64, g)], 5))
+    same = all(np.array_equal(a, b) for a, b in zip(outs[0], outs[1]))
+    check(same and int(np.max(np.abs(outs[0][0].astype(np.int32)))) > 1000,
+          "kick, snare (G), kick, open hihat (G): the same samples as without G")
+
+
 PTF = STOCK = None
 
 
@@ -401,6 +536,7 @@ def main() -> int:
     stuck_checks(PTF)
     two_track_checks(PTF, STOCK)
     cost_checks(PTF, STOCK)
+    synth_checks(PTF, STOCK)
     print(f"{len(failures)} failure(s)")
     return 1 if failures else 0
 

@@ -1,6 +1,6 @@
 # Legato for MIDI instruments: plan
 
-Status: phase 1 built and emulator-tested (`patch/legato`, `tools/emu/test_legato.py`,
+Status: built; lg2 (MIDI and synth slots) tested on hardware alone and in patch/all (ML2). Phase 1 built and emulator-tested (`patch/legato`, `tools/emu/test_legato.py`,
 `tools/test_layout.py` scenarios: alone and with patch/all's patches in both orders);
 the patch README is written (phase 2's root `README.md` and `docs/PATCHING.md` entries
 are not). Tested on hardware, alone (`lg1`) and with patch/all's mods (`MLG`): an

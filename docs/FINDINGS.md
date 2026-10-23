@@ -2240,6 +2240,33 @@ Random note, after a gate, channel change, two tracks on one channel, a song-mod
 pattern change and stop. A Chance-failed step makes no copy. Random note (`n`) changes
 the work note after `0x24da`, so a same-pitch check belongs at `0x2fd8`.
 
+### Synth instruments (emulator)
+
+- **Same order for synths.** For instruments 64–66, `seq_note_off_q` and
+  `seq_trigger_note` reach the synth host (`seq_note_off_out_q` / `seq_note_on_out_q`
+  with the synth flag set, host vtable `+0x24` / `+0x20`) from the same two sites:
+  note-off of the old note, then note-on of the new one, at the same tick. Velocity 100
+  when the step has no `V`.
+- **Synth legato needs the reverse order.** With Polyphony 1 and Glide Mode 2 (Legato)
+  or 3 (Legato O), a note-on that arrives while the voice holds a note doesn't restart
+  the envelopes, in ACD, FAT, VAP and WTFM. With "note-off, then note-on", with Glide
+  Mode 0 (Always) or 1 (Overlap), or with Polyphony above 1 (the new note takes another
+  voice), they restart. Glide Mode is parameter 26 in ACD, 22 in FAT, 35 in VAP and 40
+  in WTFM.
+- **`G` on a synth step does nothing in stock firmware.** `synth_apply_fx_q` (ITCM
+  `0x5070`, `tbh` on type − 1 for types 1–37) handles Off (1), CC a–e (8–12), delay
+  send, panning and reverb send (30–32) and CC f (37); type 19 takes the default. No
+  host message and no voice parameter change in the emulator.
+- **PERC ignores note-offs.** Its voice's MIDI method (vtable `0x60066f90` `+0x08`,
+  `0x60152598`) acts only on message type 4 (note on), through `perc_voice_trigger_q`
+  (ITCM `0x108a4`, `(core, &{44100.0, tempo}, note)`, velocity scaled in s0). Its `+0x18`, `+0x1c` and `+0x20` (sounding,
+  holds this note, holds any note) always return 1. The note picks the element: 60–61
+  kick, 62–63 snare, 64–65 closed and 66–67 open hihat, 68–69 cymbal, 70–71 perc, any
+  other note a tom at that pitch (notes above 71 an octave lower). The parameters
+  (84) are the six elements' (kick 0–8, tom 9–17, snare 18–27, hihat 28–35, cymbal 36–44,
+  perc 45–48), then a level, panning, delay, reverb and output per element (49–78), a
+  waveshaper and a 3-band EQ.
+
 ## 25. Pattern files, the play buffer and copying a pattern (`patch/copypattern`, emulator)
 
 Details and the full design: [COPY_PATTERN_PLAN.md](COPY_PATTERN_PLAN.md).

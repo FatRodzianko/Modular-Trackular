@@ -330,3 +330,5 @@
 600c3e30	song_file_undo_push	(fm, n): Workspace pattern n's file -> 10-slot ring 0x83f62fec (Song screen file operations)
 600c3eac	song_file_undo_pop	(fm): writes the ring's last file back, updates the masks
 600cdf28	show_message	(0x20020880, 0, text, time): one line in the message bar; keeps the text pointer
+000108a4	perc_voice_trigger_q	(core, &{44100.0, tempo}, note), s0 = velocity scaled: PERC element by note: 60-61 kick, 62-63 snare, 64-67 hihat, 68-69 cymbal, 70-71 perc, else tom
+60152598	perc_voice_midi	PERC voice vtable +0x08: note on only (type 4); note offs ignored

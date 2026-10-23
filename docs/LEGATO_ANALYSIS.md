@@ -286,3 +286,100 @@ change what stock sends.
 Before planning: check on hardware (stock firmware) that `G` can be put on a MIDI
 step, and that your synth does legato when a note-on arrives just before the old
 note's note-off (the two-track workaround already shows this).
+
+## 8. Synth instruments (S1–S3, instruments 64–66)
+
+Asked after `lg1` was tested on hardware: the stock synth engines retrigger their
+envelopes on every sequenced note, whatever their Glide Mode, while held pads or an
+external keyboard play them legato.
+
+**The sequencer sends synths the same order as MIDI** (emulator, stock 1.2.0, the real
+synth system from `tools/emu/synth_rig.py`, the synth host's note methods logged). A
+track playing S1 sends the old note's note-off, then the new note-on, at the same tick,
+from the same two call sites (`0x24da`, then `0x2fd8`); across empty steps the old note
+is held until the next note; two tracks on one slot overlap. `lg1` leaves synths alone
+(its marker only counts on instruments 48–63):
+
+```
+## S1 (instrument 64) on track 1: 60, 62, 64
+  tick    12 step 0 micro  1  host note on 60 vel 100 ch1
+  tick   588 step 1 micro  1  host note off 60 vel 0 ch1
+  tick   588 step 1 micro  1  host note on 62 vel 100 ch1
+  tick  1164 step 2 micro  1  host note off 62 vel 0 ch1
+  tick  1164 step 2 micro  1  host note on 64 vel 100 ch1
+```
+
+**What the synth voices need** (emulator, stock 1.2.0, each model in slot 1). Every
+envelope set to Attack 0, Decay 0.15, Sustain 0.15, Glide Time 0; note 60 held 0.4 s
+(into the sustain, peak about 3,000), then note 64. A retrigger shows as a new peak
+near full scale in the next 60 ms:
+
+| Polyphony | Glide Mode | "off 60, on 64" (what the sequencer sends) | "on 64, off 60" |
+|---|---|---|---|
+| 1 | Always, Overlap | retrigger | retrigger |
+| 1 | Legato, Legato O | retrigger | **legato** (no new peak) |
+| 4 | any | retrigger | retrigger (the new note takes another voice) |
+
+The same for ACD, FAT, VAP and WTFM. So a synth plays legato only with Polyphony 1, Glide
+Mode Legato or Legato O, and the new note-on arriving while the old note is held. Held
+pads and an external keyboard give that order; the sequencer never does, which matches
+what you saw. WAVE (`patch/synths`) follows the same rule (`wt_note_on`: no retrigger
+when the voice still holds a note and Glide Mode is Legato or Legato O). PERC has no
+Glide Mode.
+
+**`G` on a synth step in stock firmware does nothing**: `synth_apply_fx_q` (ITCM
+`0x5070`) ignores type 19 (its `tbh` sends types 2–7, 13–29 and 33–36 to the default),
+and in the emulator a step with `G 50`, `G 0` or `G 80` without a note sent nothing to
+the synth host and changed no voice parameter. So `G` is free as the marker on synth
+steps too, and such patterns play on stock firmware as before.
+
+**Extending the patch** needs no new hook: the two sites already run for instruments
+48–66. Only the marker check changes, from "both notes MIDI (48–63)" to "both notes MIDI
+(48–63), or both the same synth slot (64–66)". With `G` on a synth step at Polyphony 1,
+the synth then treats the two notes as overlapping, as held pads: Legato and Legato O
+keep the envelopes going; Overlap and Legato O, which glide only between overlapping
+notes, now glide (when Glide Time is above 0); Always and Legato glide as before. At
+Polyphony above 1 nothing changes that you can hear (the new note takes another voice).
+
+**Pitch glide, measured** (`lg2`, emulator; 48 on step 1, 60 on step 3, Glide Time 0.5 s,
+Polyphony 1, the pitch 10–35 ms after the change). The same in ACD, FAT, VAP, WTFM and
+WAVE:
+
+| Glide Mode | Without `G` | With `G` |
+|---|---|---|
+| Always | glides (about 170 Hz, rising to 262) | the same |
+| Overlap | jumps to 262 Hz | glides |
+| Legato | glides | the same |
+| Legato O | jumps to 262 Hz | glides |
+
+So the patch doesn't change how a glide sounds, but in Overlap and Legato O a `G` step
+glides where it didn't before, because the notes now overlap. In Legato O the glide and
+the envelope legato both follow the overlap, so a legato note there can't avoid the
+glide except with Glide Time 0.
+
+**Built as `lg2`** (that marker change, emulator). Through the sequencer and the real
+synth system, 60 on step 1 and 64 on step 3, every envelope at Attack 0, Decay 0.05,
+Sustain 0.15, the peak level in the 58 ms before and after step 3's block:
+
+| Model | Poly 1, Legato, no `G` | Poly 1, Legato, `G` | Poly 1, Legato O, `G` | Poly 1, Always, `G` | Poly 4, Legato, `G` |
+|---|---|---|---|---|---|
+| ACD | retrigger (3,800 → 23,475) | legato (→ 3,639) | legato | retrigger | retrigger |
+| FAT | retrigger (4,291 → 31,353) | legato (→ 3,809) | legato | retrigger | retrigger |
+| VAP | retrigger (3,202 → 22,921) | legato (→ 3,151) | legato | retrigger | retrigger |
+| WTFM | retrigger (2,986 → 18,165) | legato (→ 3,210) | legato | retrigger | retrigger |
+| WAVE (`patch/synths`, in VAP's place) | retrigger (1,085 → 7,407) | legato (→ 1,196) | legato | retrigger | retrigger |
+
+**PERC.** Its voice's MIDI handler (`0x60152598`) acts only on note-on (message type
+4); note-offs are dropped, and its "sounding" and "holds a note" methods always answer
+1. It maps notes to its six elements (ITCM `0x108a4`): 60–61 kick, 62–63 snare, 64–67
+hihats (64–65 closed, 66–67 open), 68–69 cymbal, 70–71 perc, any other note a tom at
+that pitch (the manual's C4, D4, E4–G4, A4, B4 and toms). So the legato order can't
+change its sound: kick followed by snare, closed or open hihat, two toms, cymbal or perc
+with `G` on the second step renders sample for sample the same as without `G`. PERC
+needs no exclusion.
+
+**On hardware** (`lg2`, and `lg2` in patch/all as `1.2.0-ML2`): with Glide Mode Legato
+or Legato O, `G` steps don't retrigger the envelopes; with Always or Overlap they do.
+Stock 1.2.0 behaves the same from the pads and from an external MIDI controller with
+overlapping notes, so the Glide Modes work as designed and `G` only supplies the
+overlap.

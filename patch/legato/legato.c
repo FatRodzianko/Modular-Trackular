@@ -11,10 +11,12 @@
  * mt_lg_trigger ends it right after the new note has gone out.
  *
  * The marker is a Glide FX (G, type 19), any value, in FX1 or FX2 of a MIDI-instrument
- * note (instruments 48..63, channels 1..16). Stock firmware ignores G on MIDI notes, so
- * such patterns play there as before. The stock order stays when:
- *  - the old note isn't a MIDI instrument, or isn't on any more (its gate ended:
- *    track +0x80 is 0);
+ * note (instruments 48..63, channels 1..16) or a synth note (instruments 64..66, slots
+ * S1..S3). Stock firmware ignores G on both, so such patterns play there as before. A
+ * synth plays the two notes legato when its slot has Polyphony 1 and Glide Mode Legato
+ * or Legato O; otherwise it sounds as before. The stock order stays when:
+ *  - the old note isn't a MIDI instrument (for a MIDI note) or the same synth slot (for
+ *    a synth note), or isn't on any more (its gate ended: track +0x80 is 0);
  *  - either note has Chord (14) or Arp (21);
  *  - the new note has the old one's pitch and instrument (on 60, off 60 would end the
  *    new note). This is checked at 0x2fd8, after Random note and the performance
@@ -31,7 +33,7 @@
 #include <stdint.h>
 
 #ifndef LEGATO_VERSION
-#define LEGATO_VERSION "lg1"
+#define LEGATO_VERSION "lg2"
 #endif
 
 /* ---- firmware 1.2.0 ------------------------------------------------------------------ */
@@ -47,6 +49,8 @@
 #define REC_FX2             4u
 #define INSTR_MIDI_FIRST    48u             /* MIDI channel 1 */
 #define INSTR_MIDI_LAST     63u             /* MIDI channel 16 */
+#define INSTR_SYNTH_FIRST   64u             /* synth slot S1 */
+#define INSTR_SYNTH_LAST    66u             /* synth slot S3 */
 #define FX_CHORD            14u
 #define FX_GLIDE            19u
 #define FX_ARP              21u
@@ -102,6 +106,11 @@ static int is_midi(uint32_t instr)
     return instr >= INSTR_MIDI_FIRST && instr <= INSTR_MIDI_LAST;
 }
 
+static int is_synth(uint32_t instr)
+{
+    return instr >= INSTR_SYNTH_FIRST && instr <= INSTR_SYNTH_LAST;
+}
+
 static int has_fx(const uint8_t *rec, uint32_t type)
 {
     return rec[REC_FX1] == type || rec[REC_FX2] == type;
@@ -114,7 +123,10 @@ static int lg_wanted(const uint8_t *seq, uint32_t t, const uint8_t *last)
         return 0;
     const uint8_t *trk = seq + SEQ_TRACK(t);
     const uint8_t *work = trk + TRK_WORK;
-    if (!is_midi(work[REC_INSTR]) || !is_midi(last[REC_INSTR]) || !has_fx(work, FX_GLIDE))
+    uint32_t now = work[REC_INSTR], before = last[REC_INSTR];
+    if (!(is_midi(now) && is_midi(before)) && !(is_synth(now) && now == before))
+        return 0;
+    if (!has_fx(work, FX_GLIDE))
         return 0;
     if (has_fx(work, FX_CHORD) || has_fx(work, FX_ARP) || has_fx(last, FX_CHORD) || has_fx(last, FX_ARP))
         return 0;
