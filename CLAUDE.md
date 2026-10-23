@@ -19,6 +19,9 @@ patch/<name>/build.sh                      # -> patch/<name>/build/<name>.{bin,s
 # make a firmware: one patch, or a bundle spec that "include"s several
 python tools/patch_ptf.py ../firmware_polyend/TrackerPlus_1.2.0.ptf patch/swing/patch.json build/TrackerPlus_sw1.ptf
 
+# all the checks, in parallel, skipping what already passed (see "Testing" below)
+python tools/run_tests.py ../firmware_polyend/TrackerPlus_1.2.0.ptf --tier quick      # or --tier release
+
 # patcher placement / relocation / hook-chain checks (all patches alone and in bundles)
 python tools/test_layout.py ../firmware_polyend/TrackerPlus_1.2.0.ptf build/layout
 
@@ -71,9 +74,21 @@ Reverse-engineering helpers:
 
 When adding a patch, update the root `README.md` (mod list, layout table, tools table), `docs/PATCHING.md`, and `tools/test_layout.py`.
 
+## Testing
+
+Use `tools/run_tests.py`; don't hand-roll test loops over many firmware files.
+- `--tier quick` while working on a patch: layout test, every patch's test on each patch alone and on `patch/all`.
+- `--tier release` before any commit that changes what users get (a patch's prebuilt, `patch/all`, `patch_ptf.py`, `web/`): adds the web patcher harness (all selections byte-identical) and every patch's test on the cover set of web mixes and the reordered bundles; full masterfx and synths on `patch/all`.
+- `--tier deep` only when masterfx's or synths' audio code changes.
+- The cover set replaces "test every mix": each new patch doubles the web patcher's mixes (1023 for ten), so never run the emulator tests on all of them. Byte identity and layout checks do cover all of them.
+- masterfx and synths take `--quick` (mix-dependent checks only); their full runs take ~6 and ~22 minutes.
+- Its cache (`build/test_cache.json`) skips tests already passed on byte-identical files with the same test code. A change to `tools/emu/` invalidates everything, as it should.
+
+Before starting anything expected to take more than 10 minutes, tell the user the measured estimate (the runner prints one); ask before anything over 45 minutes. Take estimates from the runner or from a timed run, never guess.
+
 ## Rules for this repo
 
-- **Emulator first.** Every change is emulator-tested (its own test plus `test_layout.py`, and the other patches' tests on bundles) before the user tries it on hardware. The user has low risk tolerance. Mapping memory the device lacks once froze a unit (FINDINGS section 11).
+- **Emulator first.** Every change is emulator-tested (`tools/run_tests.py`, release tier before anything users get) before the user tries it on hardware. The user has low risk tolerance. Mapping memory the device lacks once froze a unit (FINDINGS section 11).
 - **Version text.** At most 3 characters after `1.2.0-` (9 in total), or Config doesn't show it.
 - **Git.** Commit only when the user explicitly says so. Never push. Commit author email: `46849520+FatRodzianko@users.noreply.github.com`.
 - **Privacy.** Committed files must not contain local absolute paths (user home directories) or the user's own project names. Repo-relative paths and local file names are fine.

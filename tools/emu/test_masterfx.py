@@ -1,6 +1,10 @@
 """Check the masterfx patch (a choice of master reverb and delay per project).
 
-  python tools/emu/test_masterfx.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf> [<wav folder>]
+  python tools/emu/test_masterfx.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf> [<wav folder>] [--quick]
+
+--quick runs only what can differ between bundles (start-up, Stock identical to stock
+firmware, switching, the Config menu and the settings file) and skips the sound,
+delay and cost checks, which depend only on masterfx's own code (tools/run_tests.py).
 
 Works with the masterfx-only build and with bundles that include it. The reverb object
 (0x20019014) and the delay object (0x20018fc0) are driven through their vtables as the
@@ -973,14 +977,21 @@ def cost_checks(ptf: Path, stock: Path) -> None:
 
 def main() -> int:
     global MX, TAPE, BBD, GATED, SHIMMER, CODE
-    ptf, stock = Path(sys.argv[1]), Path(sys.argv[2])
-    wav_dir = Path(sys.argv[3]) if len(sys.argv) > 3 else None
+    args = [a for a in sys.argv[1:] if a != "--quick"]
+    quick = "--quick" in sys.argv[1:]
+    ptf, stock = Path(args[0]), Path(args[1])
+    wav_dir = Path(args[2]) if len(args) > 2 else None
     where = tf.ram_map(Machine(ptf), ptf)
     MX, TAPE, BBD, GATED, SHIMMER = where["mx"], where["tape"], where["bbd"], where["gated"], where["shimmer"]
     CODE = patch_code(ptf, "masterfx")
     startup_and_stock(ptf, stock)
     switching(ptf, stock)
     reverb_cycle(ptf)
+    if quick:                               # the mix-dependent parts only: hooks, switching, menu, file
+        menu_checks(ptf)
+        file_checks(ptf)
+        print(f"{len(failures)} failure(s) (--quick: sound, delay and cost checks skipped)")
+        return 1 if failures else 0
     for which, name, tol in ((REVERB_FREEVERB, "Freeverb", 2), (REVERB_PLATE, "Plate", 2), (REVERB_SPRING, "Spring", 8),
                              (REVERB_SHIMMER, "Shimmer", 2)):
         reverb_checks(ptf, stock, which, name, tol)

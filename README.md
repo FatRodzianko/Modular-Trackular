@@ -133,6 +133,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `.github/workflows/pages.yml` | Publishes the staged web patcher to GitHub Pages |
 | `tools/test_web_patcher.py`, `tools/web_patcher_node.mjs` | Check the web patcher's output is byte-identical to `patch_ptf.py`'s for every selection it offers (needs Node) |
 | `tools/mkrel.py` | Make a patch's relocation table (code and RAM addresses) from three links of it (used by the build scripts) |
+| `tools/run_tests.py` | Run the tests at a chosen depth (quick, release, deep) in parallel, with a time estimate and a cache that skips what already passed; release adds the web patcher check and a cover set of web mixes (every RAM edge, hook-chain neighbour and padding case) instead of all of them |
 | `tools/test_layout.py` | Check the patcher's code and RAM placement, relocation and hook chains for each patch alone and both bundle orders |
 | `tools/thumbdis.py` | Quick Thumb disassembly with literal-pool values and strings |
 | `tools/movw_refs.py` | Find literal and MOVW/MOVT references to an address |

@@ -1,7 +1,12 @@
 """Check the synths patch (WAVE, a wavetable synth that stands in for one synth model,
 chosen per project).
 
-  python tools/emu/test_synths.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf> [<wav folder>] [--stress N]
+  python tools/emu/test_synths.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf> [<wav folder>] [--stress N] [--quick]
+
+--quick runs only what can differ between bundles (the hooks, the WAVE model, the swap,
+the menus and screens, the settings and patch files, Macros, the render loop, and 200
+stress blocks) and skips the rig, stock-output, sound, voice-allocation and bank checks,
+which depend only on synths' own code (tools/run_tests.py).
 
 Works with the synths-only build and with bundles that include it. The firmware's own
 synth system runs in the emulator (tools/emu/synth_rig.py): host, slots, patches, VAP
@@ -2429,10 +2434,28 @@ def main() -> int:
         i = args.index("--stress")
         stress_blocks = int(args[i + 1])
         del args[i:i + 2]
+    quick = "--quick" in args
+    if quick:
+        args.remove("--quick")
+        stress_blocks = min(stress_blocks, 200)
     ptf, stock = Path(args[0]), Path(args[1])
     wav_dir = Path(args[2]) if len(args) > 2 else None
     CODE = patch_code(ptf, "synths")
     WHERE = ram_map(Machine(ptf), ptf)
+    if quick:                               # the mix-dependent parts only
+        hook_checks(ptf, stock)
+        wave_model_checks(ptf)
+        swap_checks(ptf)
+        menu_checks(ptf)
+        model_list_checks(ptf)
+        edit_patch_checks(ptf)
+        file_checks(ptf, stock)
+        patch_file_checks(ptf, stock)
+        macro_checks(ptf)
+        export_checks(ptf)
+        stress_checks(ptf, stress_blocks)
+        print(f"{len(failures)} failure(s) (--quick: rig, stock output, sound, allocation and bank checks skipped)")
+        return 1 if failures else 0
     rig_checks(stock)
     hook_checks(ptf, stock)
     stock_output_checks(ptf, stock)
