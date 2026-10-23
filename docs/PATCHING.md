@@ -81,6 +81,7 @@ must be byte-identical to these builds:
 | the previous visualizer (the same animation, every pad update a full flush) | `TrackerPlus_vz2.ptf` | `1.2.0-vz2` | tested | `8b3ddcb09de46829799f542cf9d7423d95d4f39aa76db44881f5c18eb0361736` |
 | condtrig | `TrackerPlus_ct1.ptf` | `1.2.0-ct1` | tested | `539328948185c4a02577ce62181fc4143a5e86dc06a33e61b469d52b21da8197` |
 | synths | `TrackerPlus_sy4.ptf` | `1.2.0-sy4` | tested | `2fca2e07bb19ef4e539328152af27c173067ec6088604c45d9f28b96aa876e97` |
+| copypattern | `TrackerPlus_cp4.ptf` | `1.2.0-cp4` | tested (also with humanize) | `7bfbc3eb09a7eb9d9dd4ccf3a8a52b1221743be7061397048f72bbc32908db01` |
 | all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths) | `TrackerPlus_MSY.ptf` | `1.2.0-MSY` | tested (made with the web patcher) | `f3fee2dd07e88d3b8810cd1d9b371e0636f7ad4920c777f021b28da2afd2fd99` |
 | the previous all (the same without synths) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | tested | `6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437` |
 | the all before that (without condtrig and synths) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
@@ -101,7 +102,8 @@ Each patch can be installed on its own, or several can go into one firmware:
   interpolate only, `patch/masterfx/patch.json` the master reverb and delay chosen per project
   (see its README for the effects), `patch/swing/patch.json` Global Swing,
   `patch/visualizer/patch.json` the pad visualizer, `patch/condtrig/patch.json`
-  conditional trigs, `patch/synths/patch.json` the WAVE synth.
+  conditional trigs, `patch/synths/patch.json` the WAVE synth,
+  `patch/copypattern/patch.json` the Copy to New button (not in `patch/all`).
 - **Several patches:** use a bundle spec, which lists the patches to combine.
   `patch/all/patch.json` is the bundle that ships (all eight: colorsong, Humanize,
   interpolate, masterfx, swing, the visualizer, condtrig and synths):
@@ -209,6 +211,7 @@ python tools/emu/test_visualizer.py build/TrackerPlus_vz5.ptf
 python tools/emu/test_condtrig.py build/TrackerPlus_ct1.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_itcmtest.py build/TrackerPlus_it1.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_synths.py build/TrackerPlus_sy4.ptf path/to/TrackerPlus_1.2.0.ptf [wav folder]
+python tools/emu/test_copypattern.py build/TrackerPlus_cp4.ptf
 ```
 
 Each test works on any firmware that contains its patch, so for a bundle run every
@@ -218,7 +221,8 @@ together.
 
 `tools/test_layout.py` checks the patcher's placement without the emulator. It builds
 each patch alone, `patch/all` (all eight), colorsong, humanize and interpolate in the
-other order, those three with masterfx in both orders, the six before condtrig in the other order, the six with synths in both orders, and two
+other order, those three with masterfx in both orders, the six before condtrig in the other order, the six with synths in both orders,
+copypattern alone, with humanize in both orders and with all eight in both orders, and two
 patches on the same chained sites, and
 checks that each patch's code and RAM sit where they
 should (RAM in a region the patch may use, no two blocks overlapping), that exactly the

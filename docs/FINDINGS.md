@@ -2174,6 +2174,44 @@ same after every build of a patch.
   array (1.0 when set; `0x16f14`). `+0x22` is "stepped" and `+0x23` the MIDI CC.
   `+0x24` is "rebuild on change".
 
+## 25. Pattern files, the play buffer and copying a pattern (`patch/copypattern`, emulator)
+
+Details and the full design: [COPY_PATTERN_PLAN.md](COPY_PATTERN_PLAN.md).
+
+- **The editor edits the play buffer** `*(seq+0x14)` in place; it is the only RAM copy
+  of the current pattern, unsaved edits included. A pattern nobody edited has no
+  `Workspace/patterns/pattern_NN.mtp` (N = 1..255, `%02d`).
+- `pattern_write_file(fm, path, data)` (`0x600c1fb4`): remove, `pattern_set_header`
+  (`0x600ae98c`: `{0x0002534b, 0x01020901, 5,5,5,5, u16 0x3030}`), CRC of 0x302c bytes
+  into `data+0x302c` through the object at `*(fm+0x1104)` (vtable +0: `(obj, data,
+  len)`; set up at boot, not by the static constructors), open mode 3, one 0x3030-byte
+  write, close. Returns 1 on success.
+- `pattern_read_file` (`0x600c2350`) doesn't check the CRC; `0x600c2284` upgrades file
+  versions 1-4 (byte +8) and other sizes (+0xc) on load. `pattern_init` (`0x600ae9b0`):
+  every track 32 steps, notes -1, instrument and FX types 0. `step_clear` (`0x600ae940`)
+  clears note, instrument and both FX types (values stay).
+- Unsaved changes: `fm+0x469` (`fm_mark_unsaved`, `0x600bcd30`), `project+0x6f4` bit 0
+  (kept in `project.mt`), and the per-pattern `fm+0x4ca+n` (the play buffer must be
+  saved as pattern n). `0x600bcc58` ORs them all (and per-instrument flags at
+  `fm+0x46a`, `fm+0x49a`).
+- File manager busy: `fm+0x13d` (state) and `+0x13f`. The stock check `0x600bc990`
+  allows a new operation when the state is 0 or 0x0c and `(+0x13f & 0xfd) == 0`.
+  The buffer swap (`0x600acc68`) sets the current pattern from `fm+0x130` (the last
+  pattern `pattern_load_now` loaded, `0x600c2510`).
+- Song screen file operations work on pattern files, not RAM: `0x600c3a8c` and
+  `0x600c3b58` read patterns into SDRAM `0x83f5cf6c` / `0x83f5ff9c`, copy or clear
+  tracks, update the masks and write the file, with a 10-slot undo of whole files
+  (`0x600c3e30` push, `0x600c3eac` pop; ring `0x83f62fec`, state `0x2001f614`).
+- Message bar: `show_message(0x20020880, 0, text, time)` (`0x600cdf28`; time 0 = the
+  default) shows one line ("No undo data :(") and keeps the text pointer; two lines:
+  `0x600cdf44`. It needs boot-time objects the emulator doesn't build.
+- Page 3 of the Pattern screen's bottom bar binds and labels each button with its own
+  call (binds `0x600e29ba`, `0x600e29c6`; text `0x600e586c`..`0x600e58c0`, second
+  lines `0x600e58cc`..`0x600e5920`, one call per button; colors and data only for
+  buttons 0, 1 and 7), so two patches can each add a button without sharing a site:
+  humanize takes button 2; copypattern takes button 2 when the call at `0x600e5884`
+  still goes to the stock `disp_ctrl_set_text`, and button 3 otherwise.
+
 ## 26. The bootloader doesn't erase a sector whose data stop in its first page (hardware)
 
 Found when `TrackerPlus_cp1.ptf` (copypattern alone) boot-looped while the same code

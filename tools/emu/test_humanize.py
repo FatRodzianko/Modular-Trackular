@@ -301,6 +301,11 @@ def main() -> int:
     HZ = patch_ram(ptf, "humanize")
     CODE = patch_code(ptf, "humanize")
     HZ_VALUE = HZ + 8
+    try:                                        # copypattern puts its button on button 3
+        patch_code(ptf, "copypattern")
+        free = range(4, 7)
+    except SystemExit:
+        free = range(3, 7)
     r = Rig(ptf)
     m = r.m
 
@@ -315,7 +320,7 @@ def main() -> int:
     check(kind == 1 and bool(in_patch), f"record mode: button 2 bound to a patch handler ({kind}, {handler:#x})")
     for i, h in STOCK_HANDLERS.items():
         check(r.entry(i) == (1, h), f"button {i} keeps its stock handler {h:#x}")
-    check(all(r.entry(i)[0] == 0 for i in range(3, 7)), "buttons 3..6 stay unbound")
+    check(all(r.entry(i)[0] == 0 for i in free), f"buttons {free.start}..6 stay unbound")
     if not (kind == 1 and in_patch):
         print("no Humanize button: is this a humanize build?")
         return 1
@@ -335,7 +340,7 @@ def main() -> int:
         mode = "record mode" if rec else "outside record mode"
         check(texts.get(22) == "Humanize", f"{mode}: button 2 text {texts.get(22)!r}")
         check(texts.get(20) == "Pattern" and texts.get(21) == "Track" and texts.get(27) == "More"
-              and all(texts.get(c) == "" for c in range(23, 27)), f"{mode}: other button texts unchanged")
+              and all(texts.get(20 + c) == "" for c in free), f"{mode}: other button texts unchanged")
         want = styles + (STYLE_ACTIVE if rec else STYLE_GREY)
         check(colors.get(22) == want and colors.get(21) == styles + STYLE_ACTIVE,
               f"{mode}: button 2 colors {'active' if rec else 'greyed out'}, Track Name active")

@@ -1,0 +1,66 @@
+{
+  "name": "copypattern",
+  "description": "Pattern screen button (More, More, button 3, or 4 with humanize, record mode) that copies the current pattern, with its unsaved edits and every track's length, into the next empty pattern, playing or stopped, and stays on the current pattern",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "bin": "build/copypattern.bin",
+  "sym": "build/copypattern.sym",
+  "rel": "build/copypattern.rel",
+  "prebuilt_bin": "prebuilt/copypattern.bin",
+  "prebuilt_sym": "prebuilt/copypattern.sym",
+  "prebuilt_rel": "prebuilt/copypattern.rel",
+  "branches": [
+    {
+      "at": "0x600E29C6",
+      "old": "ecf791fe",
+      "to": "mt_cp_bind",
+      "next": "mt_cp_next_bind",
+      "note": "Pattern screen page 3: bind button 1 (Track Name); also binds Copy to New (button 2, or 3 with humanize) in record mode"
+    },
+    {
+      "at": "0x600E5890",
+      "old": "1cf064fa",
+      "to": "mt_cp_label",
+      "next": "mt_cp_next_label",
+      "note": "Pattern screen page 3 labels: button 3's (empty) text; Copy to on button 2 or 3"
+    },
+    {
+      "at": "0x600E58F0",
+      "old": "1cf040fa",
+      "to": "mt_cp_label2",
+      "next": "mt_cp_next_label2",
+      "note": "Pattern screen page 3 labels: button 3's (empty) second line; New on button 2 or 3"
+    },
+    {
+      "at": "0x600E592E",
+      "old": "1cf039fa",
+      "to": "mt_cp_colors",
+      "next": "mt_cp_next_colors",
+      "note": "Pattern screen page 3 labels: Pattern Name's colors; Copy to New's button gets the active or greyed-out set"
+    },
+    {
+      "at": "0x600E5958",
+      "old": "1cf04efa",
+      "to": "mt_cp_data",
+      "next": "mt_cp_next_data",
+      "note": "Pattern screen page 3 labels: Pattern Name's data, also given to Copy to New's button"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x600403DC",
+      "old": "991f0e60",
+      "to": "mt_cp_pattern_update",
+      "next": "mt_cp_next_pattern_update",
+      "thumb": true,
+      "note": "Pattern screen vtable: update method 0x600e1f99 -> mt_cp_pattern_update (the scan and the write)"
+    },
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "version": true,
+      "note": "version text 1.2.0-cp4"
+    }
+  ]
+}

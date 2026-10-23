@@ -19,6 +19,8 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
     a copy of it on the same two ITCM sites,
   - condtrig alone, after and before all the others but itcmtest and synths, and after
     itcmtest (both on the same two ITCM sites),
+  - copypattern alone, after and before humanize (both add a button to the same page),
+    and after and before patch/all's patches,
 and checks that a bundle with ramdiag (standalone) is refused, and so is one where a
 shared site isn't chained by both patches, and one where two patches pass different
 registers at one ITCM site.
@@ -279,6 +281,21 @@ def main() -> int:
     it_ct = dict(rev, name="itcm-condtrig", include=[str(it), str(ct)], version="ICT")
     it_ct_spec = outdir / "itcm-condtrig.json"
     it_ct_spec.write_text(json.dumps(it_ct, indent=2))
+    cp = ROOT / "patch" / "copypattern" / "patch.json"
+    hz_cp = dict(rev, name="humanize-copypattern", include=[str(hz), str(cp)], version="HCP")
+    hz_cp_spec = outdir / "humanize-copypattern.json"
+    hz_cp_spec.write_text(json.dumps(hz_cp, indent=2))
+    cp_hz = dict(rev, name="copypattern-humanize", include=[str(cp), str(hz)], version="CPH")
+    cp_hz_spec = outdir / "copypattern-humanize.json"
+    cp_hz_spec.write_text(json.dumps(cp_hz, indent=2))
+    all_cp_list = [cs, hz, ip, mx, sw, vz, ct, sy, cp]
+    all_cp = dict(rev, name="all-copypattern", include=[str(x) for x in all_cp_list], version="CPA")
+    all_cp_spec = outdir / "all-copypattern.json"
+    all_cp_spec.write_text(json.dumps(all_cp, indent=2))
+    all_cp_rev = dict(rev, name="all-copypattern-reversed", include=[str(x) for x in all_cp_list[::-1]],
+                      version="CPR")
+    all_cp_rev_spec = outdir / "all-copypattern-reversed.json"
+    all_cp_rev_spec.write_text(json.dumps(all_cp_rev, indent=2))
     stock_img = bytes(read_ptf(stock).image)
 
     for label, spec, specs, version, sha in (
@@ -318,7 +335,12 @@ def main() -> int:
              [cs, hz, ip, mx, sw, vz, ct], "MTK", None),
             ("condtrig, visualizer, swing, masterfx, interpolate, humanize, colorsong", with_ct_rev_spec,
              [ct, vz, sw, mx, ip, hz, cs], "MTL", None),
-            ("chained on ITCM sites: itcmtest, then condtrig", it_ct_spec, [it, ct], "ICT", None)):
+            ("chained on ITCM sites: itcmtest, then condtrig", it_ct_spec, [it, ct], "ICT", None),
+            ("copypattern alone", cp, [cp], None, None),
+            ("humanize, copypattern", hz_cp_spec, [hz, cp], "HCP", None),
+            ("copypattern, humanize", cp_hz_spec, [cp, hz], "CPH", None),
+            ("patch/all's patches, then copypattern", all_cp_spec, all_cp_list, "CPA", None),
+            ("copypattern, then patch/all's patches reversed", all_cp_rev_spec, all_cp_list[::-1], "CPR", None)):
         out = outdir / f"{spec.stem if spec.parent == outdir else spec.parent.name}.ptf"
         if not build(stock, spec, out):
             check(False, f"{label}: patch_ptf failed")

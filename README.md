@@ -51,7 +51,13 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   envelopes, two LFOs (bipolar or unipolar) and a 6-slot Mod Matrix. Its patches save
   and load like any model's. Tested on hardware. See
   [patch/synths/README.md](patch/synths/README.md).
-- **all**: all eight mods above in one firmware (version text `1.2.0-MSY`), from
+- **copypattern**: a Copy to New button on the Pattern screen (record mode, next to
+  Humanize) copies the current pattern, with its unsaved edits and every track's
+  length, into the next empty pattern, playing or stopped, and stays on the current
+  pattern. Its button sits next to Humanize's, or in Humanize's place without it.
+  Tested on hardware; not in `patch/all`. See
+  [patch/copypattern/README.md](patch/copypattern/README.md).
+- **all**: the eight hardware-tested mods above (all but copypattern) in one firmware (version text `1.2.0-MSY`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware, made with the web
   patcher.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
@@ -111,6 +117,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/visualizer/` | Pad visualizer during playback |
 | `patch/condtrig/` | Conditional trigs: Chance FX values above 100 as conditions on the pass count |
 | `patch/synths/` | WAVE, a wavetable synth in place of one synth model per project; its table generator `gen_wavetables.py` |
+| `patch/copypattern/` | Copy to New: copies the current pattern into the next empty one |
 | `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
@@ -133,6 +140,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/test_colorsong.py`, `test_rescan.py` | colorsong rule and scenario tests on the patched firmware |
 | `tools/emu/test_ramdiag.py` | ramdiag menu, fill, scan and report tests on the patched firmware |
 | `tools/emu/test_humanize.py` | humanize button, edit-rule, Config menu and settings-file tests on the patched firmware |
+| `tools/emu/test_copypattern.py` | copypattern button, the search for an empty pattern, the copy (stopped and playing in song mode) against the stock writer and loader, failure cases and file rules |
 | `tools/emu/reverb_rig.py` | The master reverb and delay objects driven block by block through their update(), for the masterfx tools |
 | `tools/emu/test_masterfx.py` | masterfx: Stock identical to stock firmware, switching, start-up, each effect's block handling, knob, level and cost tests, Config menu and settings file, and WAV renders next to the stock effects |
 | `tools/emu/stress_masterfx.py` | masterfx stress: long randomized sessions through the reverb or the delay (garbage settings, missing blocks, restarts, effect choices) with a write watch and state checks |
