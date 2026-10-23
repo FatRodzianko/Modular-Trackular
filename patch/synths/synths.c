@@ -56,7 +56,7 @@
 #include <stdint.h>
 
 #ifndef SYNTHS_VERSION
-#define SYNTHS_VERSION "sy4"
+#define SYNTHS_VERSION "sy5"
 #endif
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
@@ -634,8 +634,8 @@ static const int8_t osc_cells[] = {2, 3, 4, 0, 1, 40, 5, 6, 7, -1};
 static const int8_t osc_page[] = {2, 0, 3, 1, 4, 5, 6, 8, 7, 41, 40, 9, 10};
 /* The Modulation tab's envelope/LFO screens: VAP's cells, with each LFO's Polarity in the
  * empty cell just before its Sync */
-static const int8_t lfo1_cells[] = {23, 24, 25, 26, 60, 30, 27, 28, 29};
-static const int8_t lfo2_cells[] = {15, 16, 17, 18, -1, 61, 34, 31, 32, 33};
+static const int8_t lfo1_cells[] = {15, 16, 17, 18, 60, 30, 27, 28, 29};
+static const int8_t lfo2_cells[] = {23, 24, 25, 26, -1, 61, 34, 31, 32, 33};
 static const int8_t vap_lfo1_cells[] = {23, 24, 25, 26, -1, 30, 27, 28, 29};
 static const int8_t vap_lfo2_cells[] = {15, 16, 17, 18, -1, -1, 34, 31, 32, 33};
 /* The Edit Patch screen's LFO pages (a list; VAP's: Sync, Ratio, Waveform, Retrigger),
@@ -644,6 +644,11 @@ static const int8_t lfo1_page[] = {30, 27, 28, 29, 60};
 static const int8_t lfo2_page[] = {34, 31, 32, 33, 61};
 static const int8_t vap_lfo1_page[] = {-1, 30, 27, 28, 29};
 static const int8_t vap_lfo2_page[] = {34, 31, 32, 33};
+/* The Edit Patch screen's Env 1 and Env 2 pages: VAP's Env 1 is its filter envelope
+ * (23-26), so WAVE's filter envelope (15-18) goes there, and its mod envelope (23-26) on
+ * Env 2. (The engine keeps the slots: saved patches play as before.) */
+static const int8_t fenv_page[] = {15, 16, 17, 18};
+static const int8_t menv_page[] = {23, 24, 25, 26};
 
 static int cells_are(const struct fw_vector *v, const int8_t *cells, uint32_t n)
 {
@@ -703,8 +708,9 @@ static void wave_macros(const void *functor, struct fw_vector *macros)
 
 /* VAP's patch -> WAVE's. Checked first: anything unexpected leaves it VAP's (model 4).
  * The screen keeps VAP's tabs and cells (Oscillator, Filter, Modulation, Matrix, FX,
- * Voice), with WAVE's oscillator cells and names; VAP's Envelope 1 (23-26) is WAVE's mod
- * envelope and its Envelope 2 (15-18) WAVE's filter envelope. */
+ * Voice), with WAVE's oscillator cells and names. WAVE's filter envelope is VAP's
+ * Envelope 2 (15-18) and its mod envelope VAP's Envelope 1 (23-26); the pages and tabs
+ * show the filter envelope first, as VAP shows its own (23-26: VAP's filter envelope). */
 static void wave_rewrite(uint8_t *c)
 {
     struct fw_vector *pv = (struct fw_vector *)(c + C_PARAMS);
@@ -730,7 +736,8 @@ static void wave_rewrite(uint8_t *c)
         || !cells_are(&mod[2].cells, vap_lfo2_cells, sizeof vap_lfo2_cells)
         || !str_eq(&q[5].name, "LFO 1") || !str_eq(&q[6].name, "LFO 2")
         || !cells_are(&q[5].cells, vap_lfo1_page, sizeof vap_lfo1_page)
-        || !cells_are(&q[6].cells, vap_lfo2_page, sizeof vap_lfo2_page))
+        || !cells_are(&q[6].cells, vap_lfo2_page, sizeof vap_lfo2_page)
+        || !cells_are(&q[3].cells, menv_page, sizeof menv_page) || !cells_are(&q[4].cells, fenv_page, sizeof fenv_page))
         return;
 
     /* WAVE's own parameters after VAP's 60: the LFOs' Polarity, Bipolar (0) or Unipolar
@@ -774,17 +781,19 @@ static void wave_rewrite(uint8_t *c)
 
     /* the screen and the Macro editor's pages */
     set_cells(&osc[0].cells, osc_cells, sizeof osc_cells);
-    str_set(&mod[1].name, "Mod Env/LFO 1");
-    str_set(&mod[2].name, "Flt Env/LFO 2");
+    str_set(&mod[1].name, "Flt Env/LFO 1");
+    str_set(&mod[2].name, "Mod Env/LFO 2");
     set_cells(&mod[1].cells, lfo1_cells, sizeof lfo1_cells);
     set_cells(&mod[2].cells, lfo2_cells, sizeof lfo2_cells);
     set_cells(&q[5].cells, lfo1_page, sizeof lfo1_page);
     set_cells(&q[6].cells, lfo2_page, sizeof lfo2_page);   /* one more cell: from the heap */
     set_cells(&q[0].cells, osc_page, sizeof osc_page);
-    str_set(&q[3].name, "Mod Envelope");
-    str_set(&q[3].shortname, "Mod Env");
-    str_set(&q[4].name, "Filter Envelope");
-    str_set(&q[4].shortname, "Flt Env");
+    set_cells(&q[3].cells, fenv_page, sizeof fenv_page);    /* the Env 1 tile */
+    set_cells(&q[4].cells, menv_page, sizeof menv_page);    /* the Env 2 tile */
+    str_set(&q[3].name, "Filter Envelope");
+    str_set(&q[3].shortname, "Flt Env");
+    str_set(&q[4].name, "Mod Envelope");
+    str_set(&q[4].shortname, "Mod Env");
 
     /* the Macros, once the firmware has made them */
     init[2] = (uint32_t)fmt_manager;        /* an empty functor, as VAP's */

@@ -855,3 +855,17 @@ load and play, and the Polarity switches show at the end of the Edit Patch scree
 pages and work as expected. CPU (user): 8 WAVE voices playing, an LFO moving Position,
 full reverb and delay sends: the CPU use peaked at 56 %. Still open: boot with a
 WAVE project.
+
+### Built: `1.2.0-sy5` (emulator-tested; not on hardware yet)
+
+The user found WAVE's filter envelope on the Edit Patch screen's Env 2 tile, while stock
+VAP has its filter envelope on Env 1. Measured in the emulator, VAP's filter envelope is
+parameters 23–26 (Env 1). WAVE had taken 15–18 for its filter envelope from an inference
+in FINDINGS that turned out wrong (FINDINGS section 23, "VAP's envelopes, measured").
+
+The user chose the display-only fix: the Env 1 tile and the "Flt Env/LFO 1" tab show WAVE's
+filter envelope (15–18), and Env 2 and "Mod Env/LFO 2" its mod envelope (23–26). The engine,
+the Init patch, the Macros and saved patches are unchanged. The one difference from VAP left:
+WAVE's filter envelope answers MIDI CCs 46–49, where VAP's answers 80–83.
+
+`sy5` on hardware (user): alone and in the all bundle (`1.2.0-MS5`), the filter envelope on Env 1; every mod in MS5 works.

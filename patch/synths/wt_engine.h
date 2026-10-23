@@ -19,7 +19,7 @@
  * JP-8000's; the saw is its centre saw alone. Each voice's oscillators start at their
  * own phases.
  *
- * Modulation, per block: a mod envelope (VAP's Env 2, 23-26), two LFOs with VAP's
+ * Modulation, per block: a mod envelope (23-26, VAP's Env 1), two LFOs with VAP's
  * parameters (27-34: Ratio in Hz, or a tempo division with Sync; Waveform; Retrigger
  * Note, One Shot or Free Running) and a Polarity each (60, 61: WAVE's own, after VAP's
  * 60; Bipolar -1..1, Unipolar 0..1), and a 6-slot Mod Matrix (42-59: Src, Dest, Amt)
@@ -34,9 +34,10 @@
  * The 24 dB OB and SVF types put a second, unresonant stage before it. Cutoff, envelope
  * and key tracking are set per block.
  *
- * Envelopes (x2, ADSR): advanced once per block, a linear attack and exponential decay
+ * Envelopes (x3, ADSR): advanced once per block, a linear attack and exponential decay
  * and release; the amp envelope is ramped across the block. As in VAP, parameters
- * 19-22 are the amp envelope and 15-18 the filter's (docs/FINDINGS.md section 21). The
+ * 19-22 are the amp envelope; WAVE's filter envelope is 15-18 (VAP's Env 2; VAP's own filter
+ * envelope is 23-26, docs/FINDINGS.md section 23). The
  * amp envelope's end makes the voice idle: "sounding" is false and the render writes
  * 128 zeros.
  */
@@ -62,7 +63,7 @@ enum {
     WP_FENV_ATT, WP_FENV_DEC, WP_FENV_SUS, WP_FENV_REL,     /* 15-18: the filter envelope */
     WP_AENV_ATT, WP_AENV_DEC, WP_AENV_SUS, WP_AENV_REL,     /* 19-22: the amp envelope */
     WP_GLIDE_MODE, WP_GLIDE_TIME, WP_TRACK, WP_DIGITAL, WP_NOISE,
-    WP_MENV_ATT, WP_MENV_DEC, WP_MENV_SUS, WP_MENV_REL,     /* 23-26: the mod envelope (VAP's Env 2) */
+    WP_MENV_ATT, WP_MENV_DEC, WP_MENV_SUS, WP_MENV_REL,     /* 23-26: the mod envelope (VAP's Env 1) */
     WP_LFO1, WP_LFO2 = WP_LFO1 + 4,                         /* 27-30, 31-34: Ratio, Waveform, Retrigger, Sync */
     WP_MTX = WP_LFO2 + 4,                                   /* 42-59: 6 x Src, Dest, Amt */
     WP_LFO_POL = WP_MTX + 18,                               /* 60, 61: LFO 1's and LFO 2's Polarity */

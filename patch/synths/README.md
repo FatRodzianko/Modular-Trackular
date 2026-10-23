@@ -27,10 +27,13 @@ What WAVE has:
   Resonance, Volume and Noise.
 - Glide and noise.
 
-Installed on its own, Config shows the firmware version as `1.2.0-sy4`.
+Installed on its own, Config shows the firmware version as `1.2.0-sy5`.
 
-**Status:** tested in the emulator and on hardware: `sy4`, alone and bundled with all the
-other patches, installs and plays; `sy3` patches load and play; the LFOs' Polarity
+**Status:** `sy5` is tested in the emulator and on hardware, alone and in the all bundle.
+It is `sy4` with the filter envelope on the
+Edit Patch screen's Env 1 tile (as VAP's) and the mod envelope on Env 2; the sound and
+the patch files are unchanged. `sy4` was tested on hardware, alone and bundled with all
+the other patches: it installs and plays; `sy3` patches load and play; the LFOs' Polarity
 switches show on the Edit Patch screen and work. With 8 WAVE voices playing, an LFO
 moving Position and full reverb and delay sends, the CPU use peaked at 56 %.
 Earlier builds were tested on hardware:
@@ -72,8 +75,8 @@ screen, the tiles open them as lists:
 | Osc | Wave, Position, Mix, Tune, Detune, Finetune, Noise, Digital, Reset |
 | Filter | Cutoff, Resonance, Type, Env Amt, Key Track |
 | Amp Env | The amp envelope |
-| Env 1 | The mod envelope |
-| Env 2 | The filter envelope |
+| Env 1 | The filter envelope (as on VAP) |
+| Env 2 | The mod envelope |
 | LFO 1, LFO 2 | Sync, Ratio, Waveform, Retrigger, Polarity |
 | Mod | The Mod Matrix |
 | Voice | Glide Mode, Glide Time, Volume |
@@ -94,8 +97,8 @@ Noise (white noise into the filter), and Finetune (both oscillators, ±100 c).
 
 **Modulation:**
 - Amp Env.
-- Mod Env/LFO 1: the mod envelope, and LFO 1.
-- Flt Env/LFO 2: the filter envelope, and LFO 2.
+- Flt Env/LFO 1: the filter envelope, and LFO 1.
+- Mod Env/LFO 2: the mod envelope, and LFO 2.
 
 Each envelope has Attack, Decay, Sustain and Release. Attack is the time to full level;
 Decay and Release are the time to fall 60 dB.
@@ -349,7 +352,7 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/synths/patch.json build/TrackerPlus_sy4.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/synths/patch.json build/TrackerPlus_sy5.ptf
 ```
 
 To combine it with other patches, list `../synths/patch.json` in a bundle (see "Choosing
@@ -367,7 +370,7 @@ patch/synths/build.sh
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_synths.py build/TrackerPlus_sy4.ptf path/to/TrackerPlus_1.2.0.ptf [wav folder] [--stress 20000]
+python tools/emu/test_synths.py build/TrackerPlus_sy5.ptf path/to/TrackerPlus_1.2.0.ptf [wav folder] [--stress 20000]
 ```
 
 It runs the firmware's own synth system: host, slots, VAP voices and the audio graph
@@ -443,7 +446,7 @@ With a folder given, it also writes WAV files of test phrases:
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched `.ptf` to
 `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then Config →
-Firmware → the patched file. Config should show `1.2.0-sy4 Build 1504`.
+Firmware → the patched file. Config should show `1.2.0-sy5 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`.
 - Synths that were WAVE play the replaced model's Init patch.

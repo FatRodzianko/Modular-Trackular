@@ -63,7 +63,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   pattern. Its button sits next to Humanize's, or in Humanize's place without it.
   Tested on hardware. See
   [patch/copypattern/README.md](patch/copypattern/README.md).
-- **all**: all ten mods above in one firmware (version text `1.2.0-ML2`), from
+- **all**: all ten mods above in one firmware (version text `1.2.0-MS5`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for

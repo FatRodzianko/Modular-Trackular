@@ -486,14 +486,14 @@ WAVE_INIT = {0: ("Position 1", 0.6667), 1: ("Position 2", 0.6667), 2: ("Wave 1",
 WAVE_GROUPS = [("Oscillator", [("(1/2)", [2, 3, 4, 0, 1, 40, 5, 6, 7, -1]), ("(2/2)", [9, 10, 41, -1, -1, 8, -1, -1])]),
                ("Filter", [("", [12, 13, 11, 14, -1, 37, -1, -1, -1])]),
                ("Modulation", [("Amp Env", [19, 20, 21, 22, -1, -1]),
-                               ("Mod Env/LFO 1", [23, 24, 25, 26, 60, 30, 27, 28, 29]),
-                               ("Flt Env/LFO 2", [15, 16, 17, 18, -1, 61, 34, 31, 32, 33])]),
+                               ("Flt Env/LFO 1", [15, 16, 17, 18, 60, 30, 27, 28, 29]),
+                               ("Mod Env/LFO 2", [23, 24, 25, 26, -1, 61, 34, 31, 32, 33])]),
                ("Matrix", [("(1/2)", list(range(42, 51))), ("(2/2)", list(range(51, 60)) + [-1])]),
                ("FX", [("", [])]),
                ("Voice", [("", [35, 36, 39])])]
 WAVE_PAGES = [("Oscillators", "Osc", [2, 0, 3, 1, 4, 5, 6, 8, 7, 41, 40, 9, 10]), ("Filter", "", [12, 13, 11, 14, 37]),
-              ("Amp Envelope", "Amp Env", [19, 20, 21, 22]), ("Mod Envelope", "Mod Env", [23, 24, 25, 26]),
-              ("Filter Envelope", "Flt Env", [15, 16, 17, 18]), ("LFO 1", "", [30, 27, 28, 29, 60]),
+              ("Amp Envelope", "Amp Env", [19, 20, 21, 22]), ("Filter Envelope", "Flt Env", [15, 16, 17, 18]),
+              ("Mod Envelope", "Mod Env", [23, 24, 25, 26]), ("LFO 1", "", [30, 27, 28, 29, 60]),
               ("LFO 2", "", [34, 31, 32, 33, 61]), ("Modulation", "Mod", list(range(42, 60))), ("Voice", "", [35, 36, 39])]
 WAVE_MACROS = [("Attack", [19]), ("Decay/Release", [20, 16, 22, 18]), ("Wave Position", [0, 1]),
                ("Filter Cutoff", [12]), ("Filter Resonance", [13]), ("Filter Env Amount", [14]), ("Velocity", [39]),
@@ -644,6 +644,10 @@ def wave_model_checks(ptf: Path) -> None:
     check(groups == WAVE_GROUPS, f"the screen: {[g for g, _ in groups]} with WAVE's cells")
     check(pages == WAVE_PAGES, f"the Edit Patch screen's pages (each LFO's Polarity last on its page): "
                                f"{[(q[0], q[1]) for q in pages]}")
+    check(pages[3][2] == [P_FENV_ATT, P_FENV_DEC, P_FENV_SUS, P_FENV_REL]
+          and pages[4][2] == [P_MENV_ATT, P_MENV_DEC, P_MENV_SUS, P_MENV_REL],
+          f"the Env 1 tile (page 4) holds the filter envelope the engine follows ({pages[3][2]}), as VAP's Env 1 "
+          f"holds VAP's; Env 2 the mod envelope ({pages[4][2]})")
     check([(n, t) for n, t, _ in macros] == WAVE_MACROS and all(a == 1.0 for _, _, am in macros for a in am),
           f"the Macros: {[(n, t) for n, t, _ in macros]}")
     used = {x for _, subs in groups for _, cells in subs for x in cells if x >= 0} | \

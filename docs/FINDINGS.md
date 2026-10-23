@@ -1646,7 +1646,7 @@ The voice's `set_param` index is the entry's position. VAP has 60:
 |---|---|
 | 0–11 | Shape 1, Shape 2 (0..1), PW 1, PW 2 (−0.5..0.5), Mix (−1..1), Tune 1, Tune 2 (−36..36 st), Detune (0..100), Finetune (−100..100), Reset 1, Reset 2, Type (filter, 0..14) |
 | 12–14 | Cutoff (20..20000 Hz, default 400), Resonance (0..1.5), Env Amt (−1..1) |
-| 15–18, 19–22, 23–26 | Three ADSRs: Attack, Decay, Release 0..10, Sustain 0..1. By their defaults 15–18 is the amp envelope (S 1.0), 19–22 the filter's (S 0, with Env Amt) and 23–26 Envelope 2 |
+| 15–18, 19–22, 23–26 | Three ADSRs: Attack, Decay, Release 0..10, Sustain 0..1. Measured (see "VAP's envelopes, measured" below): 19–22 is the amp envelope, 23–26 the filter's (with Env Amt; the Edit Patch screen's Env 1) and 15–18 a free envelope (Env 2). (Read from the defaults alone, this table first said 15–18 amp and 19–22 filter.) |
 | 27–34 | Two LFOs: Ratio, Waveform, Retrigger, Sync |
 | 35–41 | Glide Mode, Glide Time, Note Track, Mix Env Amt, Volume (0..2: velocity, set per note), Sync, Noise |
 | 42–59 | A 6-slot matrix: Src, Dest, Amt |
@@ -1681,8 +1681,9 @@ measured with `mallinfo` around raising a slot's polyphony.
 ### Found while building `patch/synths` (emulator)
 
 - **VAP's amp envelope is parameters 19–22, not 15–18.** An Attack on 19 slows the
-  onset, Sustain 21 holds the note, and Release 22 sets the tail; 15–18 change nothing
-  with the filter open, so they are the filter envelope (with Env Amt). VAP's default
+  onset, Sustain 21 holds the note, and Release 22 sets the tail. 15–18 change nothing
+  with the filter open. (This note went on to call them the filter envelope; that was
+  wrong: VAP's filter envelope is 23–26. See "VAP's envelopes, measured" in section 23.) VAP's default
   patch is a pluck: amp Sustain 0, Decay 0.5. The Init patch's Macros agree: Macro a
   ("Attack") moves 19 and Macro b ("Decay/Release") moves 20 and 22; c is empty, d moves
   Cutoff (12), e Resonance (13), f Env Amt (14).
@@ -2330,3 +2331,26 @@ through chain words stored there, so the unit reset in a loop.
   the first 256 bytes of a sector with `0xFF` up to 16 bytes into the second page (like
   `MT0` and `RD2`). `tools/test_layout.py` checks every output. No hardware-tested build
   ended in a first page, so their outputs are unchanged.
+
+### VAP's envelopes, measured (`patch/synths` sy5, emulator; the user's hardware check)
+
+Stock VAP, Cutoff 150 Hz, Resonance 0, Env Amt 100 %, a note held 2.3 s. Each envelope in
+turn gets a 2 s attack (Sustain 1), the others an instant one:
+
+| Slow attack on | Brightness (spectral centroid), early → late | Level (RMS), early → late |
+|---|---|---|
+| 15–18 | 2351 → 2329 Hz | 15237 → 15215 |
+| 19–22 | 2237 → 2329 Hz | 1571 → 15215 |
+| 23–26 | 522 → 2329 Hz | 12046 → 15215 |
+
+- **19–22 is the amp envelope, 23–26 the filter envelope, and 15–18 a free envelope** that
+  drives neither on its own (a Mod Matrix source). VAP's own Macros agree: Attack moves
+  19 and 23, Decay/Release 20, 24, 22 and 26.
+- On the Edit Patch screen, VAP's Env 1 tile (page "Envelope 1") holds 23–26, its filter
+  envelope, and Env 2 holds 15–18. The user checked this on hardware.
+- The MIDI CCs (entry byte `+0x23`): Cutoff 74, Resonance 71, Env Amt 77, 15–18 CCs 46–49,
+  19–22 CCs 75, 72, 76, 73, and 23–26 CCs 80–83.
+- WAVE (`patch/synths`) took 15–18 as its filter envelope and 23–26 as its mod envelope,
+  from the earlier inference. Its pages and tabs now show 15–18 on Env 1 and 23–26 on
+  Env 2, so the filter envelope sits where VAP's does; the slots and saved patches are
+  unchanged. Its filter envelope answers CCs 46–49, not VAP's 80–83.
