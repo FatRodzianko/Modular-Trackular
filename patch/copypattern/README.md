@@ -8,7 +8,7 @@ switch to the copy yourself when you want it. Installed on its own, Config shows
 firmware version as `1.2.0-cp4`.
 
 **Status:** tested on hardware, on its own (third button) and with humanize (fourth
-button, Humanize on the third). Not part of `patch/all`.
+button, Humanize on the third), and in `patch/all`.
 
 ## Using it
 

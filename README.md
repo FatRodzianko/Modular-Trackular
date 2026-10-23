@@ -60,9 +60,9 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   Humanize) copies the current pattern, with its unsaved edits and every track's
   length, into the next empty pattern, playing or stopped, and stays on the current
   pattern. Its button sits next to Humanize's, or in Humanize's place without it.
-  Tested on hardware; not in `patch/all`. See
+  Tested on hardware. See
   [patch/copypattern/README.md](patch/copypattern/README.md).
-- **all**: the nine hardware-tested mods above (all but copypattern) in one firmware (version text `1.2.0-MLG`), from
+- **all**: all ten mods above in one firmware (version text `1.2.0-MLC`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
@@ -123,7 +123,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/synths/` | WAVE, a wavetable synth in place of one synth model per project; its table generator `gen_wavetables.py` |
 | `patch/legato/` | MIDI legato: a Glide FX on a MIDI note sends its note-on before the previous note's note-off |
 | `patch/copypattern/` | Copy to New: copies the current pattern into the next empty one |
-| `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato in one firmware |
+| `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
 | `patch/itcmtest/` | No-op test of ITCM hooks (stubs in the ITCM tail, loaded by the startup copy table) |

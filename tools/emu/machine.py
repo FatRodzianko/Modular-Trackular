@@ -141,7 +141,16 @@ class Machine:
         return self.r32(self.uc.reg_read(UC_ARM_REG_SP) + 4 * (i - 4))
 
     def cstr(self, a: int, limit: int = 512) -> str:
-        return bytes(self.uc.mem_read(a, limit)).split(b"\0")[0].decode("latin-1")
+        # Byte by byte up to the NUL, as the firmware reads it: a fixed-size read would
+        # fault on a short string near the end of a memory region. An unterminated string
+        # that runs into unmapped memory still raises.
+        out = bytearray()
+        while len(out) < limit:
+            b = bytes(self.uc.mem_read(a + len(out), 1))
+            if b == b"\0":
+                break
+            out += b
+        return out.decode("latin-1")
 
     def _on_dl_write(self, uc, address, size, user):
         self.display_list.append(uc.reg_read(UC_ARM_REG_R1))

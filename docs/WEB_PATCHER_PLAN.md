@@ -59,7 +59,9 @@ A mix is a bundle spec built from `patch/all/patch.json` (same `firmware`,
   hex digit). Bits 6 and 7 went to condtrig and synths. From the ninth mod (legato,
   bit 8) the first letter carries the bits above 7: `M` + (mask >> 8), so mixes with
   legato are `N` + two hex digits (colorsong + legato is `1.2.0-N01`) and the names of
-  mixes without it don't change. `Z` is the last letter, so masks up to 0xDFF fit.
+  mixes without it don't change. Copypattern is bit 9: `O` without legato, `P` with it
+  (colorsong + copypattern is `1.2.0-O01`). `Z` is the last letter, so masks up to
+  0xDFF fit.
 
 The page offers this spec for download too ("for Python users"), so anyone can
 rebuild the same file with `tools/patch_ptf.py` and compare.

@@ -38,11 +38,12 @@ Python command below does, without installing anything:
    one in step 1) and the image's, and refuses anything else, including a file that's
    already patched.
 2. Tick the mods you want. One mod gives its own build, "Select all" gives the
-   `patch/all` bundle (all nine, `1.2.0-MLG`), and any other mix gets a version text
+   `patch/all` bundle (all ten, `1.2.0-MLC`), and any other mix gets a version text
    that says which mods are in it: `M` plus two hex digits for colorsong 01, humanize 02,
    interpolate 04, masterfx 08, swing 10, visualizer 20, condtrig 40 and synths 80
-   (colorsong + swing is `1.2.0-M11`), and `N` instead of `M` when legato is in it
-   (colorsong + legato is `1.2.0-N01`).
+   (colorsong + swing is `1.2.0-M11`); `N` instead of `M` when legato is in it
+   (colorsong + legato is `1.2.0-N01`), `O` when copypattern is (colorsong + copypattern
+   is `1.2.0-O01`), and `P` when both are.
 3. Patch and download. The page only offers the file when its SHA-256 is the one
    `tools/patch_ptf.py` makes for that selection (`web/expected.json`), and says when
    it's also one of the hardware-tested builds in the table below. A mix that isn't in
@@ -65,7 +66,7 @@ python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.js
 ```
 
 Use `patch/humanize/patch.json` for Humanize alone, `patch/interpolate/patch.json` for
-interpolate alone, or `patch/all/patch.json` for all nine in one firmware (see "Choosing patches" below for your own
+interpolate alone, or `patch/all/patch.json` for all ten in one firmware (see "Choosing patches" below for your own
 mix).
 
 The patcher checks the stock image, checks the original bytes at every patched
@@ -85,10 +86,11 @@ must be byte-identical to these builds:
 | synths | `TrackerPlus_sy4.ptf` | `1.2.0-sy4` | tested | `2fca2e07bb19ef4e539328152af27c173067ec6088604c45d9f28b96aa876e97` |
 | legato | `TrackerPlus_lg1.ptf` | `1.2.0-lg1` | tested | `f266ed1f131fc15edf12b224e081f16d9109938b004d8410e2cb0cdb380a68e6` |
 | copypattern | `TrackerPlus_cp4.ptf` | `1.2.0-cp4` | tested (also with humanize) | `7bfbc3eb09a7eb9d9dd4ccf3a8a52b1221743be7061397048f72bbc32908db01` |
-| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato) | `TrackerPlus_MLG.ptf` | `1.2.0-MLG` | tested | `4afd36206ccbb73b6d2556b4de9228afc060360653152fa492d67139da2ad0a2` |
-| the previous all (the same without legato) | `TrackerPlus_MSY.ptf` | `1.2.0-MSY` | tested (made with the web patcher) | `f3fee2dd07e88d3b8810cd1d9b371e0636f7ad4920c777f021b28da2afd2fd99` |
-| the all before that (without synths and legato) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | tested | `6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437` |
-| the one before that (without condtrig, synths and legato) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
+| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern) | `TrackerPlus_MLC.ptf` | `1.2.0-MLC` | tested | `4170d1cbf34c3a91073d6f276798844dcdd10faee99acb7fc079af484bc269b0` |
+| the previous all (the same without copypattern) | `TrackerPlus_MLG.ptf` | `1.2.0-MLG` | tested | `4afd36206ccbb73b6d2556b4de9228afc060360653152fa492d67139da2ad0a2` |
+| the all before that (without legato and copypattern) | `TrackerPlus_MSY.ptf` | `1.2.0-MSY` | tested (made with the web patcher) | `f3fee2dd07e88d3b8810cd1d9b371e0636f7ad4920c777f021b28da2afd2fd99` |
+| the one before that (without synths, legato and copypattern) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | tested | `6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437` |
+| the one before that (without condtrig, synths, legato and copypattern) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 | itcmtest (ITCM hooks test, on its own) | `TrackerPlus_it1.ptf` | `1.2.0-it1` | tested | `701b35dfadb4626ebe19e94ccb3af47aff9e4d604684d59b2e8b9cbf5da18d7c` |
@@ -108,16 +110,17 @@ Each patch can be installed on its own, or several can go into one firmware:
   `patch/visualizer/patch.json` the pad visualizer, `patch/condtrig/patch.json`
   conditional trigs, `patch/synths/patch.json` the WAVE synth, `patch/legato/patch.json`
   MIDI legato,
-  `patch/copypattern/patch.json` the Copy to New button (not in `patch/all`).
+  `patch/copypattern/patch.json` the Copy to New button.
 - **Several patches:** use a bundle spec, which lists the patches to combine.
-  `patch/all/patch.json` is the bundle that ships (all nine: colorsong, Humanize,
-  interpolate, masterfx, swing, the visualizer, condtrig, synths and legato):
+  `patch/all/patch.json` is the bundle that ships (all ten: colorsong, Humanize,
+  interpolate, masterfx, swing, the visualizer, condtrig, synths, legato and copypattern):
 
   ```json
   "include": ["../colorsong/patch.json", "../humanize/patch.json", "../interpolate/patch.json",
               "../masterfx/patch.json", "../swing/patch.json", "../visualizer/patch.json",
-              "../condtrig/patch.json", "../synths/patch.json", "../legato/patch.json"],
-  "version": "MLG",
+              "../condtrig/patch.json", "../synths/patch.json", "../legato/patch.json",
+              "../copypattern/patch.json"],
+  "version": "MLC",
   ```
 
 To make your own mix, copy `patch/all/` to a new folder (for example `patch/mymix/`)
@@ -226,7 +229,7 @@ went from the `.map.json` the patcher wrote next to the `.ptf`, so keep the two
 together.
 
 `tools/test_layout.py` checks the patcher's placement without the emulator. It builds
-each patch alone, `patch/all` (all nine) and its reverse, colorsong, humanize and interpolate in the
+each patch alone, `patch/all` (all ten) and its reverse, colorsong, humanize and interpolate in the
 other order, those three with masterfx in both orders, the six before condtrig in the other order, the six with synths in both orders,
 copypattern alone, with humanize in both orders and with all nine in both orders, and two
 patches on the same chained sites, and

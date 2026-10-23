@@ -79,6 +79,14 @@
       "title": "MIDI Legato",
       "summary": "A Glide FX (G) on a MIDI-instrument note plays it legato: its note-on goes out before the previous note's note-off, so a mono synth doesn't retrigger its envelopes. Stock firmware ignores G on MIDI notes.",
       "status": "Tested on hardware"
+    },
+    {
+      "id": "copypattern",
+      "bit": 9,
+      "spec": "patch/copypattern/patch.json",
+      "title": "Copy Pattern to New",
+      "summary": "A Pattern screen button (record mode, More twice) that copies the current pattern, unsaved edits and track lengths included, into the next empty pattern, playing or stopped, and stays on the current pattern.",
+      "status": "Tested on hardware"
     }
   ],
   "tested_builds": {
@@ -95,6 +103,8 @@
     "2fca2e07bb19ef4e539328152af27c173067ec6088604c45d9f28b96aa876e97": "synths (1.2.0-sy4)",
     "f3fee2dd07e88d3b8810cd1d9b371e0636f7ad4920c777f021b28da2afd2fd99": "all eight mods before legato (1.2.0-MSY)",
     "f266ed1f131fc15edf12b224e081f16d9109938b004d8410e2cb0cdb380a68e6": "legato (1.2.0-lg1)",
-    "4afd36206ccbb73b6d2556b4de9228afc060360653152fa492d67139da2ad0a2": "all nine mods (1.2.0-MLG)"
+    "4afd36206ccbb73b6d2556b4de9228afc060360653152fa492d67139da2ad0a2": "all nine mods before copypattern (1.2.0-MLG)",
+    "7bfbc3eb09a7eb9d9dd4ccf3a8a52b1221743be7061397048f72bbc32908db01": "copypattern (1.2.0-cp4)",
+    "4170d1cbf34c3a91073d6f276798844dcdd10faee99acb7fc079af484bc269b0": "all ten mods (1.2.0-MLC)"
   }
 }
