@@ -56,8 +56,10 @@ A mix is a bundle spec built from `patch/all/patch.json` (same `firmware`,
   interpolate 2, masterfx 3, swing 4, visualizer 5), so the text says which mods are
   in a firmware: colorsong + swing is `1.2.0-M11`. Always 3
   characters, so Config shows it. It can't collide with `MTE` or `MT0` (`T` isn't a
-  hex digit). Bits 6 and 7 are left for the next two mods; a ninth needs a new
-  scheme (for example two base-32 digits).
+  hex digit). Bits 6 and 7 went to condtrig and synths. From the ninth mod (legato,
+  bit 8) the first letter carries the bits above 7: `M` + (mask >> 8), so mixes with
+  legato are `N` + two hex digits (colorsong + legato is `1.2.0-N01`) and the names of
+  mixes without it don't change. `Z` is the last letter, so masks up to 0xDFF fit.
 
 The page offers this spec for download too ("for Python users"), so anyone can
 rebuild the same file with `tools/patch_ptf.py` and compare.

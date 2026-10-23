@@ -51,15 +51,19 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   envelopes, two LFOs (bipolar or unipolar) and a 6-slot Mod Matrix. Its patches save
   and load like any model's. Tested on hardware. See
   [patch/synths/README.md](patch/synths/README.md).
+- **legato**: MIDI legato. A Glide FX (`G`, any value) on a MIDI-instrument note sends
+  its note-on before the previous note's note-off, so a mono synth plays the two notes
+  legato instead of retriggering its envelopes, without a second track. Stock firmware
+  ignores `G` on MIDI notes. Tested on hardware. See
+  [patch/legato/README.md](patch/legato/README.md).
 - **copypattern**: a Copy to New button on the Pattern screen (record mode, next to
   Humanize) copies the current pattern, with its unsaved edits and every track's
   length, into the next empty pattern, playing or stopped, and stays on the current
   pattern. Its button sits next to Humanize's, or in Humanize's place without it.
   Tested on hardware; not in `patch/all`. See
   [patch/copypattern/README.md](patch/copypattern/README.md).
-- **all**: the eight hardware-tested mods above (all but copypattern) in one firmware (version text `1.2.0-MSY`), from
-  [patch/all/patch.json](patch/all/patch.json). Tested on hardware, made with the web
-  patcher.
+- **all**: the nine hardware-tested mods above (all but copypattern) in one firmware (version text `1.2.0-MLG`), from
+  [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
   future patches. See [patch/ramdiag/README.md](patch/ramdiag/README.md).
@@ -98,7 +102,7 @@ page only offers a download when its output is byte-identical to what
 `tools/patch_ptf.py` makes. See "In your browser" in [docs/PATCHING.md](docs/PATCHING.md).
 
 Each mod can be installed on its own, or several can be combined into one firmware.
-`patch/all` combines all eight, and you can make your own mix, including
+`patch/all` combines all nine, and you can make your own mix, including
 patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.md).
 
 ## Layout
@@ -117,8 +121,9 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/visualizer/` | Pad visualizer during playback |
 | `patch/condtrig/` | Conditional trigs: Chance FX values above 100 as conditions on the pass count |
 | `patch/synths/` | WAVE, a wavetable synth in place of one synth model per project; its table generator `gen_wavetables.py` |
+| `patch/legato/` | MIDI legato: a Glide FX on a MIDI note sends its note-on before the previous note's note-off |
 | `patch/copypattern/` | Copy to New: copies the current pattern into the next empty one |
-| `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths in one firmware |
+| `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
 | `patch/itcmtest/` | No-op test of ITCM hooks (stubs in the ITCM tail, loaded by the startup copy table) |
@@ -150,6 +155,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/test_condtrig.py` | condtrig: every condition in both columns, what a skipped step drops, counting and resets, encoder and grid text, Chance 0–100 as stock, cost |
 | `tools/emu/synth_rig.py` | The firmware's synth system (host, slots, voices, the audio graph) driven block by block, for the synth tools |
 | `tools/emu/test_synths.py` | synths: stock output unchanged, the swap, the WAVE model and its pages, Model list and Edit Patch drawing, settings and patch files, oscillators, filters, envelopes, LFOs and Mod Matrix, banks, voices, stress, and WAV renders |
+| `tools/emu/test_legato.py` | legato: random patterns against stock (identical without `G`, only reordered with it), the legato order and every case that keeps the stock order, other FX, stuck notes, cost |
 | `tools/emu/test_itcmtest.py` | itcmtest: the ITCM stubs after the boot copy, Chance FX and count-in playing exactly as stock through the hooks |
 | `tools/emu/test_interpolate.py` | interpolate ramp, MIDI-rate, cost, Config menu and settings-file tests, through the real audio block |
 | `tools/emu/seq_timing.py` | Run the stock sequencer on test patterns and print the MIDI it sends, with timing |

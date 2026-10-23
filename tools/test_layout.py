@@ -7,7 +7,7 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
     visualizer alone, ramdiag alone,
   - versiontest alone (pinned base; byte-identical to MT0),
   - patch/all (colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig,
-    synths),
+    synths, legato),
   - colorsong, humanize and interpolate the other way round (interpolate, humanize,
     colorsong),
   - colorsong, humanize, interpolate and masterfx, both ways round, and with swing and
@@ -21,6 +21,8 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
     itcmtest (both on the same two ITCM sites),
   - copypattern alone, after and before humanize (both add a button to the same page),
     and after and before patch/all's patches,
+  - legato alone, and patch/all in reverse order (legato first; with condtrig,
+    both with ITCM hooks),
 and checks that a bundle with ramdiag (standalone) is refused, and so is one where a
 shared site isn't chained by both patches, and one where two patches pass different
 registers at one ITCM site.
@@ -281,6 +283,7 @@ def main() -> int:
     it_ct = dict(rev, name="itcm-condtrig", include=[str(it), str(ct)], version="ICT")
     it_ct_spec = outdir / "itcm-condtrig.json"
     it_ct_spec.write_text(json.dumps(it_ct, indent=2))
+    lg = ROOT / "patch" / "legato" / "patch.json"
     cp = ROOT / "patch" / "copypattern" / "patch.json"
     hz_cp = dict(rev, name="humanize-copypattern", include=[str(hz), str(cp)], version="HCP")
     hz_cp_spec = outdir / "humanize-copypattern.json"
@@ -288,7 +291,7 @@ def main() -> int:
     cp_hz = dict(rev, name="copypattern-humanize", include=[str(cp), str(hz)], version="CPH")
     cp_hz_spec = outdir / "copypattern-humanize.json"
     cp_hz_spec.write_text(json.dumps(cp_hz, indent=2))
-    all_cp_list = [cs, hz, ip, mx, sw, vz, ct, sy, cp]
+    all_cp_list = [cs, hz, ip, mx, sw, vz, ct, sy, lg, cp]
     all_cp = dict(rev, name="all-copypattern", include=[str(x) for x in all_cp_list], version="CPA")
     all_cp_spec = outdir / "all-copypattern.json"
     all_cp_spec.write_text(json.dumps(all_cp, indent=2))
@@ -296,6 +299,10 @@ def main() -> int:
                       version="CPR")
     all_cp_rev_spec = outdir / "all-copypattern-reversed.json"
     all_cp_rev_spec.write_text(json.dumps(all_cp_rev, indent=2))
+    all_lg_list = [cs, hz, ip, mx, sw, vz, ct, sy, lg]
+    all_lg_rev = dict(rev, name="all-legato-reversed", include=[str(x) for x in all_lg_list[::-1]], version="LGR")
+    all_lg_rev_spec = outdir / "all-legato-reversed.json"
+    all_lg_rev_spec.write_text(json.dumps(all_lg_rev, indent=2))
     stock_img = bytes(read_ptf(stock).image)
 
     for label, spec, specs, version, sha in (
@@ -308,8 +315,8 @@ def main() -> int:
             ("visualizer alone", vz, [vz], None, None),
             ("synths alone", sy, [sy], None, None),
             ("ramdiag alone", rd, [rd], None, None),
-            ("patch/all: colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig, synths",
-             all_spec, [cs, hz, ip, mx, sw, vz, ct, sy],
+            ("patch/all: colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig, synths, legato",
+             all_spec, [cs, hz, ip, mx, sw, vz, ct, sy, lg],
              json.loads(all_spec.read_text())["version"], None),
             ("reversed: interpolate, humanize, colorsong", rev_spec, [ip, hz, cs], "MTR", None),
             ("colorsong, humanize, interpolate, masterfx", with_mx_spec, [cs, hz, ip, mx], "MTX", None),
@@ -340,7 +347,9 @@ def main() -> int:
             ("humanize, copypattern", hz_cp_spec, [hz, cp], "HCP", None),
             ("copypattern, humanize", cp_hz_spec, [cp, hz], "CPH", None),
             ("patch/all's patches, then copypattern", all_cp_spec, all_cp_list, "CPA", None),
-            ("copypattern, then patch/all's patches reversed", all_cp_rev_spec, all_cp_list[::-1], "CPR", None)):
+            ("copypattern, then patch/all's patches reversed", all_cp_rev_spec, all_cp_list[::-1], "CPR", None),
+            ("legato alone", lg, [lg], None, None),
+            ("patch/all reversed (legato first)", all_lg_rev_spec, all_lg_list[::-1], "LGR", None)):
         out = outdir / f"{spec.stem if spec.parent == outdir else spec.parent.name}.ptf"
         if not build(stock, spec, out):
             check(False, f"{label}: patch_ptf failed")

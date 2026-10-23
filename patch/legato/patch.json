@@ -1,0 +1,53 @@
+{
+  "name": "legato",
+  "description": "Legato for MIDI instruments: a Glide FX (G) on a MIDI note sends its note-on before the previous note's note-off, so mono synths play the two notes legato",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "bin": "build/legato.bin",
+  "sym": "build/legato.sym",
+  "rel": "build/legato.rel",
+  "prebuilt_bin": "prebuilt/legato.bin",
+  "prebuilt_sym": "prebuilt/legato.sym",
+  "prebuilt_rel": "prebuilt/legato.rel",
+  "branches": [
+    {
+      "at": "0x600AA7F8",
+      "old": "00f02ef8",
+      "to": "mt_lg_seq_advance",
+      "next": "mt_lg_next_seq_advance",
+      "note": "app_audio_block: bl seq_advance (veneer 0x600aa858); afterwards ends a kept note, if any (guard)"
+    },
+    {
+      "at": "0x600BC27A",
+      "old": "00f02df8",
+      "to": "mt_lg_render_advance",
+      "next": "mt_lg_next_render_advance",
+      "note": "render loop: bl seq_advance (veneer 0x600bc2d8); the same guard"
+    }
+  ],
+  "itcm_branches": [
+    {
+      "at": "0x24DA",
+      "old": "fef763fe",
+      "to": "mt_lg_note_off",
+      "next": "mt_lg_next_note_off",
+      "note": "seq_process_track: bl seq_note_off_q 0x11a4 (the old note before a new one) -> mt_lg_note_off(seq, t, last, mode): keeps the old note for a legato step"
+    },
+    {
+      "at": "0x2FD8",
+      "old": "fef760fa",
+      "to": "mt_lg_trigger",
+      "next": "mt_lg_next_trigger",
+      "note": "seq_process_track: bl seq_trigger_note 0x149c (the step's note) -> mt_lg_trigger(seq, t, rec): ends the kept note after the new note-on"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "version": true,
+      "note": "version text 1.2.0-lg1"
+    }
+  ]
+}

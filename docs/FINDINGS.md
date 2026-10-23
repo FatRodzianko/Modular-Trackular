@@ -2174,6 +2174,72 @@ same after every build of a patch.
   array (1.0 when set; `0x16f14`). `+0x22` is "stepped" and `+0x23` the MIDI CC.
   `+0x24` is "rebuild on change".
 
+## 24. MIDI note-off order and legato hook points (emulator)
+
+Found while investigating legato (`docs/LEGATO_ANALYSIS.md`).
+
+### What stock sends
+
+- **Old note-off, then new note-on.** When a track plays a note while its last note
+  (a MIDI instrument) is still on, `seq_process_track` first calls
+  `seq_note_off_q(seq, t, last record, -4)` at ITCM `0x24da`, then
+  `seq_trigger_note(seq, t, work record)` at `0x2fd8`. Both messages go out at the same
+  tick, in the same audio block. USB and DIN get the same order; with both ports on,
+  each message goes to USB, then DIN.
+- **A MIDI note has no length of its own.** It sounds through empty steps until the
+  track's next note, an OFF/CUT/FADE step (note values −2/−3/−4, note-off at that
+  step's micro-step 1 from `0x296e`), a gate end, a mute or stop.
+- **No note-off across tracks.** Two tracks on one channel never end each other's
+  notes. Two note-ons of one pitch from two tracks get only one note-off.
+- **Micro-move and the instrument's MIDI delay** move the old note-off together with
+  the new note-on (both from the same two sites, at the delayed micro-step).
+- **Gate `q`:** note-off at the gate end from `0x20ca` (the gate, roll and mute path),
+  then a second note-off for the same note at the next note (`0x24da`). The gate length
+  is capped at 47 micro-steps: `q` 101–255 behaves like `q` 100.
+- **Chance fails:** neither `0x24da` nor `0x2fd8` runs; the old note keeps sounding.
+- **Glide `G` (type 19) on a MIDI note is ignored**, for every value 0–255.
+- **Stop:** `seq_stop` (`0x600acd90`) calls `seq_track_note_off_q` (`0x600ac5a8`) for
+  each of the 16 tracks, which sends the off for the track's last record.
+- **Mute** (the project's mute flag set while a note is held): note-off at the track's
+  next micro-step 1, from `0x20ca`.
+
+### The functions
+
+- **`seq_note_off_q(seq, t, rec, mode)`** (ITCM `0x11a4`): for instruments 48–66, a
+  record with Chord (14) in either FX column (and no Arp, 21) goes to
+  `seq_chord_note_off_q` (`0x600ac508`, through the veneer `0x1f698`), otherwise
+  `seq_note_off_out_q(note, 0, channel, synth)` through the veneer `0x1f608`. Sample
+  instruments on tracks 0–7 go to the voice note-off (`0x5678`). ITCM callers: `0x20ca`,
+  `0x24da`, `0x296e`, `0x33f2` and `0x1242` (a loop over the 16 tracks).
+- **`seq_trigger_note`** (ITCM `0x149c`) for instruments 48–66: Chord goes to
+  `seq_trigger_chord_q` (`0x138c`, note-ons through `0x1438`). Otherwise the velocity is
+  the `V` value × 127 / 100, or the instrument's default from `instr_default_velocity_q`
+  (`0x600acb50`, through the veneer `0x1f5c8`; byte `+2` of the MIDI instrument record
+  at project `+0xaa0 + 0x10·channel`), plus the performance velocity offset (`+0xb4`),
+  then a tail call to `seq_note_on_out_q` through the veneer `0x1f788`. ITCM callers:
+  `0x22f8`, `0x285c` and `0x2fd8` (step notes and delayed notes).
+- **`seq_note_on_out_q(note, velocity, channel, synth)`** (`0x600abb44`) and
+  **`seq_note_off_out_q(note, ?, channel, synth)`** (`0x600abbe8`): synth → the synth
+  engine; otherwise nothing while rendering, else note + (2 − settings `+0x2f`) × 12,
+  clamped to 0–127, to the USB and/or jack port object (vtable `+0x20` note on, `+0x24`
+  note off, velocity 0) by settings `+0x2c`. Settings `+0x2f` is the MIDI octave;
+  with 0, as in a zeroed emulator, notes go out 24 semitones up.
+- **The ITCM veneers' target words are in flash** (ITCM image base `0x6018d6e4`):
+  `0x601ace70` (`0x1f788`, note on), `0x601accf0` (`0x1f608`, note off) and
+  `0x601ad1e8` (`0x1fb00`, `seq_track_note_off_q`), like `0x601acf00` for
+  `seq_advance_step`. A `words` hook there sees every MIDI/synth note on or off, but
+  without the track.
+
+### Reordering for legato (emulator scratch proof)
+
+With unicorn hooks in place of two ITCM BL hooks (skip `0x24da` and keep a copy of the
+last record when the new note should be legato; at `0x2fdc`, where r0–r3 are dead,
+call `seq_note_off_q` with the copy), the new note-on goes out before the old note-off
+in every case tried: adjacent steps, after empty and OFF steps, Micro-move, Roll,
+Random note, after a gate, channel change, two tracks on one channel, a song-mode
+pattern change and stop. A Chance-failed step makes no copy. Random note (`n`) changes
+the work note after `0x24da`, so a same-pitch check belongs at `0x2fd8`.
+
 ## 25. Pattern files, the play buffer and copying a pattern (`patch/copypattern`, emulator)
 
 Details and the full design: [COPY_PATTERN_PLAN.md](COPY_PATTERN_PLAN.md).

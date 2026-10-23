@@ -318,6 +318,9 @@
 60148028	vec_param_default_append_q	(vector<parameter entry> *, n): _M_default_append, as VAP's builder grows the vector to 60
 6014dcb0	vap_param_register_q	(builder state, index, &entry, ...): moves the entry into params[index] (index < count) and sets VAP's set handler (table 0x2002d1a4, 60 x 16 bytes)
 60124f38	patch_storage_load_into	storage vtable +0x0c: (storage, &path, patch, 1) -> 1 when loaded; Workspace <slot>.patch (0x600b12d2) and Patches <model>/<name>.patch (0x600b0e9c)
+0000138c	seq_trigger_chord_q	(seq, t, rec): Chord FX note-ons, MIDI/synth (bl note-on veneer at 0x1438)
+600acb50	instr_default_velocity_q	(seq, instr): default velocity; MIDI 48-63 from project +0xaa0 + 0x10*channel + 2, samples and synths elsewhere
+600ac508	seq_chord_note_off_q	Chord FX note-offs for a record, from seq_note_off_q through ITCM veneer 0x1f698
 600ae98c	pattern_set_header	(seq, data): id 0x0002534b, version 5, size 0x3030
 600ae9b0	pattern_init	(seq, data): header, every track 32 steps, notes -1, instrument and FX types 0
 600ae940	step_clear	(seq, step): note -1, instrument 0, FX types 0 (values kept)

@@ -1,0 +1,11 @@
+601d0154 t lg_flush
+601d0134 t lg_init_if_needed
+601d0184 T mt_lg_next_note_off
+601d0190 T mt_lg_next_render_advance
+601d018c T mt_lg_next_seq_advance
+601d0188 T mt_lg_next_trigger
+601d0000 T mt_lg_note_off
+601d011c T mt_lg_render_advance
+601d0104 T mt_lg_seq_advance
+601d00a8 T mt_lg_trigger
+601d0194 T mt_version_fmt
