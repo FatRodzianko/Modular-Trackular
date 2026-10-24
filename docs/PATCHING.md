@@ -297,6 +297,11 @@ changing a patch, or the mods in `web/manifest.json`, run it with `--update` to 
 python tools/test_web_patcher.py path/to/TrackerPlus_1.2.0.ptf build/webtest --update
 ```
 
+Each published site is a build named by a digest of its files (`web/stage.py`). The page
+loads its code by that name and checks `build.json`, so a browser still holding an earlier
+build's page or code (GitHub Pages lets it keep them for 10 minutes) reloads once onto the
+new build, instead of running old code on new patch files.
+
 The test projects are copies of project folders from the SD card (`Projects/...`).
 
 ## 3. Install

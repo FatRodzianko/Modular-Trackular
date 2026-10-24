@@ -6,6 +6,8 @@ import {
 
 const $ = (id) => document.getElementById(id);
 const base = document.baseURI;
+// The build this page and its code belong to: web/stage.py names it ("dev" unstaged).
+const BUILD = "dev";
 const cache = new Map();
 
 async function fetchBytes(url) {
@@ -275,6 +277,30 @@ async function build() {
   }
 }
 
+// A browser may still hold an earlier build's page and code (GitHub Pages lets it keep
+// them for 10 minutes) while the patch files, always revalidated, are the new build's:
+// old code on new patch files refuses or mismatches. So when the site's build.json names
+// another build, load the page again as ?build=<it>: an address not in the cache, whose
+// page asks for that build's code. Returns false when the page is being replaced.
+async function upToDate() {
+  if (BUILD === "dev") return true;
+  let live;
+  try {
+    const r = await fetch(new URL("build.json", base).href, { cache: "no-store" });
+    live = r.ok ? (await r.json()).build : null;
+  } catch {
+    return true;                            // can't tell: carry on, as before this check
+  }
+  if (!live || live === BUILD) return true;
+  const url = new URL(location.href);
+  if (url.searchParams.get("build") === live) {
+    throw new Error("the site is being updated and still sent this page from the earlier build (wait a minute)");
+  }
+  url.searchParams.set("build", live);
+  location.replace(url.href);
+  return false;
+}
+
 function fatal(e) {
   show($("load-error"), `The patcher couldn't start: ${e.message}. Reload the page to try again.`, "bad");
 }
@@ -284,6 +310,7 @@ async function main() {
   if (!globalThis.crypto?.subtle) {
     throw new Error("this browser doesn't offer Web Crypto here (open the page over https)");
   }
+  if (!(await upToDate())) return;
   [state.manifest, state.expected] = await Promise.all([fetchJson("manifest.json"), fetchJson("expected.json")]);
   state.allSpec = await fetchJson(state.manifest.all);
   renderGrid();

@@ -130,7 +130,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/itcmtest/` | No-op test of ITCM hooks (stubs in the ITCM tail, loaded by the startup copy table) |
 | `tools/ptf.py` | Read / convert / re-encode `.ptf` (Intel HEX), with a byte-exact round-trip check |
 | `tools/patch_ptf.py` | Apply a patch or bundle spec to a stock `.ptf`: places the patches in the order listed, assigns their RAM (and late RAM blocks, for state used after boot) and relocates them, and makes the ITCM stubs for hooks in ITCM code (stock hash + original-byte checks, gap-free append) |
-| `web/` | The web patcher: `patcher.js` (a port of `ptf.py` and `patch_ptf.py`), the page, `manifest.json` (the mods it offers), `expected.json` (the output hashes it accepts), `stage.py` (assembles the site) |
+| `web/` | The web patcher: `patcher.js` (a port of `ptf.py` and `patch_ptf.py`), the page, `manifest.json` (the mods it offers), `expected.json` (the output hashes it accepts), `stage.py` (assembles the site, named per build so a browser never runs an earlier build's code) |
 | `.github/workflows/pages.yml` | Publishes the staged web patcher to GitHub Pages |
 | `tools/test_web_patcher.py`, `tools/web_patcher_node.mjs` | Check the web patcher's output is byte-identical to `patch_ptf.py`'s for every selection it offers (needs Node) |
 | `tools/mkrel.py` | Make a patch's relocation table (code and RAM addresses) from three links of it (used by the build scripts) |

@@ -8,6 +8,14 @@ its patch.json and the prebuilt files it names (prebuilt_bin, prebuilt_sym,
 prebuilt_rel), at the same paths as in the repository. Nothing else: no build/
 output, no other patches, and never a .ptf or .hex file.
 
+Each staging is a build, named by a digest of everything it serves. The staged page
+asks for its code by that name (app.js?v=<build>, patcher.js?v=<build>,
+style.css?v=<build>), app.js knows it, and build.json holds it. A browser that still has
+an earlier build's page or code cached (GitHub Pages lets it keep them 10 minutes)
+finds build.json naming another build and reloads as ?build=<that build>, which fetches
+the new page and so the new code; the patch files, which the page always revalidates,
+never meet code from another build.
+
 It refuses when web/expected.json is out of date: when it doesn't list every
 selection the page offers, or its "inputs_sha256" (a digest of the patch files
 above) doesn't match them, as after a patch's prebuilt files change. Then run
@@ -63,6 +71,18 @@ def inputs_digest() -> str:
     return h.hexdigest()
 
 
+def build_id(out: Path) -> str:
+    """The staged site's name: a digest of every file it serves (before the page is
+    pointed at it). Text files count without CR, as in inputs_digest."""
+    h = hashlib.sha256()
+    for p in sorted(q for q in out.rglob("*") if q.is_file()):
+        data = p.read_bytes()
+        if p.suffix != ".bin":
+            data = data.replace(b"\r\n", b"\n")
+        h.update(p.relative_to(out).as_posix().encode() + b"\0" + hashlib.sha256(data).digest())
+    return h.hexdigest()[:16]
+
+
 def selection_keys() -> list[str]:
     """Every selection the page offers, as expected.json keys: ids in manifest order."""
     ids = [p["id"] for p in json.loads((WEB / "manifest.json").read_text())["patches"]]
@@ -85,9 +105,21 @@ def main() -> int:
         dst = out / (rel[len("web/"):] if rel.startswith("web/") else rel)
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
+    build = build_id(out)
+    for name, pairs in (("index.html", [('src="app.js"', f'src="app.js?v={build}"'),
+                                        ('href="style.css"', f'href="style.css?v={build}"')]),
+                        ("app.js", [('from "./patcher.js";', f'from "./patcher.js?v={build}";'),
+                                    ('const BUILD = "dev";', f'const BUILD = "{build}";')])):
+        text = (out / name).read_text(encoding="utf-8")
+        for old, new in pairs:
+            if text.count(old) != 1:
+                sys.exit(f"web/{name}: expected {old!r} once")
+            text = text.replace(old, new)
+        (out / name).write_text(text, encoding="utf-8", newline="\n")
+    (out / "build.json").write_text(json.dumps({"build": build}) + "\n")
     (out / ".nojekyll").write_text("")
     n = sum(1 for p in out.rglob("*") if p.is_file())
-    print(f"staged {n} files in {out}")
+    print(f"staged {n} files in {out} (build {build})")
     return 0
 
 
