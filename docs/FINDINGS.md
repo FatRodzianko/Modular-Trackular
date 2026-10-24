@@ -2502,23 +2502,55 @@ Found while planning Beat Slice (Play Through), `docs/BEAT_SLICE_THROUGH_PLAN.md
 
 ### The Sample Playback screen (`scr` = `0x200254b4`)
 
-- **Vtable** at `0x60042690`: update `0x600f6071` at word `0x60042698`, start
-  `0x600f57f0`, create-controls `0x600f8390`. These slots are by analogy with the
-  Pattern and Config vtables, not yet run.
-- **The Play Mode list's data block** `scr+0xb58` (`0x600f7c54`):
-  - `+0` = the mode;
-  - `+2` = 8;
-  - `+4` = 9;
-  - `+0x14` = `scr+0xb70` (the names).
+- **Vtable** at `0x60042690`: update `0x600f6071` at word `0x60042698` (the screen's
+  periodic refresh: dirty flags `scr+0xd7`..`+0xdd`), start `0x600f57f0`,
+  create-controls `0x600f8390`. In the emulator, create-controls and start run on a
+  Beat Slice instrument, and the update runs after them. The start's last call,
+  `0x600f5508` (pad lights), needs the pad LED object and is stubbed in the rig.
+- **The Play Mode list** is a text list control (0x48 bytes, constructor `0x60105a3c`,
+  vtable `0x600469bc`: draw `0x60105140`, set-value `+0x1c` = `0x6010510c`, set-data
+  `+0x24` = `0x60105054`). It sits at (601, 29), 197 × 394 px, with 27-pixel rows, text
+  at x = 614 and the first row at y = 46 (emulator). Its data block `scr+0xb58`
+  (`0x600f7c54`), passed by `bl disp_ctrl_set_data` at `0x600f7cac`:
 
-  It is passed by `bl disp_ctrl_set_data` at `0x600f7cac`. The field meanings beyond
-  that are not checked.
+  | Offset | Field | Play Mode list |
+  |---|---|---|
+  | `+0` | `i16` selected row (set-data copies it into the control's target `+0x34`; the draw moves `+0` towards the target, 27 px at a time) | the mode |
+  | `+2` | `u16` item count | 8 |
+  | `+4` | `u16` visible rows (the scissor height is rows × 27; a scroll bar only when rows < count) | 9 (8 when created) |
+  | `+8` | per-item colour flags, or 0 | 0 |
+  | `+0x10`, `+0x12` | marquee width (0: no marquee), text option | 0, 0 |
+  | `+0x14` | `char **` the names | `scr+0xb70` |
+
+  - Set-value clamps to 0..count − 1. The handler's
+    `disp_ctrl_set_value(list, mode + ins+4)` (7 for Wavetable) is overridden by the
+    set-data in `0x600f7c54` right after it, so stock always shows the mode's row with
+    no animation (emulator: data `+0`, target and drawn row stay equal after every
+    step).
+  - With the data block rewritten at `0x600f7cac` (count 9, a 9-name table, `+0` = 6),
+    the list draws nine rows (y 46..262) with the highlight on the seventh and no scroll
+    bar (emulator, simulated with a Unicorn hook).
+  - **Text widths:** the five UI fonts are run-length coded in flash. `0x601018e8`
+    decodes them at boot (`0x6011ff44`, pairs of value and count) from the tables at
+    `0x60043100` and `0x60043128` (two sets of 5 {address, length}), and keeps the
+    0x94-byte EVE metric blocks (128 widths first) at `0x83fcd374`, 0xac bytes apart.
+    `0x601024b4(font, text, n)` sums the widths. Without a scroll bar the list has 178
+    px for text. "Pingpong Loop" takes at most 130 px, "Beat Slice Thru" at most 150
+    (the 22-pixel fonts).
 - **The only UI writer of `ins+0x3c`:** `0x600f5b98(step)`, clamped to 0..7. Its
   callers, all with the list focused (`scr+0xd6 == 6`, `scr+0x70 == 0`):
   - the encoder callback `0x600c92e0` (tail call `0x600c9322`);
   - +1 `0x600c9d84` (`0x600c9dc6`);
   - −1 `0x600ca7a4` (`0x600ca7e6`);
-  - buttons 7/8 `0x600f5e1c` (`bl` at `0x600f5e8a` −1, `0x600f5e80` +1).
+  - buttons 7/8 `0x600f5e1c` (`bl` at `0x600f5e8a` −1, `0x600f5e80` +1): argument 6
+    (7th button) steps −1, 7 (8th) steps +1, and a press with the list not focused
+    only focuses it.
+
+  The encoder's step is clamped to ±4 (emulator: −4 from Granular gives Pingpong
+  Loop, −9 from there gives 1-Shot). Mode 6 sets the sample type `ins+4` to 1, and
+  any other mode sets it to 0. A step of 0 on a Beat Slice instrument leaves the
+  instrument byte-identical (emulator), and so does 5 → 6 → 5 for an instrument with
+  no wavetable window set.
 - **The callbacks' pointers** are in the literal pool of `0x600f5018` (`0x600f512c`,
   21 entries): `0x600f5140` −1, `0x600f5144` +1, `0x600f5164` buttons, `0x600f5178`
   encoder. Those are their only references.

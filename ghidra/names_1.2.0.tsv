@@ -332,3 +332,38 @@
 600cdf28	show_message	(0x20020880, 0, text, time): one line in the message bar; keeps the text pointer
 000108a4	perc_voice_trigger_q	(core, &{44100.0, tempo}, note), s0 = velocity scaled: PERC element by note: 60-61 kick, 62-63 snare, 64-67 hihat, 68-69 cymbal, 70-71 perc, else tom
 60152598	perc_voice_midi	PERC voice vtable +0x08: note on only (type 4); note offs ignored
+60032abc	smp_play_dispatch_q	(voice, instrument, note): note-on setup by play mode ins+0x3c (0..7; other values return 0)
+60035310	smp_on_oneshot_q	mode 0 note-on: start/end from ins+0x3e/+0x44 (or the Position override)
+600357c4	smp_on_slice_q	mode 4 note-on: the selected slice ins+0x169 (or the S FX slice), pitched by the note
+60032b50	smp_on_beatslice_q	mode 5 note-on: slice = note - 24 (clamped), or the S FX slice; end = next slice start or 0xffff; pitch fixed at 60
+60100694	smp_point_to_frames_q	(point 0..65535, length frames, sample address): frame position
+60100b50	smp_voice_latch_q	voice: mode -> +0x21, length ins+0x2c -> +0x68, sample address -> +0x24, tune/finetune
+600327e4	smp_voice_update_q	sample voice render: switch on voice+0x21 (0/4/5 -> 1-shot render 0x600357b4)
+60030d50	smp_voice_note_on_q	(voice, instrument, note): amp envelope start, dispatcher; a busy voice fades first (state 7)
+60030f9c	smp_voice_note_off_q	voice: amp envelope release, or stop at once when the envelope is off (+0xee)
+00005678	voice_note_off_q	(player, mode): -3 cut, -2 fade, else release (0x54b4)
+600c19d8	pti_build_header_q	(fm, instrument, buf): 16-byte header + 0x174-byte struct + CRC at +0x184 (0x188 bytes)
+600c1990	pti_parse_header_q	header version 1: upgrade if file version < 9 (0x600c5a48), copy 0x174 bytes into the instrument
+60113c80	instr_copy_step_q	copies instrument slot +6 to slot +7 (whole struct) and its sample
+600f57f0	scr_smp_start	Sample Playback screen start: 8 play-mode name pointers -> scr+0xb70, controls
+600f8390	scr_smp_create_controls	Sample Playback screen create-controls (vtable 0x60042690 slot 3)
+600f6070	scr_smp_update	Sample Playback screen update (vtable word 0x60042698)
+600f7c54	scr_smp_show_mode	Play Mode list data scr+0xb58 (mode, 8, 9, names at +0x14) and the mode's controls
+600f5b98	scr_smp_change_mode	(step): ins+0x3c = mode + step clamped 0..7, Wavetable setup, loop fix-up, redraw
+600f5e1c	scr_smp_buttons_7_8	screen buttons 7/8: focus the Play Mode list, or step it -1/+1
+600c92e0	scr_smp_encoder	Sample Playback encoder callback (case 6: change mode by the encoder step)
+600c9d84	scr_smp_plus	Sample Playback +1 callback (case 6: change mode +1)
+600ca7a4	scr_smp_minus	Sample Playback -1 callback (case 6: change mode -1)
+6010f000	slice_add_q	(slicer, instrument): new slice after the selected one, half-way to the next start or 0xffff
+6010f094	slice_remove_q	(slicer, instrument): remove the selected slice
+6010f100	slice_adjust_q	(slicer, instrument, delta): move the selected slice, bounded by its neighbours
+6010f1b8	slice_auto_q	(slicer, instrument): clear the slices, transient detection 0x600aff4c
+6010f1f0	slice_evenly_q	(slicer, instrument, n): n slices at i*65535/n
+601001ac	smp_voice_finetune_q	voice pitch update; mode 5 (voice+0x21) uses note 60
+60105a3c	ctrl_textlist_ctor	(ctrl 0x48 bytes, params): text list control, vtable 0x600469bc
+6010510c	ctrl_textlist_set_value	vtable +0x1c: target row = value clamped to 0..count-1
+60105054	ctrl_textlist_set_data	vtable +0x24: data {i16 row, u16 count, u16 visible rows, ..., +0x14 char **names}; target = row
+601024b4	font_text_width	(metrics, text, n): sum of the 128-entry width table
+601018e8	fonts_load_q	(display, {address, length} x n, n): run-length decode each font, keep the 0x94-byte metric blocks at 0x83fcd374 (0xac apart)
+6011ff44	font_rle_decode	(src, pairs, dst): pairs of value and count
+600aa860	app_get_q	returns the app object (its +0x14 -> +0x30 is the clock the text list's marquee reads)
