@@ -4,8 +4,8 @@ chosen per project).
   python tools/emu/test_synths.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf> [<wav folder>] [--stress N] [--quick]
 
 --quick runs only what can differ between bundles (the hooks, the WAVE model, the swap,
-the menus and screens, the settings and patch files, Macros, the render loop, and 200
-stress blocks) and skips the rig, stock-output, sound, voice-allocation and bank checks,
+the menus and screens, the settings and patch files, Macros, the render loop, the effect
+(its state is in the late RAM block, placed per bundle), and 200 stress blocks) and skips the rig, stock-output, sound, voice-allocation and bank checks,
 which depend only on synths' own code (tools/run_tests.py).
 
 Works with the synths-only build and with bundles that include it. The firmware's own
@@ -14,7 +14,7 @@ voices, rendered through the audio graph (or the synth output object alone).
 
 - The rig (stock firmware): the per-voice heap and cost of docs/FINDINGS.md section 21
   come out again, and two runs of the same notes give identical output.
-- Hooks: the five VAP voice vtable words and the four call sites (the registry builder,
+- Hooks: the six VAP voice vtable words and the four call sites (the registry builder,
   the project's slot records, the Model list's data and its images) point into the
   patch; the other models' voice vtables are stock; the registry names model 3 "WAVE".
 - Stock output: with WAVE off, or replacing a model no slot uses, the synth output and
@@ -41,12 +41,13 @@ voices, rendered through the audio graph (or the synth output object alone).
   after a change; damaged, sy1 and out-of-range files count as Off and are kept; Save
   As keeps the choice and writes it; a project without a name writes nothing; stock
   firmware never opens the file.
-- Patch files: a WAVE patch saves to WAVE/<name>.patch with model id 3 and its 62
+- Patch files: a WAVE patch saves to WAVE/<name>.patch with model id 3 and its 66
   values, and loads back into a WAVE slot; a file of 60 (saved before the Polarity
-  switches) loads with both Bipolar; a load that fails leaves them as they were; stock
-  firmware rejects a WAVE file on an ACD slot (the ACD Init patch plays).
-- Polarity: WAVE's two parameters after VAP's 60. Every per-parameter array of the
-  patch has 62 entries, also after a rebuild (Sync changed); Unipolar LFOs give 0..1
+  switches) loads with both Bipolar and Effect None, one of 62 (before the effect) with
+  Effect None; a load that fails leaves them as they were; stock firmware rejects a
+  WAVE file on an ACD slot (the ACD Init patch plays).
+- Polarity: WAVE's first two parameters after VAP's 60. Every per-parameter array of the
+  patch has 66 entries, also after a rebuild (Sync changed); Unipolar LFOs give 0..1
   (a square steps 0 and +100 cents, Random S&H stays above 0), each LFO its own; LFO 1
   Unipolar at 50 % from Position 0 sweeps 0 to 0.5 with no stop at 0.
 - Oscillators: pitch within 1 cent (notes 24-108); Tune, Finetune, Detune, pitch bend;
@@ -74,13 +75,19 @@ voices, rendered through the audio graph (or the synth output object alone).
 - More than 8 voices: 8 engine voices, the rest silent until one is free; freed engine
   voices go to voices that had none.
 - Macros: a Macro ramp reaches set_param every block and moves the sound.
+- The effect (62-65: Effect, Rate, Depth, Mix), on a WAVE slot's output in stereo: with
+  Effect None R is L; the chorus's two taps, measured from a click, sit at 3.5 ms and
+  move in opposite directions by Depth x 1.85 ms at Rate's speed; Mix 0 is dry, 100 %
+  the taps alone; switching on and off fades (no step); its state starts cleared after a
+  start whatever the late RAM held; the level within 1.5 dB of dry; L and R differ
+  through the whole audio graph; with 4 voices too; its cost per block.
 - Export: the render loop (0x600bc220) renders the WAVE voices.
 - Stress (N blocks, default 2000): random notes, parameters (garbage too), swaps, Model
   list picks, polyphony changes, restarts, with a write watch over all RAM; then all
   parameters NaN, and the Init values again.
 - WAV files (if a folder is given): VAP's Init patch and WAVE's, a position sweep
   through each bank and the super saw, a ladder filter sweep, a pad, super saw chords,
-  a resonant sweep in Digital mode.
+  a resonant sweep in Digital mode, chords dry and with the chorus (stereo).
 """
 from __future__ import annotations
 
@@ -97,7 +104,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import synth_rig as sr  # noqa: E402
 from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
-from layout import patch_code  # noqa: E402
+from layout import patch_code, patch_late_ram  # noqa: E402
 from machine import FAKE_DISPLAY_VT, Machine  # noqa: E402
 from patch_ptf import bl_target  # noqa: E402
 
@@ -136,13 +143,14 @@ STOCK_ITEMS = ["Performance presets", "Pattern divider", "Notes scale", "Root no
 MAP_MARKER = 0x50414D52             # "RMAP"
 MAP_FIELDS = ("state", "menu", "applied", "ready", "switches", "loads", "model_ids", "param", "voice",
               "voice_size", "params", "size", "tables", "banks", "frames", "stride", "level_off", "level_len",
-              "levels", "builder")
+              "levels", "builder", "fx_ready", "fx_size", "fx_p", "fx_running")
 SY_READY = 0x59444552
 CC_CUTOFF, CC_RESONANCE, CC_MACRO = 74, 71, 102     # Macro a-f arrive as CCs 102-107
-ENGINE_READS = set(range(62))                               # the parameters wt_engine.h reads
+ENGINE_READS = set(range(66))                               # the parameters wt_engine.h and wt_fx.h read
 
 WHERE: dict[str, int] = {}          # set in main(): the patch's state and its layout
 CODE = (0, 0)                       # set in main(): the patch's code, start and end
+LATE = (0, 0)                       # set in main(): the patch's late RAM block (the effect's state)
 failures: list[str] = []
 
 
@@ -388,11 +396,11 @@ def model_names(r: sr.SynthRig) -> dict[int, str]:
 def hook_checks(ptf: Path, stock: Path) -> None:
     print("hooks")
     p, s = Machine(ptf), Machine(stock)
-    words = [p.r32(sr.VOICE_VT[VAP] + off) for off in (0x04, 0x08, 0x0C, 0x10, 0x18)]
+    words = [p.r32(sr.VOICE_VT[VAP] + off) for off in (0x04, 0x08, 0x0C, 0x10, 0x14, 0x18)]
     check(all(CODE[0] <= w < CODE[1] and w & 1 for w in words),
-          "VAP voice vtable +0x04, +0x08, +0x0c, +0x10, +0x18 point into the patch")
+          "VAP voice vtable +0x04, +0x08, +0x0c, +0x10, +0x14, +0x18 point into the patch")
     same = all(p.r32(sr.VOICE_VT[VAP] + off) == s.r32(sr.VOICE_VT[VAP] + off)
-               for off in range(0, 0x30, 4) if off not in (0x04, 0x08, 0x0C, 0x10, 0x18))
+               for off in range(0, 0x30, 4) if off not in (0x04, 0x08, 0x0C, 0x10, 0x14, 0x18))
     check(same, "the VAP vtable's other words are stock")
     others = all(p.r32(sr.VOICE_VT[md] + off) == s.r32(sr.VOICE_VT[md] + off)
                  for md in (ACD, FAT, WTFM, PERC) for off in range(0, 0x30, 4))
@@ -482,7 +490,8 @@ WAVE_INIT = {0: ("Position 1", 0.6667), 1: ("Position 2", 0.6667), 2: ("Wave 1",
              33: ("Retrigger", 2.0), 34: ("Sync", 0.0), 35: ("Glide Mode", 0.0), 36: ("Glide Time", 0.0),
              37: ("Key Track", 0.5), 38: ("Drive", 0.0), 40: ("Digital", 0.0), 41: ("Noise", 0.0), 42: ("Src 1", 3.0),
              43: ("Dest 1", 0.0), 44: ("Amt 1", 0.0), 45: ("Src 2", 2.0), 46: ("Dest 2", 0.0), 47: ("Amt 2", 0.0),
-             60: ("Polarity", 0.0), 61: ("Polarity", 0.0)}
+             60: ("Polarity", 0.0), 61: ("Polarity", 0.0), 62: ("Effect", 0.0), 63: ("Rate", 0.5),
+             64: ("Depth", 0.5), 65: ("Mix", 0.5)}
 WAVE_GROUPS = [("Oscillator", [("(1/2)", [2, 3, 4, 0, 1, 40, 5, 6, 7, -1]), ("(2/2)", [9, 10, 41, -1, -1, 8, -1, -1])]),
                ("Filter", [("", [12, 13, 11, 14, -1, 37, 38, -1, -1])]),
                ("Modulation", [("Amp Env", [19, 20, 21, 22, -1, -1]),
@@ -490,11 +499,12 @@ WAVE_GROUPS = [("Oscillator", [("(1/2)", [2, 3, 4, 0, 1, 40, 5, 6, 7, -1]), ("(2
                                ("Mod Env/LFO 2", [23, 24, 25, 26, -1, 61, 34, 31, 32, 33])]),
                ("Matrix", [("(1/2)", list(range(42, 51))), ("(2/2)", list(range(51, 60)) + [-1])]),
                ("FX", [("", [])]),
-               ("Voice", [("", [35, 36, 39])])]
+               ("Voice", [("", [35, 36, 39, 62, 63, 64, 65])])]
 WAVE_PAGES = [("Oscillators", "Osc", [2, 0, 3, 1, 4, 5, 6, 8, 7, 41, 40, 9, 10]), ("Filter", "", [12, 13, 11, 14, 37, 38]),
               ("Amp Envelope", "Amp Env", [19, 20, 21, 22]), ("Filter Envelope", "Flt Env", [15, 16, 17, 18]),
               ("Mod Envelope", "Mod Env", [23, 24, 25, 26]), ("LFO 1", "", [30, 27, 28, 29, 60]),
-              ("LFO 2", "", [34, 31, 32, 33, 61]), ("Modulation", "Mod", list(range(42, 60))), ("Voice", "", [35, 36, 39])]
+              ("LFO 2", "", [34, 31, 32, 33, 61]), ("Modulation", "Mod", list(range(42, 60))),
+              ("Voice", "", [35, 36, 39, 62, 63, 64, 65])]
 WAVE_MACROS = [("Attack", [19]), ("Decay/Release", [20, 16, 22, 18]), ("Wave Position", [0, 1]),
                ("Filter Cutoff", [12]), ("Filter Resonance", [13]), ("Filter Env Amount", [14]), ("Velocity", [39]),
                ("Pressure", [])]
@@ -587,10 +597,10 @@ def wave_model_checks(ptf: Path) -> None:
     p = r.patch_obj(0)
     c = p + 0x54
     ents = r._entries(0)
-    check(r.model(0) == WAVE and m.r32(c + 0x24) == WAVE and len(ents) == 62 and m.r32(c + 0x28) == 1
+    check(r.model(0) == WAVE and m.r32(c + 0x24) == WAVE and len(ents) == 66 and m.r32(c + 0x28) == 2
           and m.r32(c + 0x40) == 0x7FFFFFFF and all(m.r32(v) == sr.VOICE_VT[VAP] for v in r.voices(0)),
-          f"slot 0 on model {r.model(0)}: a patch with model id {m.r32(c + 0x24)}, {len(ents)} parameters, mono, no "
-          "polyphony cap, VAP voice objects")
+          f"slot 0 on model {r.model(0)}: a patch with model id {m.r32(c + 0x24)}, {len(ents)} parameters, "
+          f"{m.r32(c + 0x28)} output channels (stereo, as PERC), no polyphony cap, VAP voice objects")
     vals, defaults = r.params(0), r.defaults(0)
     bad = [(i, sstr(m, ents[i]), vals[i], defaults[i]) for i, (n, v) in WAVE_INIT.items()
            if sstr(m, ents[i]) != n or abs(vals[i] - v) > 1e-6 * max(1.0, abs(v)) or defaults[i] != vals[i]]
@@ -626,11 +636,23 @@ def wave_model_checks(ptf: Path) -> None:
     check(ranges[60] == ranges[61] == (0.0, 1.0) and flags[60] == flags[61] == flags[11]
           and pol == [["Bipolar", "Unipolar", "Unipolar", "Bipolar"]] * 2 and rebuild[60] == rebuild[61] == 0,
           f"Polarity (60, 61): 0-1, stepped with no CC as Type, Bipolar/Unipolar ({pol[0]}), no rebuild on change")
-    check(arrays(m, p) == {k: 62 for k in PATCH_ARRAYS},
+    eff = [display(m, ents[P_EFFECT], v) for v in (0.0, 1.0, 5.0, -2.0, float("nan"))]
+    rate = [display(m, ents[P_FX_RATE], v) for v in (0.0, 0.5, 1.0, 2.0, float("nan"))]
+    pct = [[display(m, ents[i], v) for v in (0.0, 0.5, 1.0)] for i in (P_FX_DEPTH, P_FX_MIX)]
+    ccs = [m.uc.mem_read(ents[i] + 0x23, 1)[0] for i in range(P_EFFECT, P_FX_MIX + 1)]
+    check(all(ranges[i] == (0.0, 1.0) for i in range(P_EFFECT, P_FX_MIX + 1)) and flags[P_EFFECT] == flags[11]
+          and flags[P_FX_RATE] == flags[P_FX_DEPTH] == flags[P_FX_MIX] == flags[P_DRIVE]
+          and not any(rebuild[P_EFFECT:P_FX_MIX + 1]) and ccs == [0xFF] * 4
+          and eff == ["None", "Chorus", "Chorus", "None", "None"]
+          and rate == ["0.05 Hz", "0.50 Hz", "5.00 Hz", "5.00 Hz", "0.05 Hz"]
+          and pct == [["0 %", "50 %", "100 %"]] * 2,
+          f"the effect (62-65): 0-1 each; Effect stepped as Type ({eff}); Rate, Depth, Mix plain as Drive "
+          f"(Rate {rate}, Depth/Mix {pct[0]}); no CC, no rebuild on change")
+    check(arrays(m, p) == {k: 66 for k in PATCH_ARRAYS},
           f"the patch's per-parameter arrays, sized from the builder's count: {arrays(m, p)}")
     room = (m.r32(c + 8) - m.r32(c)) // 0x38
-    check(room == 62, f"the parameter vector's room: {room} entries (62: no doubling to 120, 6.7 KB, when "
-                      "WAVE's two are added)")
+    check(room == 66, f"the parameter vector's room: {room} entries (66: no doubling to 120, 6.7 KB, when "
+                      "WAVE's six are added)")
     caps = {k: m.r32(p + off + 8) for k, (off, _) in PATCH_ARRAYS.items()}
     sync = [i for i, x in enumerate(rebuild) if x]
     r.set_param(0, P_LFO1_SYNC, 1.0)
@@ -639,14 +661,15 @@ def wave_model_checks(ptf: Path) -> None:
     for v in (1.0, 0.0):                        # Sync: the patch is rebuilt (VAP's builder, then WAVE's)
         m.write(val, struct.pack("<f", v))
         m.call(setv, p, P_LFO1_SYNC, val, 2, max_insns=50_000_000)
-    check(sync == [30, 34] and len(r._entries(0)) == 62 and arrays(m, p) == {k: 62 for k in PATCH_ARRAYS}
+    check(sync == [30, 34] and len(r._entries(0)) == 66 and arrays(m, p) == {k: 66 for k in PATCH_ARRAYS}
           and {k: m.r32(p + off + 8) for k, (off, _) in PATCH_ARRAYS.items()} == caps and m.r32(c + 0x24) == WAVE
           and display(m, r._entries(0)[60], 1.0) == "Unipolar" and container_layout(m, c)[1] == WAVE_PAGES,
-          f"a rebuild (set_value on Sync, the entries {sync} that rebuild): still 62 parameters, the arrays as "
+          f"a rebuild (set_value on Sync, the entries {sync} that rebuild): still 66 parameters, the arrays as "
           "they were (the per-parameter loops stay inside them), model 3, the Edit Patch pages as before")
     groups, pages, macros = container_layout(m, c)
     check(groups == WAVE_GROUPS, f"the screen: {[g for g, _ in groups]} with WAVE's cells")
-    check(pages == WAVE_PAGES, f"the Edit Patch screen's pages (each LFO's Polarity last on its page): "
+    check(pages == WAVE_PAGES, f"the Edit Patch screen's pages (each LFO's Polarity last on its page, the effect "
+                               f"on Voice): "
                                f"{[(q[0], q[1]) for q in pages]}")
     check(pages[3][2] == [P_FENV_ATT, P_FENV_DEC, P_FENV_SUS, P_FENV_REL]
           and pages[4][2] == [P_MENV_ATT, P_MENV_DEC, P_MENV_SUS, P_MENV_REL],
@@ -656,7 +679,8 @@ def wave_model_checks(ptf: Path) -> None:
           f"the Macros: {[(n, t) for n, t, _ in macros]}")
     used = {x for _, subs in groups for _, cells in subs for x in cells if x >= 0} | \
            {x for *_, cells in pages for x in cells if x >= 0} | {x for _, t, _ in macros for x in t}
-    check(used <= ENGINE_READS, f"every parameter the screen, the pages and the Macros show is one the engine reads "
+    check(used <= ENGINE_READS, f"every parameter the screen, the pages and the Macros show is one the engine or the "
+                                f"effect reads "
                                 f"({sorted(used - ENGINE_READS) or 'none other'})")
     check(r.title(0) == "Synth 1 (WAVE)" and r.title(1) == "Synth 2 (PERC)",
           f"the instrument title: {r.title(0)!r}, the next slot {r.title(1)!r}")
@@ -694,7 +718,7 @@ def swap_checks(ptf: Path) -> None:
     check(sorted(e[0] for e in r.entries()) == sorted(v1)
           and sorted(e[1] for e in r.entries()) == [0, 0, 0, 2, 2], "an engine voice for each WAVE voice")
     sets = {v: sum(1 for x, _ in r.sets if x == v) for v in v1}
-    check(all(n == 62 for n in sets.values()) and not any(x in v1 for x, _ in r.pushes),
+    check(all(n == 66 for n in sets.values()) and not any(x in v1 for x, _ in r.pushes),
           f"every parameter pushed to each new voice reaches the patch ({sorted(set(sets.values()))}) and none "
           "reaches VAP's set_param")
     pc = r.param_copy(0)
@@ -1033,6 +1057,8 @@ def patch_file_checks(ptf: Path, stock: Path) -> None:
     r.set_param(0, P_CUTOFF, 1234.0)
     r.set_param(0, P_WAVE1, float(SUPERSAW))
     r.set_param(0, P_LFO2_POL, 1.0)
+    r.set_param(0, P_EFFECT, 1.0)
+    r.set_param(0, P_FX_MIX, 0.8)
     pfs = PatchFS(r)
     w = m.r32(sr.S + 0x9C)
     ok = m.call(m.r32(m.r32(w) + 0x10), w, sr.S + 0x14, r.patch_obj(0), max_insns=50_000_000)
@@ -1048,26 +1074,38 @@ def patch_file_checks(ptf: Path, stock: Path) -> None:
     got = r2.m.call(SLOT_LOAD, sr.S, 0, out, max_insns=50_000_000)
     vals = r2.params(0)
     saved = pb_values(data)
-    check(len(saved) == 62 and saved[P_LFO1_POL] == 0.0 and saved[P_LFO2_POL] == 1.0,
-          f"the file holds 62 values, LFO 2's Polarity Unipolar ({len(saved)}; {saved[60:]})")
+    fx_saved = [1.0, 0.5, 0.5, 0.8]
+    check(len(saved) == 66 and saved[P_LFO1_POL] == 0.0 and saved[P_LFO2_POL] == 1.0
+          and np.allclose(saved[62:], fx_saved),
+          f"the file holds 66 values, LFO 2's Polarity Unipolar, Chorus at Mix 80 % ({len(saved)}; {saved[60:]})")
     check(got == 1 and r2.patch_model(0) == WAVE and abs(vals[P_CUTOFF] - 1234.0) < 1e-3
-          and vals[P_WAVE1] == float(SUPERSAW) and vals[60:] == [0.0, 1.0] and r2.param_copy(0)[-2:] == [0.0, 1.0],
+          and vals[P_WAVE1] == float(SUPERSAW) and vals[60:62] == [0.0, 1.0] and r2.param_copy(0)[-2:] == [0.0, 1.0]
+          and np.allclose(vals[62:], fx_saved),
           f"a WAVE slot loads it back from the project (0.patch): Cutoff {vals[P_CUTOFF]:.0f}, Wave 1 "
-          f"{WAVE_NAMES[int(vals[P_WAVE1])]}, Polarity {vals[60:]} (the engine's copy too)")
+          f"{WAVE_NAMES[int(vals[P_WAVE1])]}, Polarity {vals[60:62]} (the engine's copy too), the effect {vals[62:]}")
+    for n, what in ((62, "saved before the effect (sy4-sy6)"), (60, "saved before the Polarity switches (sy3)")):
+        r2.set_param(0, P_LFO1_POL, 1.0)
+        r2.set_param(0, P_EFFECT, 1.0)
+        r2.set_param(0, P_FX_RATE, 0.9)
+        pfs2.files["0.patch"] = pb_with_values(data, saved[:n])
+        got = r2.m.call(SLOT_LOAD, sr.S, 0, out, max_insns=50_000_000)
+        vals = r2.params(0)
+        pol = [0.0, 1.0] if n == 62 else [0.0, 0.0]
+        check(got == 1 and vals[P_CUTOFF] > 1233.0 and vals[60:62] == pol and r2.param_copy(0)[-2:] == pol
+              and vals[62:] == FX_DEFAULTS,
+              f"a file of {n} values ({what}), into a patch with LFO 1 Unipolar and the Chorus on: Polarity "
+              f"{vals[60:62]} ({'from the file' if n == 62 else 'Bipolar'}), the effect {vals[62:]} (None, the "
+              "defaults), the rest from the file")
     r2.set_param(0, P_LFO1_POL, 1.0)
-    pfs2.files["0.patch"] = pb_with_values(data, saved[:60])
-    got = r2.m.call(SLOT_LOAD, sr.S, 0, out, max_insns=50_000_000)
-    vals = r2.params(0)
-    check(got == 1 and vals[P_CUTOFF] > 1233.0 and vals[60:] == [0.0, 0.0] and r2.param_copy(0)[-2:] == [0.0, 0.0],
-          f"a file of 60 values (saved before the Polarity switches), into a patch with both Unipolar: both "
-          f"Bipolar ({vals[60:]}, the engine's copy {r2.param_copy(0)[-2:]}), the rest from the file")
-    r2.set_param(0, P_LFO1_POL, 1.0)
+    r2.set_param(0, P_EFFECT, 1.0)
     st = r2.m.r32(sr.S + 0xA4)
     path = r2.m.alloc(0x18)
     r2.m.write(path, struct.pack("<II", path + 8, 12) + b"nofile.patch\0\0\0\0")
     got = r2.m.call(r2.m.r32(r2.m.r32(st) + 0x0C), st, path, r2.patch_obj(0), 1, max_insns=50_000_000)
-    check(got == 0 and r2.params(0)[60:] == [1.0, 0.0] and r2.param_copy(0)[-2:] == [1.0, 0.0],
-          f"a load that fails (no such file): the Polarity switches as they were ({r2.params(0)[60:]})")
+    check(got == 0 and r2.params(0)[60:62] == [1.0, 0.0] and r2.param_copy(0)[-2:] == [1.0, 0.0]
+          and r2.params(0)[62:] == [1.0] + FX_DEFAULTS[1:],
+          f"a load that fails (no such file): the Polarity switches and the effect as they were "
+          f"({r2.params(0)[60:]})")
     s = Rig(stock, patched=False)
     sfs = PatchFS(s)
     s.configure((ACD, PERC, PERC), (1, 1, 1))
@@ -1093,6 +1131,8 @@ P_MENV_ATT, P_MENV_DEC, P_MENV_SUS, P_MENV_REL = range(23, 27)       # the mod e
 P_LFO1_RATE, P_LFO1_WAVE, P_LFO1_RETRIG, P_LFO1_SYNC = range(27, 31)
 P_LFO2_RATE, P_LFO2_WAVE, P_LFO2_RETRIG, P_LFO2_SYNC = range(31, 35)
 P_LFO1_POL, P_LFO2_POL = 60, 61                                      # WAVE's own: Bipolar 0, Unipolar 1
+P_EFFECT, P_FX_RATE, P_FX_DEPTH, P_FX_MIX = range(62, 66)            # ... and the effect's: None 0, Chorus 1
+FX_DEFAULTS = [0.0, 0.5, 0.5, 0.5]
 P_SRC1, P_DEST1, P_AMT1, P_SRC2, P_DEST2, P_AMT2 = range(42, 48)
 S_AMP, S_FILTER, S_MOD, S_LFO1, S_LFO2, S_VEL, S_KEY = range(7)                     # Src
 D_POS, D_POS1, D_POS2, D_PITCH, D_PITCH1, D_PITCH2, D_MIX, D_CUTOFF, D_RES, D_VOL, D_NOISE = range(11)   # Dest
@@ -1803,6 +1843,188 @@ def drive_checks(ptf: Path) -> None:
                                       f"({costs[0]:.0f} -> {costs[1]:.0f})")
 
 
+FX_CENTRE = 3.5e-3 * RATE           # wt_fx.h: the chorus taps' centre, in samples
+FX_SWING = 1.85e-3 * RATE           # ... their swing at Depth 100 %
+FX_LP_DELAY = (1 - 0.7226) / 0.7226  # ... the taps' one-pole low-pass: its mean delay in samples
+FX_OUT = 3                          # the synth output object's R block: output index slot + 3
+BLOCK = sr.BLOCK
+
+
+def fx_rate(v: float) -> float:
+    return 0.05 * 100.0 ** v
+
+
+def fx_value(hz: float) -> float:
+    return float(np.log(hz / 0.05) / np.log(100.0))
+
+
+class FX:
+    """WAVE slot 0's effect alone: blocks through voice 0's +0x14 (as synth_slot_render calls it
+    after the voices: (voice, ctx, L, R), the slot's output) with L filled from `x`."""
+
+    def __init__(self, w: WT):
+        self.w, m = w, w.r.m
+        self.ctx, self.L, self.R = m.alloc(0x40), m.alloc(4 * BLOCK), m.alloc(4 * BLOCK)
+        m.write(self.ctx, struct.pack("<f", 120.0))
+
+    def run(self, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        m, v = self.w.r.m, self.w.voice
+        f = m.r32(m.r32(v) + sr.V_POST)
+        outl, outr = [], []
+        for k in range(0, len(x), BLOCK):
+            m.write(self.L, x[k:k + BLOCK].astype("<f4").tobytes())
+            m.write(self.R, struct.pack("<128f", *([7.0] * BLOCK)))        # R must be written
+            m.call(f, v, self.ctx, self.L, self.R, max_insns=5_000_000)
+            outl.append(np.frombuffer(bytes(m.uc.mem_read(self.L, 4 * BLOCK)), "<f4").copy())
+            outr.append(np.frombuffer(bytes(m.uc.mem_read(self.R, 4 * BLOCK)), "<f4").copy())
+        return np.concatenate(outl), np.concatenate(outr)
+
+    def cost(self, blocks: int = 4) -> float:
+        n = [0]
+        h = self.w.r.m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: n.__setitem__(0, n[0] + 1))
+        self.run(np.zeros(blocks * BLOCK, np.float32))
+        self.w.r.m.uc.hook_del(h)
+        return n[0] / blocks
+
+
+def tap_delays(fx: FX, seconds: float, every: int = 512) -> tuple[np.ndarray, np.ndarray]:
+    """A click every `every` samples, Mix 100 % (the taps alone): each side's delay per click,
+    as the centroid of its response, less the low-pass's mean delay. (A click comes out
+    where n - d(n) is its time: the delay as it is then, d samples later. With the taps
+    moving at s samples per sample, the two sides' mean is off by s x (dl - dr) / 2 at
+    most 4 Rate swing^2 / 44,100.)"""
+    n = int(seconds * RATE) // every * every
+    x = np.zeros(n, np.float32)
+    x[::every] = 1.0
+    L, R = fx.run(x)
+    k = np.arange(every // 2)
+
+    def delays(y):
+        seg = y.reshape(-1, every)[:, :every // 2]
+        return (seg * k).sum(1) / seg.sum(1) - FX_LP_DELAY
+    return delays(L), delays(R)
+
+
+def graph_lr(r: Rig, blocks: int, slot: int = 0) -> tuple[np.ndarray, np.ndarray]:
+    """The synth output object's 16-bit L and R blocks of a slot (output indices slot, slot + 3)."""
+    z = np.zeros(BLOCK, "<i2")
+    ls, rs = [], []
+    for _ in range(blocks):
+        r.synth_block()
+        ls.append(r.out.get(slot, z))
+        rs.append(r.out.get(slot + FX_OUT, z))
+    return np.concatenate(ls), np.concatenate(rs)
+
+
+def fx_checks(ptf: Path) -> None:
+    print("the effect (62-65: Effect, Rate, Depth, Mix): the chorus, on a WAVE slot's output, in stereo")
+    rnd = np.random.default_rng(5)
+    noise = rnd.uniform(-0.5, 0.5, 40 * BLOCK).astype(np.float32)
+    fx = FX(WT(ptf))
+    L, R = fx.run(noise)
+    check(np.array_equal(L, noise) and np.array_equal(R, noise),
+          "Effect None (the Init patch): L as it came, R a copy of it, sample for sample")
+    fx.w.set(effect=1.0, fx_mix=0.0)
+    L, R = fx.run(noise)
+    check(np.array_equal(L, noise) and np.array_equal(R, noise), "Chorus at Mix 0: dry, both sides")
+
+    # the taps, from clicks: centre, swing with Depth, opposite directions, Rate
+    got = {}
+    for depth, hz in ((1.0, 2.0), (0.5, 2.0), (1.0, 0.5)):
+        fx = FX(WT(ptf, effect=1.0, fx_mix=1.0, fx_depth=depth, fx_rate=fx_value(hz)))
+        fx.run(np.zeros(30 * BLOCK, np.float32))        # faded in
+        dl, dr = tap_delays(fx, 2.5 if hz >= 1 else 4.5)
+        mid, half = (dl + dr) / 2, (dl - dr) / 2
+        up = np.where((half[:-1] < 0) & (half[1:] >= 0))[0]
+        t = (up + half[up] / (half[up] - half[up + 1])) * 512
+        period = float(np.diff(t).mean()) / RATE if len(t) > 1 else 0.0
+        lag = 4 * hz * (depth * FX_SWING) ** 2 / RATE      # the measurement's own lag (tap_delays)
+        got[(depth, hz)] = (float(np.abs(mid - FX_CENTRE).max()), lag, float(np.abs(half).max()) / FX_SWING,
+                            1.0 / period if period else 0.0)
+    ok = all(c < lag + 0.1 and abs(sw - d) < 0.03 * d and abs(f - hz) < 0.02 * hz
+             for (d, hz), (c, lag, sw, f) in got.items())
+    check(ok, "the chorus's taps, measured from clicks at Mix 100 %: centred on 3.5 ms, L and R moved in opposite "
+              "directions by Depth x 1.85 ms at Rate: " +
+              "; ".join(f"Depth {d:.0%} Rate {hz} Hz: centre off by {c:.2f} samples (the measurement lags "
+                        f"{lag:.2f}), swing {sw:.3f} x 1.85 ms, {f:.3f} Hz" for (d, hz), (c, lag, sw, f) in got.items()))
+
+    # fades: a sine switched on and off moves smoothly, R = L again once off
+    sine = (0.8 * np.sin(2 * np.pi * 220 * np.arange(70 * BLOCK) / RATE)).astype(np.float32)
+    fx = FX(WT(ptf, fx_mix=1.0, fx_depth=1.0))
+    step_dry = float(np.abs(np.diff(sine)).max())
+    fx.run(sine[:10 * BLOCK])
+    fx.w.set(effect=1.0)
+    on_l, on_r = fx.run(sine[10 * BLOCK:40 * BLOCK])
+    fx.w.set(effect=0.0)
+    off_l, off_r = fx.run(sine[40 * BLOCK:])
+    jl = np.concatenate([sine[10 * BLOCK - 1:10 * BLOCK], on_l, off_l])
+    jr = np.concatenate([sine[10 * BLOCK - 1:10 * BLOCK], on_r, off_r])
+    jump = max(float(np.abs(np.diff(jl)).max()), float(np.abs(np.diff(jr)).max()))
+    first = on_l[0] == sine[10 * BLOCK] and on_r[0] == sine[10 * BLOCK]
+    after = np.array_equal(off_l[-5 * BLOCK:], sine[-5 * BLOCK:]) and np.array_equal(off_r[-5 * BLOCK:], sine[-5 * BLOCK:])
+    wet = float(np.abs(on_l[-BLOCK:] - sine[40 * BLOCK - BLOCK:40 * BLOCK]).max())
+    check(first and after and jump < 1.5 * step_dry and wet > 0.05,
+          f"switching on and off fades (a 220 Hz sine at Mix and Depth 100 %): the first sample dry, the largest step "
+          f"{jump:.4f} (the sine's own {step_dry:.4f}; halfway through the fade dry and taps are each at 0.71, so "
+          f"up to 1.41 times it where they are in phase), wet after the fade (differs by {wet:.2f}), dry and R = L "
+          "again once faded out")
+
+    # its state: untouched before boot; cleared and seeded from the patch at the first block after it
+    r = Rig(ptf)
+    r.configure((VAP, PERC, PERC), (1, 1, 1))
+    r.swap(VAP)
+    r.set_param(0, P_EFFECT, 1.0)
+    r.set_param(0, P_FX_MIX, 0.7)
+    late0, late1 = LATE
+    junk = struct.pack("<I", 0x7FC00001) * ((late1 - late0) // 4)    # NaNs
+    r.m.write(late0, junk)
+    w = WT.__new__(WT)
+    w.r = r
+    fx = FX(w)
+    L, R = fx.run(noise[:4 * BLOCK])
+    untouched = bytes(r.m.uc.mem_read(late0, late1 - late0)) == junk and r.m.uc.mem_read(r.st("fx_ready"), 1)[0] == 0
+    check(not r.ready() and untouched and np.array_equal(L, noise[:4 * BLOCK]) and np.array_equal(R, L),
+          "before the unit has booted: R = L, and the late RAM block (maybe SDRAM, not ready yet) is not touched")
+    r.pattern()
+    L, R = fx.run(noise)
+    p0 = struct.unpack("<4f", bytes(r.m.uc.mem_read(late0 + WHERE["fx_p"], 16)))
+    fresh = struct.unpack("<5f", bytes(r.m.uc.mem_read(late0 + WHERE["fx_p"] + WHERE["fx_size"], 20)))
+    check(np.isfinite(L).all() and np.isfinite(R).all() and np.abs(L).max() < 1.0 and not np.array_equal(L, R)
+          and np.allclose(p0, [1.0, 0.5, 0.5, 0.7]) and np.allclose(fresh[:4], FX_DEFAULTS)
+          and r.m.uc.mem_read(r.st("fx_ready"), 1)[0] == 1,
+          f"booted, the late RAM full of NaNs: cleared at the first block, the slot's values from its patch "
+          f"({[round(v, 2) for v in p0]}), the others' the defaults (no WAVE patch there); the chorus plays, finite")
+    r.set_param(0, P_FX_DEPTH, 0.25)
+    p1 = struct.unpack("<4f", bytes(r.m.uc.mem_read(late0 + WHERE["fx_p"], 16)))
+    check(p1[2] == 0.25, f"after that, set_param keeps the slot's values (Depth {p1[2]})")
+
+    # through the whole synth output: level, stereo; 4 voices
+    lv, lr = {}, {}
+    for eff in (0.0, 1.0):
+        r = wave_rig(ptf, 4, effect=eff)
+        for n in (48, 55, 60, 64):
+            r.note_on(0, n, 100)
+        graph_lr(r, 30)
+        L, R = graph_lr(r, 160)
+        lv[eff] = 10 * np.log10(np.mean(np.concatenate([L, R]).astype(float) ** 2))
+        lr[eff] = (L.astype(float), R.astype(float))
+    diff = 10 * np.log10(np.mean((lr[1.0][0] - lr[1.0][1]) ** 2) / np.mean(lr[1.0][0] ** 2))
+    corr = float(np.corrcoef(lr[1.0][0], lr[1.0][1])[0, 1])
+    check(np.array_equal(*lr[0.0]) and abs(lv[1.0] - lv[0.0]) < 1.5 and diff > -20 and np.abs(lr[1.0]).max() < 32767,
+          f"through the synth output (WAVE's Init patch, a 4-note chord on 4 voices): Effect None gives L = R; the "
+          f"Chorus's level {lv[1.0] - lv[0.0]:+.1f} dB from dry, L and R differ ({diff:.0f} dB, correlation "
+          f"{corr:.2f}), unclipped")
+
+    fx = FX(WT(ptf))
+    fx.run(np.zeros(BLOCK, np.float32))             # the first block after a start sets the state up
+    c0 = fx.cost()
+    fx.w.set(effect=1.0)
+    fx.run(np.zeros(4 * BLOCK, np.float32))
+    c1 = fx.cost()
+    check(c0 < 1000 and c1 < 12000, f"the effect's cost per slot per block (voice 0's +0x14): Effect None {c0:.0f} "
+                                   f"instructions (R = L), Chorus {c1:.0f}")
+
+
 def analog_filter_checks(ptf: Path) -> None:
     print("the analog filters (MG: the ladder; OB: the saturating SVF)")
     w = WT(ptf, **OPEN)
@@ -2156,12 +2378,14 @@ def stress_checks(ptf: Path, blocks: int = 2000, seed: int = 11) -> None:
     lo, hi = CODE
     writers = builder_ranges(ptf)
     ram = WHERE["state"], WHERE["state"] + WHERE["size"]
+    late = LATE
     errors: list[str] = []
     state = {"block": 0}
     from machine import STACK_TOP
 
     def allowed(a: int, pc: int) -> bool:
-        if ram[0] <= a < ram[1] or STACK_TOP - 0x4000 <= a < STACK_TOP or MODEL_TABLE <= a < MODEL_TABLE + 20:
+        if ram[0] <= a < ram[1] or late[0] <= a < late[1] or STACK_TOP - 0x4000 <= a < STACK_TOP \
+                or MODEL_TABLE <= a < MODEL_TABLE + 20:
             return True
         if any(b <= a < b + 512 for b in OUT_BUFS):
             return True
@@ -2205,7 +2429,7 @@ def stress_checks(ptf: Path, blocks: int = 2000, seed: int = 11) -> None:
             inside[0] -= 1
             if not inside[0]:
                 watch_off()
-    for off in (sr.V_DELETE, sr.V_MIDI, sr.V_SET_PARAM, sr.V_RENDER, sr.V_SOUNDING):
+    for off in (sr.V_DELETE, sr.V_MIDI, sr.V_SET_PARAM, sr.V_RENDER, sr.V_POST, sr.V_SOUNDING):
         tramp = m.r32(sr.VOICE_VT[VAP] + off) & ~1
         code_ = bytes(m.uc.mem_read(tramp, 0x24))
         exits = [tramp + i for i in range(0, 0x24, 2)
@@ -2271,6 +2495,18 @@ def stress_checks(ptf: Path, blocks: int = 2000, seed: int = 11) -> None:
             if slot > 2 or not all(np.isfinite(x) for x in f.values()) or any(x > 4 for x in st.values()) \
                     or not levels_ok:
                 return f"entry {k}: slot {slot}, {f}, {st}"
+        if m.uc.mem_read(r.st("fx_ready"), 1)[0]:     # struct wt_fx (wt_fx.h): the delay line, then its fields
+            for i in range(3):
+                a = LATE[0] + i * WHERE["fx_size"]
+                buf = np.frombuffer(bytes(m.uc.mem_read(a, 4 * 512)), "<f4")
+                running, pos, phase, lpl, lpr, mix, depth = struct.unpack(
+                    "<IIfffff", bytes(m.uc.mem_read(a + WHERE["fx_running"], 28)))
+                ok = np.isfinite(buf).all() and np.abs(buf).max() <= 4.0 and running <= 1 and pos < 512 \
+                    and 0.0 <= phase < 1.0 and 0.0 <= mix <= 1.0 and 0.0 <= depth <= 1.0 \
+                    and np.isfinite([lpl, lpr]).all() and abs(lpl) <= 4.0 and abs(lpr) <= 4.0
+                if not ok:
+                    return f"effect {i}: running {running}, pos {pos}, phase {phase}, taps {lpl} {lpr}, mix {mix}, " \
+                           f"depth {depth}, delay line peak {np.abs(buf).max()}"
         return None
 
     # Every block is bounded by the call's instruction limit (a block that doesn't return
@@ -2295,7 +2531,7 @@ def stress_checks(ptf: Path, blocks: int = 2000, seed: int = 11) -> None:
             r.bend(slot, int(rnd.choice([-32768, -8192, 0, 8191, 32767, int(rnd.integers(-32768, 32768))])))
             note("bend")
         elif x < 0.62 and r.model(slot) in (VAP, WAVE):
-            idx = int(rnd.integers(0, 62 if r.model(slot) == WAVE else 60))
+            idx = int(rnd.integers(0, 66 if r.model(slot) == WAVE else 60))
             if r.model(slot) == WAVE and rnd.random() < 0.5:
                 # garbage reaches the WAVE voices only: stock VAP's own render hangs on some (NaN LFO
                 # settings, stock firmware too), and the UI keeps the patch in range
@@ -2469,12 +2705,31 @@ def wav_checks(ptf: Path, stock: Path, folder: Path) -> None:
     r.note_off(0, 45)
     out.append(r.render(80, fast=True)[0][0])
     write_wav(folder / "digital-resonant-sweep.wav", np.concatenate(out))
+    # the chorus, in stereo: the same chords dry (Effect None), then with the Chorus at its defaults, then at Depth
+    # 100 % and Rate 0.86 Hz (about the Juno's Chorus II)
+    r = wave_rig(ptf, 4, aenv_att=0.3, aenv_sus=0.9, aenv_rel=1.0, cutoff=3000.0, envamt=0.1)
+    ls, rs = [], []
+    for eff, depth, rate in ((0.0, 0.5, 0.5), (1.0, 0.5, 0.5), (1.0, 1.0, fx_value(0.86))):
+        r.set_param(0, P_EFFECT, eff)
+        r.set_param(0, P_FX_DEPTH, depth)
+        r.set_param(0, P_FX_RATE, rate)
+        for chord in ([48, 55, 60, 64], [45, 52, 57, 60]):
+            for n in chord:
+                r.note_on(0, n, 100)
+            a, b = graph_lr(r, 300)
+            for n in chord:
+                r.note_off(0, n)
+            c, d = graph_lr(r, 150)
+            ls += [a, c]
+            rs += [b, d]
+    write_wav(folder / "chorus.wav", np.concatenate(ls), np.concatenate(rs))
     check(True, "wrote init-vap.wav, init-wave.wav (ending on a chord), banks-position-sweep.wav, filter-sweep.wav "
-                "(the ladder), pad.wav, super-saw.wav, digital-resonant-sweep.wav")
+                "(the ladder), pad.wav, super-saw.wav, digital-resonant-sweep.wav, chorus.wav (stereo: dry, Chorus, "
+                "Chorus at Depth 100 %)")
 
 
 def main() -> int:
-    global WHERE, CODE
+    global WHERE, CODE, LATE
     args = sys.argv[1:]
     stress_blocks = 2000
     if "--stress" in args:
@@ -2488,6 +2743,7 @@ def main() -> int:
     ptf, stock = Path(args[0]), Path(args[1])
     wav_dir = Path(args[2]) if len(args) > 2 else None
     CODE = patch_code(ptf, "synths")
+    LATE = patch_late_ram(ptf, "synths")
     WHERE = ram_map(Machine(ptf), ptf)
     if quick:                               # the mix-dependent parts only
         hook_checks(ptf, stock)
@@ -2500,6 +2756,7 @@ def main() -> int:
         patch_file_checks(ptf, stock)
         macro_checks(ptf)
         export_checks(ptf)
+        fx_checks(ptf)
         stress_checks(ptf, stress_blocks)
         print(f"{len(failures)} failure(s) (--quick: rig, stock output, sound, allocation and bank checks skipped)")
         return 1 if failures else 0
@@ -2516,6 +2773,7 @@ def main() -> int:
     osc_checks(ptf)
     filter_checks(ptf)
     drive_checks(ptf)
+    fx_checks(ptf)
     analog_filter_checks(ptf)
     supersaw_checks(ptf)
     saw_checks(ptf)

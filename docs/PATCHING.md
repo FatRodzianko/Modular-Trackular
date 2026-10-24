@@ -38,7 +38,7 @@ Python command below does, without installing anything:
    one in step 1) and the image's, and refuses anything else, including a file that's
    already patched.
 2. Tick the mods you want. One mod gives its own build, "Select all" gives the
-   `patch/all` bundle (all ten, `1.2.0-MS6`), and any other mix gets a version text
+   `patch/all` bundle (all ten, `1.2.0-MS7`), and any other mix gets a version text
    that says which mods are in it: `M` plus two hex digits for colorsong 01, humanize 02,
    interpolate 04, masterfx 08, swing 10, visualizer 20, condtrig 40 and synths 80
    (colorsong + swing is `1.2.0-M11`); `N` instead of `M` when legato is in it
@@ -83,13 +83,15 @@ must be byte-identical to these builds:
 | visualizer | `TrackerPlus_vz5.ptf` | `1.2.0-vz5` | tested | `46970bb1689414fd711cadc6cfd149da458145aafcd9f6d274f10759dce9bdbd` |
 | the previous visualizer (the same animation, every pad update a full flush) | `TrackerPlus_vz2.ptf` | `1.2.0-vz2` | tested | `8b3ddcb09de46829799f542cf9d7423d95d4f39aa76db44881f5c18eb0361736` |
 | condtrig | `TrackerPlus_ct1.ptf` | `1.2.0-ct1` | tested | `539328948185c4a02577ce62181fc4143a5e86dc06a33e61b469d52b21da8197` |
-| synths | `TrackerPlus_sy6.ptf` | `1.2.0-sy6` | tested | `6f56aa00881797f55bec494b359d1248badd0fa11a66e4b3b15cd1adb878dc52` |
+| synths | `TrackerPlus_sy7.ptf` | `1.2.0-sy7` | tested | `dddf733b197e59d8a6dc7f3e1ee253ec450518238ca991d651f03ce4e0dc940f` |
+| the previous synths (without the effect) | `TrackerPlus_sy6.ptf` | `1.2.0-sy6` | tested | `6f56aa00881797f55bec494b359d1248badd0fa11a66e4b3b15cd1adb878dc52` |
 | the previous synths (without Drive) | `TrackerPlus_sy5.ptf` | `1.2.0-sy5` | tested | `4ccd24c538a814e7f930130d7cf69bfb9733515ae362569e1d41cf1aa6996e36` |
 | the previous synths (filter envelope on the Env 2 tile) | `TrackerPlus_sy4.ptf` | `1.2.0-sy4` | tested | `2fca2e07bb19ef4e539328152af27c173067ec6088604c45d9f28b96aa876e97` |
 | legato (MIDI and synth slots) | `TrackerPlus_lg2.ptf` | `1.2.0-lg2` | tested | `a7bab99688e6036e58b66bd8e60806170a045b10c57a218d6607ab9261f81a75` |
 | the previous legato (MIDI only) | `TrackerPlus_lg1.ptf` | `1.2.0-lg1` | tested | `f266ed1f131fc15edf12b224e081f16d9109938b004d8410e2cb0cdb380a68e6` |
 | copypattern | `TrackerPlus_cp4.ptf` | `1.2.0-cp4` | tested (also with humanize) | `7bfbc3eb09a7eb9d9dd4ccf3a8a52b1221743be7061397048f72bbc32908db01` |
-| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern) | `TrackerPlus_MS6.ptf` | `1.2.0-MS6` | tested | `764994f1711bddafa691d44567239442cc1729fd5da776ab1510ae1e0b416457` |
+| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern) | `TrackerPlus_MS7.ptf` | `1.2.0-MS7` | tested | `5ed2e44bed5432a84e4787d10b0222072f1a9d72776a1d3de357582679cafefd` |
+| the previous all (the same with synths sy6) | `TrackerPlus_MS6.ptf` | `1.2.0-MS6` | tested | `764994f1711bddafa691d44567239442cc1729fd5da776ab1510ae1e0b416457` |
 | the previous all (the same with synths sy5) | `TrackerPlus_MS5.ptf` | `1.2.0-MS5` | tested | `05d5d8153c41a81d2b40a50f9c300befd76a850608f4b8d0cb40f9b151b363d7` |
 | the previous all (the same with synths sy4) | `TrackerPlus_ML2.ptf` | `1.2.0-ML2` | tested | `8fd81d702351f30b57b1da47c297248e184043a363b10e9a3b75027e6e84aa5e` |
 | the previous all (the same with legato lg1) | `TrackerPlus_MLC.ptf` | `1.2.0-MLC` | tested | `4170d1cbf34c3a91073d6f276798844dcdd10faee99acb7fc079af484bc269b0` |
@@ -126,7 +128,7 @@ Each patch can be installed on its own, or several can go into one firmware:
               "../masterfx/patch.json", "../swing/patch.json", "../visualizer/patch.json",
               "../condtrig/patch.json", "../synths/patch.json", "../legato/patch.json",
               "../copypattern/patch.json"],
-  "version": "MS6",
+  "version": "MS7",
   ```
 
 To make your own mix, copy `patch/all/` to a new folder (for example `patch/mymix/`)
@@ -375,6 +377,11 @@ details. A patch is:
     `sdram_top`, which may not be set up that early.
   - `"ram_regions": [...]` to choose the regions and their order instead of the
     default. Name `itcm_tail` here to allow it (32-bit aligned accesses only).
+  - `"late_ram": "<symbol>"` for a second block, for state used only once the unit has
+    booted (it may land in `sdram_top`). The symbol names a word in the patch that holds
+    the block's size, `const volatile uint32_t name = sizeof(...)`; the patcher gives the
+    block out after every patch's own, from the default region order, and writes its
+    address over the size. See synths' effect state.
   - `"standalone": true` for a patch that must not be combined with others.
 - `tools/patch_ptf.py` checks everything, appends the code without gaps, and keeps the
   stock Intel HEX layout, so an unmodified image re-encodes to the exact stock file.

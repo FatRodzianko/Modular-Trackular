@@ -870,7 +870,7 @@ WAVE's filter envelope answers MIDI CCs 46–49, where VAP's answers 80–83.
 
 `sy5` on hardware (user): alone and in the all bundle (`1.2.0-MS5`), the filter envelope on Env 1; every mod in MS5 works.
 
-### Built: `1.2.0-sy6`, Drive (emulator-tested; not on hardware yet)
+### Built: `1.2.0-sy6`, Drive (tested on hardware)
 
 The first of the effects the user asked to explore. Drive (0–100 %) on the Filter page and
 tab, after Key Track: the filter's input times 1 to 16 (+24 dB) through the soft clip the
@@ -880,7 +880,27 @@ VAP's parameter 38 (Mix Env Amt), never shown by WAVE and 0 in every WAVE patch,
 parameter is added and saved patches are unchanged. Cost about 2,200 instructions per voice
 per block; RAM 2,048 → 2,064 bytes, which leaves 16 bytes in DTCM in the all bundle.
 
-Next (planned, not built): a second, late RAM block in SDRAM for WAVE (a patcher change),
-then an effect slot on the Voice page (None, Chorus I/II/I+II, Flanger, Phaser; Rate,
-Depth, Mix), run once per slot on the mixed output (voice 0's `+0x14`, which gets the
-slot's output buffers), in stereo (patch channel count 2, as PERC).
+`sy6` on hardware (user): alone and in the all bundle (`1.2.0-MS6`): old WAVE patches sound
+the same and load at Drive 0 %; Drive is audible, and stays under control with Resonance
+above 50 %.
+
+### Built: `1.2.0-sy7`, the effect with a Chorus (tested on hardware)
+
+The user chose to build the effect selector first, with None and a Chorus, and to add more
+effects to it once that works. Parameters 62–65 of WAVE's own: Effect (None, Chorus), Rate
+(0.05–5 Hz), Depth and Mix, on the Voice page and tab after Volume. The effect runs once
+per slot on its summed output (voice 0's `+0x14`), and a WAVE patch has 2 output channels;
+with Effect None, R is a copy of L, so the outputs are `sy6`'s. The chorus is after the
+Juno's: one delay line, two taps a triangle LFO moves in opposite directions around
+3.5 ms (±1.85 ms at Depth 100 %), each through a 9 kHz one-pole low-pass, mixed with
+equal-power gains. Its state is in a late RAM block (a patcher change: `"late_ram"`,
+also in the web patcher, the layout test and the test runner's cover set): 6,288 bytes,
+in SDRAM in the all bundle, touched only after boot. Patch files saved before `sy7` (62
+values) load with Effect None. Cost about 8,900 instructions per slot per block with the
+Chorus, 840 with None.
+
+Emulator: release and deep tiers passed. `sy7` on hardware (user): alone and in the all
+bundle (`1.2.0-MS7`), both load and work, every mod in MS7 too.
+
+Next (planned, not built): Flanger and Phaser as more Effect choices, on the same
+parameters and delay line (512 samples, 11.6 ms).

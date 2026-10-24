@@ -286,12 +286,25 @@ const decoder = new TextDecoder();
 const SPEC_KEYS = new Set([
   "name", "description", "firmware", "stock_image_sha256", "bin", "sym", "rel", "prebuilt_bin",
   "prebuilt_sym", "prebuilt_rel", "base", "branches", "words", "ram_startup", "ram_regions", "standalone",
-  "include", "version", "version_word", "itcm_branches",
+  "include", "version", "version_word", "itcm_branches", "late_ram",
 ]);
 
 function checkKeys(spec) {
   const unknown = Object.keys(spec).filter((k) => !SPEC_KEYS.has(k));
   if (unknown.length) fail(`${spec.name}: the web patcher doesn't support ${unknown.join(", ")} yet`);
+}
+
+// The size of a patch's late RAM block: its "late_ram" word as linked (0: none).
+function lateSize(spec, blob, syms, rel, pinned) {
+  const symbol = spec.late_ram;
+  if (symbol == null) return 0;
+  if (!has(syms, symbol)) fail(`${spec.name}: no symbol ${JSON.stringify(symbol)} for "late_ram"`);
+  const off = syms[symbol] - (rel ? rel.link : pinned);
+  if ((off & 3) || !(0 <= off && off <= blob.length - 4)) fail(`${spec.name}: ${symbol} is not an aligned word in the patch code`);
+  if (rel && (rel.offsets.includes(off) || rel.ram_offsets.includes(off))) fail(`${spec.name}: ${symbol} is in the relocation table`);
+  const size = getU32(blob, off);
+  if (!(0 < size && size <= 0x10000)) fail(`${spec.name}: ${symbol} holds ${size}, not a late RAM size (1 to 65536 bytes)`);
+  return size;
 }
 
 // io.fetch(url) -> Promise<Uint8Array>; URLs resolve like paths (file: or http:).
@@ -329,6 +342,7 @@ async function loadPatch(spec, specUrl, inBundle, io, log) {
     ram_link: rel ? rel.ram_link : null, ram_size: rel ? rel.ram_size : 0,
     ram_rel: rel ? rel.ram_offsets : [], ram_order: order,
     ram_startup: Boolean(spec.ram_startup),
+    late_word: spec.late_ram ?? null, late_size: lateSize(spec, blob, syms, rel, pinned),
     branches: spec.branches, words, itcm_branches: spec.itcm_branches ?? [],
   };
 }
@@ -371,13 +385,30 @@ function assignRam(parts, itcmReserved = 0) {
       fail(`${p.name}: no free RAM region has ${p.ram_size} bytes left (${left})`);
     }
   }
+  // Late blocks after all the others: they don't move them.
+  for (const p of parts) {
+    p.late = null;
+    if (!p.late_size) continue;
+    for (const name of RAM_DEFAULT_ORDER) {
+      const base = alignUp(free[name], ALIGN);
+      if (base + p.late_size <= RAM_REGIONS[name][1]) {
+        p.late = [base, name];
+        free[name] = base + p.late_size;
+        break;
+      }
+    }
+    if (p.late === null) {
+      const left = RAM_DEFAULT_ORDER.map((n) => `${n} ${RAM_REGIONS[n][1] - free[n]} B`).join(", ");
+      fail(`${p.name}: no free RAM region has ${p.late_size} bytes left for its late RAM (${left})`);
+    }
+  }
 }
 
-function setNext(p, symbol, value) {
+function setNext(p, symbol, value, linked = 0) {
   if (!has(p.syms, symbol)) fail(`${p.name}: no symbol ${JSON.stringify(symbol)} for "next"`);
   const off = p.syms[symbol] - p.base;
-  if ((off & 3) || !(0 <= off && off <= p.blob.length - 4) || getU32(p.blob, off) !== 0) {
-    fail(`${p.name}: ${symbol} is not an aligned zero word in the patch code`);
+  if ((off & 3) || !(0 <= off && off <= p.blob.length - 4) || getU32(p.blob, off) !== linked) {
+    fail(`${p.name}: ${symbol} is not an aligned word holding ${linked} in the patch code`);
   }
   if ((p.rel ?? []).includes(off) || p.ram_rel.includes(off)) fail(`${p.name}: ${symbol} is in the relocation table`);
   setU32(p.blob, off, value);
@@ -446,6 +477,7 @@ export async function patchFirmware({ stockBytes, spec, specUrl, io, outName, sh
     const base = p.pinned !== null ? p.pinned : alignUp(end, ALIGN);
     if (base < end) fail(`${p.name} at ${hx(base)} overlaps what comes before it (ends ${hx(end)})`);
     place(p, base);
+    if (p.late) setNext(p, p.late_word, p.late[0], p.late_size);
     end = base + p.blob.length;
   }
   let stubFlash = null;
@@ -619,6 +651,7 @@ export async function patchFirmware({ stockBytes, spec, specUrl, io, outName, sh
   log(`wrote ${outName}: ${fullImage.length} bytes (${parts.map((p) => `${p.name} ${p.blob.length} bytes at ${hx(p.base)}`).join(", ")})`);
   for (const p of parts) {
     if (p.ram) log(`  RAM: ${p.name} ${p.ram_size} bytes at ${hx(p.ram[0])} (${p.ram[1]})`);
+    if (p.late) log(`  late RAM: ${p.name} ${p.late_size} bytes at ${hx(p.late[0])} (${p.late[1]})`);
   }
   const layout = {
     output: outName,
@@ -627,6 +660,7 @@ export async function patchFirmware({ stockBytes, spec, specUrl, io, outName, sh
       name: p.name,
       code: [hx10(p.base), hx10(p.base + p.blob.length)],
       ram: p.ram ? { region: p.ram[1], start: hx10(p.ram[0]), end: hx10(p.ram[0] + p.ram_size) } : null,
+      ...(p.late ? { late_ram: { region: p.late[1], start: hx10(p.late[0]), end: hx10(p.late[0] + p.late_size) } } : {}),
     })),
   };
   if (stubSites.size) {

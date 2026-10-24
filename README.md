@@ -48,8 +48,8 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   models per project (Config → Project Settings → Synth Engines → WAVE replaces). The
   Model list then shows WAVE, with its own controls: two oscillators on 7 wavetable
   banks, a super saw or a saw, Digital mode, ladder, OB and SVF filters with drive, three
-  envelopes, two LFOs (bipolar or unipolar) and a 6-slot Mod Matrix. Its patches save
-  and load like any model's. Tested on hardware. See
+  envelopes, two LFOs (bipolar or unipolar), a 6-slot Mod Matrix and a stereo chorus.
+  Its patches save and load like any model's. Tested on hardware. See
   [patch/synths/README.md](patch/synths/README.md).
 - **legato**: legato for MIDI instruments and synth slots. A Glide FX (`G`, any value)
   on a MIDI-instrument or synth (S1–S3) note sends its note-on before the previous
@@ -63,7 +63,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   pattern. Its button sits next to Humanize's, or in Humanize's place without it.
   Tested on hardware. See
   [patch/copypattern/README.md](patch/copypattern/README.md).
-- **all**: all ten mods above in one firmware (version text `1.2.0-MS6`), from
+- **all**: all ten mods above in one firmware (version text `1.2.0-MS7`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
@@ -129,7 +129,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/versiontest/` | Version-text test patch |
 | `patch/itcmtest/` | No-op test of ITCM hooks (stubs in the ITCM tail, loaded by the startup copy table) |
 | `tools/ptf.py` | Read / convert / re-encode `.ptf` (Intel HEX), with a byte-exact round-trip check |
-| `tools/patch_ptf.py` | Apply a patch or bundle spec to a stock `.ptf`: places the patches in the order listed, assigns their RAM and relocates them, and makes the ITCM stubs for hooks in ITCM code (stock hash + original-byte checks, gap-free append) |
+| `tools/patch_ptf.py` | Apply a patch or bundle spec to a stock `.ptf`: places the patches in the order listed, assigns their RAM (and late RAM blocks, for state used after boot) and relocates them, and makes the ITCM stubs for hooks in ITCM code (stock hash + original-byte checks, gap-free append) |
 | `web/` | The web patcher: `patcher.js` (a port of `ptf.py` and `patch_ptf.py`), the page, `manifest.json` (the mods it offers), `expected.json` (the output hashes it accepts), `stage.py` (assembles the site) |
 | `.github/workflows/pages.yml` | Publishes the staged web patcher to GitHub Pages |
 | `tools/test_web_patcher.py`, `tools/web_patcher_node.mjs` | Check the web patcher's output is byte-identical to `patch_ptf.py`'s for every selection it offers (needs Node) |

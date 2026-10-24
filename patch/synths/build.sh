@@ -34,7 +34,7 @@ link() {                               # link <linker script> <elf> <map>
     "$ARM_GCC_BIN/arm-none-eabi-gcc" -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 \
         -nostdlib -nostartfiles -T "$1" -Wl,--gc-sections \
         -Wl,--undefined=mt_syn_voice_delete -Wl,--undefined=mt_syn_voice_midi -Wl,--undefined=mt_syn_voice_set_param \
-        -Wl,--undefined=mt_syn_voice_render -Wl,--undefined=mt_syn_voice_sounding -Wl,--undefined=mt_syn_settings_folder \
+        -Wl,--undefined=mt_syn_voice_render -Wl,--undefined=mt_syn_voice_post -Wl,--undefined=mt_syn_voice_sounding -Wl,--undefined=mt_syn_settings_folder \
         -Wl,--undefined=mt_syn_last_item -Wl,--undefined=mt_syn_pattern_update -Wl,--undefined=mt_syn_config_update \
         -Wl,--undefined=mt_version_fmt -Wl,--undefined=mt_syn_ram_map -Wl,--undefined=mt_syn_registry \
         -Wl,--undefined=mt_syn_project_records -Wl,--undefined=mt_syn_list_data -Wl,--undefined=mt_syn_list_images \

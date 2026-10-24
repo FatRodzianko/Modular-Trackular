@@ -28,3 +28,15 @@ def patch_code(ptf: Path, name: str) -> tuple[int, int]:
             lo, hi = (int(x, 16) for x in p["code"])
             return lo, hi
     raise SystemExit(f"{map_path}: no code for {name}")
+
+
+def patch_late_ram(ptf: Path, name: str) -> tuple[int, int]:
+    """Start and end of a patch's late RAM block ("late_ram") in the firmware built at `ptf`."""
+    map_path = Path(ptf).with_suffix(".map.json")
+    if not map_path.exists():
+        raise SystemExit(f"{map_path} not found: build the firmware with tools/patch_ptf.py, "
+                         "which writes it next to the .ptf")
+    for p in json.loads(map_path.read_text())["patches"]:
+        if p["name"] == name and p.get("late_ram"):
+            return int(p["late_ram"]["start"], 16), int(p["late_ram"]["end"], 16)
+    raise SystemExit(f"{map_path}: no late RAM for {name}")

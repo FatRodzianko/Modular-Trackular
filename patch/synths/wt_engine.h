@@ -52,11 +52,11 @@
 #define WT_RATE             44100.0f
 #define WT_MAX_HZ           20000.0f        /* the highest harmonic a level may reach */
 
-/* The parameters (set_param indices: VAP's, then WAVE's own two) that the engine reads,
- * and their place in a slot's parameter copy. WP_SHAPE is WAVE's Position, WP_WAVE its
+/* The parameters (set_param indices: VAP's, then WAVE's own) that the engine reads, and
+ * their place in a slot's parameter copy (the effect's, 62-65, are wt_fx.h's). WP_SHAPE is WAVE's Position, WP_WAVE its
  * Wave. */
 #define VAP_PARAMS          60u
-#define WAVE_PARAMS         62u             /* VAP's 60, then LFO 1's and LFO 2's Polarity */
+#define WAVE_PARAMS         66u             /* VAP's 60, LFO 1's and LFO 2's Polarity, the effect's 4 */
 #define VAP_VOLUME          39u             /* velocity / 127, set per voice before each note */
 enum {
     WP_SHAPE1, WP_SHAPE2, WP_WAVE1, WP_WAVE2, WP_MIX, WP_TUNE1, WP_TUNE2, WP_DETUNE, WP_FINE,
@@ -84,6 +84,7 @@ static const uint8_t wt_param_slot[WAVE_PARAMS] = {
     WP_MTX + 6, WP_MTX + 7, WP_MTX + 8, WP_MTX + 9, WP_MTX + 10, WP_MTX + 11,
     WP_MTX + 12, WP_MTX + 13, WP_MTX + 14, WP_MTX + 15, WP_MTX + 16, WP_MTX + 17,
     WP_LFO_POL, WP_LFO_POL + 1,                                                       /* 60-61 */
+    WT_UNUSED, WT_UNUSED, WT_UNUSED, WT_UNUSED,                                       /* 62-65: wt_fx.h */
 };
 
 #define MSG_NOTE_ON         4u

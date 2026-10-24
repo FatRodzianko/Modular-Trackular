@@ -18,13 +18,15 @@
  * - WAVE's builder runs VAP's builder, then rewrites the patch it made: parameter
  *   names, ranges, value displays (Wave 1 "Super Saw", Type "LP Ladder 24"), the screen
  *   layout (groups), the Macro editor's pages, the Macros, the Init values and the model
- *   id. The 60 entries stay where VAP has them, so the engine reads VAP's indices. Two
- *   entries of WAVE's own follow (60, 61: the LFOs' Polarity). The firmware sizes a
- *   patch's per-parameter arrays from the count the builder leaves, and VAP's builder
- *   resizes the vector to its 60 first, so every build of a WAVE patch has 62.
+ *   id. The 60 entries stay where VAP has them, so the engine reads VAP's indices. Six
+ *   entries of WAVE's own follow (60, 61: the LFOs' Polarity; 62-65: Effect, Rate, Depth,
+ *   Mix). The firmware sizes a patch's per-parameter arrays from the count the builder
+ *   leaves, and VAP's builder resizes the vector to its 60 first, so every build of a
+ *   WAVE patch has 66. A WAVE patch has 2 output channels (as PERC's), for the effect.
  * - Patch files hold the values by position, and the loader sets as many as the file
- *   has. So before a WAVE patch loads, a hook on the patch storage's load sets both
- *   Polarity switches to Bipolar: a file saved before they existed loads as it played.
+ *   has. So before a WAVE patch loads, a hook on the patch storage's load sets WAVE's own
+ *   six to their defaults (Bipolar, Effect None): a file saved before they existed loads
+ *   as it played.
  * - The swap is the project's model index table (DTCM 0x200006b4: index 0-4 -> model
  *   id): the replaced index maps to 3. Records keep stock indices. At project load the
  *   patch reads synths.bin before the stock code applies the slot records; a change in
@@ -34,8 +36,10 @@
  *   Edit Patch screen's logo label gets no logo and the text "WAVE" for a WAVE synth.
  * - A WAVE slot's voices are VAP voice objects. Five of the VAP voice vtable's words
  *   are hooked (deleting destructor +0x04, MIDI +0x08, set parameter +0x0c, render
- *   +0x10, "still sounding" +0x18), each through a chain word. For a voice whose patch
- *   is WAVE's the engine (wt_engine.h) renders and answers "sounding", and set_param
+ *   +0x10, +0x14 after the slot's voices have rendered, "still sounding" +0x18), each
+ *   through a chain word. For a voice whose patch is WAVE's the engine (wt_engine.h)
+ *   renders and answers "sounding", the effect (wt_fx.h) runs on the slot's output after
+ *   voice 0's render, and set_param
  *   fills the slot's parameter copy without reaching VAP (WAVE's values don't fit
  *   VAP's ranges). MIDI messages always reach VAP too, so its note bookkeeping, which
  *   the slot's voice allocation reads, stays right. Every other voice is stock.
@@ -56,7 +60,7 @@
 #include <stdint.h>
 
 #ifndef SYNTHS_VERSION
-#define SYNTHS_VERSION "sy6"
+#define SYNTHS_VERSION "sy7"
 #endif
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
@@ -66,6 +70,7 @@ CHAIN_WORD(mt_syn_next_delete);             /* VAP voice +0x04: 0x6014b725 */
 CHAIN_WORD(mt_syn_next_midi);               /* VAP voice +0x08: 0x6014a9a9 */
 CHAIN_WORD(mt_syn_next_set_param);          /* VAP voice +0x0c: 0x6014a8f1 */
 CHAIN_WORD(mt_syn_next_render);             /* VAP voice +0x10: 0x6014a8b1 */
+CHAIN_WORD(mt_syn_next_post);               /* VAP voice +0x14: 0x6014a811 (nothing) */
 CHAIN_WORD(mt_syn_next_sounding);           /* VAP voice +0x18: 0x6014a81d */
 CHAIN_WORD(mt_syn_next_folder);             /* Project Settings: cfg_menu_folder 0x60118395 */
 CHAIN_WORD(mt_syn_next_last_item);          /* last item: cfg_menu_item 0x601183e9 */
@@ -150,7 +155,8 @@ struct syn_state {
     uint8_t unnamed;                        /* the session is a project without a name */
     uint8_t wait;                           /* updates left before saving */
     uint8_t applied;                        /* the model index the table maps to WAVE, or REPLACE_NONE */
-    uint8_t pad[2];
+    uint8_t fx_ready;                       /* the late RAM block is set up (reset at every start) */
+    uint8_t pad;
     /* the audio side (reset at every start) */
     uint32_t ready;                         /* SY_READY once the unit has booted */
     uint32_t switches;                      /* slots the patch moved to another model (for the tests) */
@@ -161,6 +167,14 @@ struct syn_state {
 };
 static struct syn_state syn_state_ram __attribute__((section(".mt_ram")));
 #define SY (&syn_state_ram)
+
+/* The effects' state: the late RAM block (tools/patch_ptf.py "late_ram"). The word holds
+ * the block's size as linked and its address once patched; it may be SDRAM, so it is only
+ * touched once the unit has booted (SY->ready). */
+#include "wt_fx.h"
+struct fx_ram { struct wt_fx fx[SLOTS]; };
+const volatile uint32_t mt_syn_late_ram __attribute__((used)) = sizeof(struct fx_ram);
+#define FXR ((struct fx_ram *)mt_syn_late_ram)
 
 static const uint32_t stock_model_ids[MODELS] = {1u, 2u, 4u, 5u, 6u};   /* ACD FAT VAP WTFM PERC */
 static const int32_t stock_image_ids[MODELS] = {9, 10, 11, 12, 24};     /* their logos (0x60061488) */
@@ -183,6 +197,7 @@ static void sy_init_if_needed(void)         /* RAM outside .bss holds garbage at
 static void sy_audio_reset(void)
 {
     SY->ready = 0;
+    SY->fx_ready = 0;
     SY->applied = REPLACE_NONE;
     for (uint32_t k = 0; k < MAX_VOICES; k++)
         SY->voice[k].owner = 0;
@@ -408,6 +423,11 @@ __attribute__((used)) int sy_obs_set_param(const uint32_t *f)
     if (i < 0)
         return 0;
     float v = *(const volatile float *)f[2];
+    if (index >= FX_FIRST && index < FX_FIRST + FX_PARAMS) {    /* the effect's: once it is set up */
+        if (SY->fx_ready)
+            FXR->fx[i].p[index - FX_FIRST] = v;
+        return 0;
+    }
     if (index < WAVE_PARAMS && wt_param_slot[index] != WT_UNUSED)
         SY->param[i][wt_param_slot[index]] = v;
     struct wt_voice *e = entry_of(voice);
@@ -449,10 +469,58 @@ __attribute__((used)) int sy_obs_sounding(const uint32_t *f)
     return e ? wt_voice_sounding(e) : 0;
 }
 
+static float *wave_values(uint8_t *patch);
+
+/* A slot's effect state, once the unit has booted. The first call after a start sets
+ * the block up: cleared, with each slot's effect values from its patch (set_param only
+ * keeps them from then on). Called from the audio interrupt only. */
+static struct wt_fx *fx_slot(uint32_t slot)
+{
+    if (SY->ready != SY_READY)
+        return 0;
+    if (!SY->fx_ready) {
+        uint32_t *w = (uint32_t *)FXR;
+        for (uint32_t k = 0; k < sizeof(struct fx_ram) / 4u; k++)
+            w[k] = 0;
+        for (uint32_t i = 0; i < SLOTS; i++) {
+            const float *v = wave_values((uint8_t *)slot_word(i, SYN_SLOT_PATCH));
+            const float *src = v ? v + FX_FIRST : fx_defaults;
+            for (uint32_t k = 0; k < FX_PARAMS; k++)
+                FXR->fx[i].p[k] = src[k];
+        }
+        SY->fx_ready = 1;
+    }
+    return &FXR->fx[slot];
+}
+
+/* +0x14 (voice, ctx, L, R), voice 0's, once per block after the slot's voices have
+ * rendered into L and R (the slot's output): for a WAVE slot, the effect, which writes
+ * both sides (its patch has two channels); before boot, R = L. Others: VAP's (nothing). */
+__attribute__((used)) int sy_obs_post(const uint32_t *f)
+{
+    const uint8_t *voice = (const uint8_t *)f[0];
+    if (!is_wave(voice))
+        return CHAIN;
+    float *L = (float *)f[2], *R = (float *)f[3];
+    int slot = slot_of(voice);
+    struct wt_fx *s = slot >= 0 ? fx_slot((uint32_t)slot) : 0;
+    if (s) {
+        if (s->voice != (uint32_t)voice) {  /* another patch or voice set: start over */
+            s->voice = (uint32_t)voice;
+            s->running = 0;
+        }
+        wt_fx_run(s, L, R);
+    } else
+        for (uint32_t n = 0; n < WT_BLOCK; n++)
+            R[n] = L[n];
+    return 0;
+}
+
 TRAMPOLINE(mt_syn_voice_delete, sy_obs_delete, mt_syn_next_delete)
 TRAMPOLINE(mt_syn_voice_midi, sy_obs_midi, mt_syn_next_midi)
 TRAMPOLINE(mt_syn_voice_set_param, sy_obs_set_param, mt_syn_next_set_param)
 TRAMPOLINE(mt_syn_voice_render, sy_obs_render, mt_syn_next_render)
+TRAMPOLINE(mt_syn_voice_post, sy_obs_post, mt_syn_next_post)
 TRAMPOLINE(mt_syn_voice_sounding, sy_obs_sounding, mt_syn_next_sounding)
 
 /* ---- the firmware's C++ objects ------------------------------------------------------ */
@@ -541,6 +609,7 @@ _Static_assert(sizeof(struct fw_macro) == 0x28, "macro");
 #define C_MODEL             0x24u
 #define C_MACRO_INIT        0x2Cu           /* a std::function the firmware calls with &Macros once it
                                              * has made the 8 of them: the model's Macro defaults */
+#define C_CHANNELS          0x28u           /* the output channels: 1, or 2 (PERC's; the synth output reads it each block) */
 #define C_GROUPS            0x44u
 #define C_PAGES             0x50u
 
@@ -560,6 +629,7 @@ static const char *const dest_names[MOD_DESTS] = {
     "Volume", "Noise",
 };
 static const char *const pol_names[2] = {"Bipolar", "Unipolar"};
+static const char *const effect_names[FX_TYPES] = {"None", "Chorus"};
 
 /* The value displays' std::function: an empty functor (as the firmware's own lambdas) */
 static int fmt_manager(void **dest, void *const *source, int op)
@@ -587,11 +657,13 @@ static uint32_t list_index(const float *value, uint32_t count)
         str_init(ret, table[list_index(value, count)]);                                 \
         return ret;                                                                     \
     }
+typedef struct fw_string *(*fmt_fn)(struct fw_string *, const void *, uint32_t, const float *);
 FMT_LIST(fmt_wave, wave_names, WT_SLOTS)
 FMT_LIST(fmt_type, type_names, 15)
 FMT_LIST(fmt_src, src_names, MOD_SRCS)
 FMT_LIST(fmt_dest, dest_names, MOD_DESTS)
 FMT_LIST(fmt_pol, pol_names, 2)
+FMT_LIST(fmt_effect, effect_names, FX_TYPES)
 
 /* invoker for a 0..1 value shown as a percentage ("35 %") */
 static struct fw_string *fmt_percent(struct fw_string *ret, const void *functor, uint32_t x,
@@ -601,6 +673,18 @@ static struct fw_string *fmt_percent(struct fw_string *ret, const void *functor,
     float v = *value;
     char buf[8];
     ((snprintf_fn)FW_SNPRINTF)(buf, sizeof buf, "%d %%", !(v >= 0.0f) ? 0 : v > 1.0f ? 100 : (int)(v * 100.0f + 0.5f));
+    str_init(ret, buf);
+    return ret;
+}
+
+/* invoker for the effect's Rate (0..1, 0.05-5 Hz) shown in Hz ("0.50 Hz") */
+static struct fw_string *fmt_rate(struct fw_string *ret, const void *functor, uint32_t x,
+                                  const float *value)
+{
+    (void)functor; (void)x;
+    int c = (int)(rate_hz(*value) * 100.0f + 0.5f);
+    char buf[12];
+    ((snprintf_fn)FW_SNPRINTF)(buf, sizeof buf, "%d.%02d Hz", c / 100, c % 100);
     str_init(ret, buf);
     return ret;
 }
@@ -616,7 +700,7 @@ static void set_display(struct fw_param *p, uint32_t invoker)
 
 /* half floats: a list's top item */
 #define H_0                 0x0000u
-#define H_1                 0x3C00u         /* Polarity: Bipolar, Unipolar */
+#define H_1                 0x3C00u         /* Polarity: Bipolar, Unipolar; Effect: None, Chorus */
 #define H_6                 0x4600u         /* Src: 7 sources */
 #define H_8                 0x4800u         /* Wave: 9 waves */
 #define H_10                0x4900u         /* Dest: 11 destinations */
@@ -666,6 +750,10 @@ static const int8_t filter_cells[] = {12, 13, 11, 14, -1, 37, 38, -1, -1};
 static const int8_t vap_filter_page[] = {12, 13, 11, 14, 37};
 static const int8_t vap_filter_cells[] = {12, 13, 11, 14, -1, 37, -1, -1, -1};
 static const int8_t menv_page[] = {23, 24, 25, 26};
+/* The effect: on the Voice page and tab, after VAP's three (the FX tab, with no cells in
+ * VAP, is the stock instrument effects' and stays as it is) */
+static const int8_t voice_page[] = {35, 36, 39, 62, 63, 64, 65};
+static const int8_t vap_voice_page[] = {35, 36, 39};
 
 static int cells_are(const struct fw_vector *v, const int8_t *cells, uint32_t n)
 {
@@ -758,24 +846,36 @@ static void wave_rewrite(uint8_t *c)
         || !str_eq(&g[1].name, "Filter") || vec_count(&g[1].subs, sizeof(struct fw_sub)) != 1
         || !cells_are(&((struct fw_sub *)g[1].subs.begin)[0].cells, vap_filter_cells, sizeof vap_filter_cells)
         || !str_eq(&q[1].name, "Filter") || !cells_are(&q[1].cells, vap_filter_page, sizeof vap_filter_page)
-        || !str_eq(&p[38].name, "Mix Env Amt"))
+        || !str_eq(&p[38].name, "Mix Env Amt")
+        || !str_eq(&g[5].name, "Voice") || vec_count(&g[5].subs, sizeof(struct fw_sub)) != 1
+        || !cells_are(&((struct fw_sub *)g[5].subs.begin)[0].cells, vap_voice_page, sizeof vap_voice_page)
+        || !str_eq(&q[8].name, "Voice") || !cells_are(&q[8].cells, vap_voice_page, sizeof vap_voice_page)
+        || *(uint32_t *)(c + C_CHANNELS) != 1u)
         return;
 
     /* WAVE's own parameters after VAP's 60: the LFOs' Polarity, Bipolar (0) or Unipolar
-     * (1). First, as the firmware's own append makes the entries and may move the vector.
-     * Filled as a stepped list like Type: no CC, no rebuild on change. */
+     * (1), then the effect's (wt_fx.h). First, as the firmware's own append makes the
+     * entries and may move the vector. The lists are stepped like Type, the others plain
+     * like Drive (VAP's Mix Env Amt); none has a CC or a rebuild on change. */
     ((void (*)(struct fw_vector *, uint32_t))FW_PARAMS_APPEND)(pv, WAVE_PARAMS - VAP_PARAMS);
     if (!pv->begin || vec_count(pv, sizeof *p) != WAVE_PARAMS)
         return;
     p = (struct fw_param *)pv->begin;
     for (uint32_t k = VAP_PARAMS; k < WAVE_PARAMS; k++) {
-        str_set(&p[k].name, "Polarity");
-        p[k].value = 0.0f;
+        static const char *const names[WAVE_PARAMS - VAP_PARAMS] = {
+            "Polarity", "Polarity", "Effect", "Rate", "Depth", "Mix",
+        };
+        static const fmt_fn displays[WAVE_PARAMS - VAP_PARAMS] = {
+            fmt_pol, fmt_pol, fmt_effect, fmt_rate, fmt_percent, fmt_percent,
+        };
+        uint32_t list = k < FX_FIRST + FX_RATE;
+        str_set(&p[k].name, names[k - VAP_PARAMS]);
+        p[k].value = k < FX_FIRST ? 0.0f : fx_defaults[k - FX_FIRST];
         p[k].lo = H_0;
         p[k].hi = H_1;
-        p[k].flags = p[11].flags;
+        p[k].flags = list ? p[11].flags : p[38].flags;
         p[k].pad = 0;
-        set_display(&p[k], (uint32_t)fmt_pol);
+        set_display(&p[k], (uint32_t)displays[k - VAP_PARAMS]);
     }
 
     /* the parameters */
@@ -820,6 +920,9 @@ static void wave_rewrite(uint8_t *c)
     str_set(&q[3].shortname, "Flt Env");
     str_set(&q[4].name, "Mod Envelope");
     str_set(&q[4].shortname, "Mod Env");
+    set_cells(&q[8].cells, voice_page, sizeof voice_page);  /* four more cells: from the heap */
+    set_cells(&((struct fw_sub *)g[5].subs.begin)[0].cells, voice_page, sizeof voice_page);
+    *(uint32_t *)(c + C_CHANNELS) = 2u;     /* stereo: the effect writes L and R */
 
     /* the Macros, once the firmware has made them */
     init[2] = (uint32_t)fmt_manager;        /* an empty functor, as VAP's */
@@ -927,7 +1030,7 @@ void mt_syn_patch_label(void *mgr, int id, const char *text)
 typedef int (*set_value_fn)(void *patch, uint32_t index, const float *value, uint32_t source);
 #define SET_SOURCE_LOAD     2u              /* what the loader passes */
 
-/* A WAVE patch: the patch class, WAVE's model id, and WAVE's 62 values */
+/* A WAVE patch: the patch class, WAVE's model id, and WAVE's 66 values */
 static float *wave_values(uint8_t *patch)
 {
     if (!patch || *(const uint32_t *)patch != FW_PATCH_VTABLE
@@ -937,34 +1040,37 @@ static float *wave_values(uint8_t *patch)
     return vec_count(v, sizeof(float)) == WAVE_PARAMS ? (float *)v->begin : 0;
 }
 
-/* Both Polarity switches through the patch's own set_value, as the loader sets values (it
- * also hands them to the voices) */
-static void set_polarity(uint8_t *patch, const float *pol)
+/* WAVE's own six (the Polarity switches, the effect's) through the patch's own set_value,
+ * as the loader sets values (it also hands them to the voices) */
+static void set_own(uint8_t *patch, const float *own)
 {
     set_value_fn set = (set_value_fn)(*(uint32_t *const *)patch)[PATCH_SET_VALUE / 4u];
     for (uint32_t k = 0; k < WAVE_PARAMS - VAP_PARAMS; k++)
-        set(patch, VAP_PARAMS + k, &pol[k], SET_SOURCE_LOAD);
+        set(patch, VAP_PARAMS + k, &own[k], SET_SOURCE_LOAD);
 }
 
 /* replaces the patch storage's "load into a patch" (vtable 0x60062fd4 + 0x0c, 0x60124f39;
  * chained): (storage, &path, patch, 1), 1 when loaded. A slot's Workspace patch and
  * Patches/<model>/<name>.patch both load through it. The loader sets as many values as
- * the file holds, so a WAVE patch saved before the Polarity switches (60 values) would
- * keep them as they were: they go to Bipolar first, and back if nothing loads. */
+ * the file holds, so a WAVE patch saved before WAVE's own parameters (60 values: sy3; 62:
+ * sy4-sy6, without the effect) would keep them as they were: they go to their defaults
+ * (Bipolar, Effect None) first, and back if nothing loads. */
 int mt_syn_patch_load(void *storage, const void *path, uint8_t *patch, uint32_t flag)
 {
     typedef int (*load_fn)(void *, const void *, uint8_t *, uint32_t);
     const float *v = wave_values(patch);
     float old[WAVE_PARAMS - VAP_PARAMS];
-    static const float bipolar[WAVE_PARAMS - VAP_PARAMS] = {0.0f, 0.0f};
+    float own[WAVE_PARAMS - VAP_PARAMS] = {0.0f, 0.0f};    /* Bipolar */
+    for (uint32_t k = 0; k < FX_PARAMS; k++)
+        own[FX_FIRST - VAP_PARAMS + k] = fx_defaults[k];
     if (v) {
         for (uint32_t k = 0; k < WAVE_PARAMS - VAP_PARAMS; k++)
             old[k] = v[VAP_PARAMS + k];
-        set_polarity(patch, bipolar);
+        set_own(patch, own);
     }
     int ok = ((load_fn)mt_syn_next_patch_load)(storage, path, patch, flag);
     if (v && !ok && wave_values(patch))
-        set_polarity(patch, old);
+        set_own(patch, old);
     return ok;
 }
 
@@ -1227,6 +1333,10 @@ const uint32_t mt_syn_ram_map[] = {
     (uint32_t)wt_level_len,
     WT_LEVELS,
     (uint32_t)wave_builder,                 /* WAVE's builder (the descriptor's functor) */
+    offsetof(struct syn_state, fx_ready),   /* the effect: its state in the late RAM block */
+    sizeof(struct wt_fx),
+    offsetof(struct wt_fx, p),
+    offsetof(struct wt_fx, running),
 };
 
 /* ---- version text: Config shows 1.2.0-<SYNTHS_VERSION> -------------------------- */

@@ -24,6 +24,13 @@ early. The ITCM tail is only used when a spec names it (aligned accesses only). 
 spec with "standalone": true (ramdiag) can't go into a bundle. The patcher writes
 <out>.map.json next to the output: where each patch's code and RAM landed.
 
+Late RAM: a spec with "late_ram": "<symbol>" gets a second block, for state used only
+after the unit has booted (it may be in SDRAM). The symbol names an aligned word in the
+patch code that holds the block's size as linked; the patcher gives the block out from
+the default region order (startup or not), after every patch's own block, so the other
+blocks land where they would without it, and writes its address over the size. The
+patch reaches the block only through that word.
+
 A bundle spec combines several patches into one firmware: "include" lists their
 patch.json files (relative to the bundle's folder), in the order they are placed, and
 "version" gives the version text (Config shows 1.2.0-<version>, at most 3 characters).
@@ -183,6 +190,24 @@ def load_rel(path: Path) -> dict:
     return rel
 
 
+def late_size(spec: dict, blob: bytes, syms: dict[str, int], rel: dict | None, pinned: int | None) -> int:
+    """The size of a patch's late RAM block: its "late_ram" word as linked (0: none)."""
+    symbol = spec.get("late_ram")
+    if symbol is None:
+        return 0
+    if symbol not in syms:
+        sys.exit(f"{spec['name']}: no symbol {symbol!r} for \"late_ram\"")
+    off = syms[symbol] - (rel["link"] if rel else pinned)
+    if off & 3 or not 0 <= off <= len(blob) - 4:
+        sys.exit(f"{spec['name']}: {symbol} is not an aligned word in the patch code")
+    if rel and (off in rel["offsets"] or off in rel["ram_offsets"]):
+        sys.exit(f"{spec['name']}: {symbol} is in the relocation table")
+    size = struct.unpack_from("<I", blob, off)[0]
+    if not 0 < size <= 0x10000:
+        sys.exit(f"{spec['name']}: {symbol} holds {size}, not a late RAM size (1 to 65536 bytes)")
+    return size
+
+
 def load_patch(spec: dict, pdir: Path, in_bundle: bool) -> dict:
     """One patch: its code blob, symbols, relocation table and hook sites."""
     files = {k: spec.get(k) for k in ("bin", "sym", "rel")}
@@ -214,6 +239,7 @@ def load_patch(spec: dict, pdir: Path, in_bundle: bool) -> dict:
             "ram_link": rel["ram_link"] if rel else None, "ram_size": rel["ram_size"] if rel else 0,
             "ram_rel": rel["ram_offsets"] if rel else [], "ram_order": order,
             "ram_startup": bool(spec.get("ram_startup")),
+            "late_word": spec.get("late_ram"), "late_size": late_size(spec, blob, syms, rel, pinned),
             "branches": spec["branches"], "words": words,
             "itcm_branches": spec.get("itcm_branches", [])}
 
@@ -252,16 +278,30 @@ def assign_ram(parts: list[dict], itcm_reserved: int = 0) -> None:
         if p["ram"] is None:
             left = ", ".join(f"{n} {RAM_REGIONS[n][1] - free[n]} B" for n in p["ram_order"])
             sys.exit(f"{p['name']}: no free RAM region has {p['ram_size']} bytes left ({left})")
+    # Late blocks after all the others: they don't move them.
+    for p in parts:
+        p["late"] = None
+        if not p["late_size"]:
+            continue
+        for name in RAM_DEFAULT_ORDER:
+            base = (free[name] + ALIGN - 1) & ~(ALIGN - 1)
+            if base + p["late_size"] <= RAM_REGIONS[name][1]:
+                p["late"] = (base, name)
+                free[name] = base + p["late_size"]
+                break
+        if p["late"] is None:
+            left = ", ".join(f"{n} {RAM_REGIONS[n][1] - free[n]} B" for n in RAM_DEFAULT_ORDER)
+            sys.exit(f"{p['name']}: no free RAM region has {p['late_size']} bytes left for its late RAM ({left})")
 
 
-def set_next(p: dict, symbol: str, value: int) -> None:
-    """Fill patch p's chain word `symbol` (placed, linked as 0) with `value`."""
+def set_next(p: dict, symbol: str, value: int, linked: int = 0) -> None:
+    """Fill patch p's chain word `symbol` (placed, linked as `linked`: 0) with `value`."""
     if symbol not in p["syms"]:
         sys.exit(f"{p['name']}: no symbol {symbol!r} for \"next\"")
     off = p["syms"][symbol] - p["base"]
     blob = bytearray(p["blob"])
-    if off & 3 or not 0 <= off <= len(blob) - 4 or struct.unpack_from("<I", blob, off)[0] != 0:
-        sys.exit(f"{p['name']}: {symbol} is not an aligned zero word in the patch code")
+    if off & 3 or not 0 <= off <= len(blob) - 4 or struct.unpack_from("<I", blob, off)[0] != linked:
+        sys.exit(f"{p['name']}: {symbol} is not an aligned word holding {linked} in the patch code")
     if off in (p["rel"] or []) or off in p["ram_rel"]:
         sys.exit(f"{p['name']}: {symbol} is in the relocation table")
     struct.pack_into("<I", blob, off, value)
@@ -327,6 +367,8 @@ def main() -> int:
         if base < end:
             sys.exit(f"{p['name']} at {base:#x} overlaps what comes before it (ends {end:#x})")
         place(p, base)
+        if p["late"]:
+            set_next(p, p["late_word"], p["late"][0], linked=p["late_size"])
         end = base + len(p["blob"])
     stub_flash = None
     if stub_sites:
@@ -480,6 +522,8 @@ def main() -> int:
     for p in parts:
         if p["ram"]:
             print(f"  RAM: {p['name']} {p['ram_size']} bytes at {p['ram'][0]:#x} ({p['ram'][1]})")
+        if p["late"]:
+            print(f"  late RAM: {p['name']} {p['late_size']} bytes at {p['late'][0]:#x} ({p['late'][1]})")
     layout = {
         "output": out_path.name,
         "version_text": "1.2.0-" + (version.decode() if version is not None else "(the patch's own)"),
@@ -488,7 +532,9 @@ def main() -> int:
             "code": [f"{p['base']:#010x}", f"{p['base'] + len(p['blob']):#010x}"],
             "ram": ({"region": p["ram"][1], "start": f"{p['ram'][0]:#010x}",
                      "end": f"{p['ram'][0] + p['ram_size']:#010x}"} if p["ram"] else None),
-        } for p in parts],
+        } | ({"late_ram": {"region": p["late"][1], "start": f"{p['late'][0]:#010x}",
+                           "end": f"{p['late'][0] + p['late_size']:#010x}"}} if p["late"] else {})
+            for p in parts],
     }
     if stub_sites:
         layout["itcm_stubs"] = {"flash": f"{stub_flash:#010x}", "itcm": f"{ITCM_STUBS:#x}",

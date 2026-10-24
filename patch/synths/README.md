@@ -27,13 +27,18 @@ What WAVE has:
   bipolar or unipolar), and a 6-slot **Mod Matrix**. The matrix can modulate Position, Pitch, Mix, Cutoff,
   Resonance, Volume and Noise.
 - Glide and noise.
+- **An effect per synth:** None or a stereo **Chorus** after the Roland Juno's, with Rate,
+  Depth and Mix.
 
-Installed on its own, Config shows the firmware version as `1.2.0-sy6`.
+Installed on its own, Config shows the firmware version as `1.2.0-sy7`.
 
-**Status:** `sy6` was tested on hardware, alone and in the all bundle: it installs; `sy5` patches load
-with Drive at 0 % and sound the same; Drive changes the sound audibly and stays under
-control with Resonance above 50. It is `sy5` with Drive; with Drive at 0 it plays sample
-for sample as `sy5`, which was tested on hardware, alone and in the all bundle.
+**Status:** `sy7` was tested on hardware, alone and in the all bundle: it installs and
+plays, and the effect works. It is `sy6` with the effect. With Effect None (the default,
+and what every patch saved before `sy7` loads with) its output is `sy6`'s on both sides. `sy6` was tested on hardware, alone and in the all bundle: it
+installs; `sy5` patches load with Drive at 0 % and sound the same; Drive changes the sound
+audibly and stays under control with Resonance above 50. It is `sy5` with Drive; with
+Drive at 0 it plays sample for sample as `sy5`, which was tested on hardware, alone and in
+the all bundle.
 `sy5` is `sy4` with the filter envelope on the
 Edit Patch screen's Env 1 tile (as VAP's) and the mod envelope on Env 2; the sound and
 the patch files are unchanged. `sy4` was tested on hardware, alone and bundled with all
@@ -83,7 +88,7 @@ screen, the tiles open them as lists:
 | Env 2 | The mod envelope |
 | LFO 1, LFO 2 | Sync, Ratio, Waveform, Retrigger, Polarity |
 | Mod | The Mod Matrix |
-| Voice | Glide Mode, Glide Time, Volume |
+| Voice | Glide Mode, Glide Time, Volume, Effect, Rate, Depth, Mix |
 
 **Oscillator (1/2):**
 
@@ -160,6 +165,17 @@ The glide modes are:
 - Legato: as Always, and a note played while the last is held doesn't restart the
   envelopes.
 - Legato O.: both, only while the last is held.
+
+The effect follows on the same page and tab:
+- **Effect:** None (the default) or Chorus. It works on the synth's whole output, after
+  all its voices, and makes the synth stereo.
+- **Rate:** how fast the chorus moves, 0.05–5 Hz (0.50 Hz at the default, 50 %).
+- **Depth:** how far it moves. 50 % (the default) is about the Juno's Chorus I, 100 %
+  its Chorus II.
+- **Mix:** 0 % is dry, 100 % the chorus alone; at 50 % (the default) the two are equal.
+  The loudness stays about the same at any setting.
+
+Switching the effect on or off fades it in or out over about 60 ms.
 
 **FX:** the stock instrument effects.
 
@@ -245,23 +261,25 @@ The patch works with those pieces:
   - the Macros (through the container's Macro-defaults function, which the firmware
     calls once the Macros exist);
   - the Init values and the model id;
-  - two parameters of WAVE's own after VAP's 60: the LFOs' Polarity.
+  - six parameters of WAVE's own after VAP's 60: the LFOs' Polarity (60, 61) and the
+    effect's Effect, Rate, Depth and Mix (62–65);
+  - two output channels instead of one, so the synth plays in stereo (as PERC does).
 
   VAP's 60 parameters stay where VAP has them, so patch files keep their positions. If
   anything about VAP's patch isn't as expected, the builder leaves it VAP's.
-- **The Polarity switches** are parameters 60 and 61, added with the firmware's own
-  vector code:
+- **WAVE's own parameters** (60–65) are added with the firmware's own vector code:
   - The firmware sizes each of a patch's per-parameter arrays from the count the builder
     leaves. VAP's builder sets the count to 60 first on every build, and WAVE's then adds
-    its two, so a WAVE patch has 62 every time.
-  - A new patch's vector is made 62 long before VAP's builder runs. VAP's builder trims it
-    to 60 and keeps the room, so adding the two needs no new allocation. Growing VAP's 60
-    to 62 would double the vector's room to 120 entries (6.7 KB per WAVE patch).
+    its six, so a WAVE patch has 66 every time.
+  - A new patch's vector is made 66 long before VAP's builder runs. VAP's builder trims it
+    to 60 and keeps the room, so adding the six needs no new allocation. Growing VAP's 60
+    to 66 would double the vector's room to 120 entries (6.7 KB per WAVE patch).
   - Patch files store values by position, and loading sets as many as the file holds.
-    So a hook on the patch storage's load sets both switches to Bipolar before a WAVE
-    patch loads: a patch saved without them (`sy3`) loads as it played. If the load
-    fails, they go back to what they were.
-  - `sy3` loading a patch saved with them ignores the two extra values.
+    So a hook on the patch storage's load sets all six to their defaults (Bipolar, Effect
+    None) before a WAVE patch loads: a patch saved without them (`sy3`: 60 values;
+    `sy4`–`sy6`: 62) loads as it played. If the load fails, they go back to what they
+    were.
+  - An older build loading a patch saved with more of them ignores the extra values.
 - **The swap** sets the table entry of the replaced index to 3:
   - At project load, the patch reads `synths.bin` before the stock code applies the slot
     records. So the stock code gives each slot its model, then loads its patch, as the
@@ -274,7 +292,7 @@ The patch works with those pieces:
 - **The Edit Patch screen** shows the model's logo in a label, picked from a table by the
   model index. For a WAVE synth, the patch clears the label's logo and gives it the text
   "WAVE".
-- **WAVE's voices are VAP voice objects** (VAP's factory). Five entries of the VAP voice
+- **WAVE's voices are VAP voice objects** (VAP's factory). Six entries of the VAP voice
   vtable (`0x600667e4`) are hooked, each chained to the stock one:
 
   | Entry | A WAVE voice | Any other voice |
@@ -283,6 +301,7 @@ The patch works with those pieces:
   | `+0x08` MIDI | Notes, note offs and bend to the engine, then always to VAP (its note bookkeeping) | VAP's |
   | `+0x0c` set parameter | Into the slot's parameter copy only: WAVE's values don't fit VAP's ranges | VAP's |
   | `+0x10` render | The engine renders 128 samples (silence before the unit has booted) | VAP's |
+  | `+0x14` after the voices | Voice 0's, once per block with the synth's summed output: the effect, which writes both sides | VAP's (nothing) |
   | `+0x18` sounding | The engine's amp envelope | VAP's |
 
   The hooks are naked trampolines. For any other voice, the jump to VAP's method leaves
@@ -293,6 +312,12 @@ The patch works with those pieces:
 - **Start-up.** Running heavy DSP while the unit boots hung it before
   ([FINDINGS.md](../../docs/FINDINGS.md) section 19). So a WAVE voice renders silence until
   the Pattern screen's update has run once.
+- **The effect's memory** (6,288 bytes: a delay line and the state for each of the three
+  synths) is a second RAM block that the patcher gives out after every patch's own
+  ("late_ram" in `patch.json`). In the all bundle it is in SDRAM. SDRAM may not be ready
+  before the firmware's `main` runs, so the block is only touched once the unit has
+  booted. It holds garbage at power-on: the first block after a start clears it and takes
+  each synth's effect values from its patch.
 
 **The engine** (`wt_engine.h`) renders mono, 128 samples per block, into the left buffer, as
 VAP does:
@@ -320,6 +345,16 @@ VAP does:
 - **Start phases:** each voice's oscillators start at a random phase. Saws that start
   together peak together, and a chord would clip.
 
+**The effect** (`wt_fx.h`) runs once per block on the synth's output, after all its
+voices. With Effect None it copies the left side to the right. The chorus writes each
+sample into a delay line of 512 samples and reads it at two points, one per side. A
+triangle LFO moves them in opposite directions around 3.5 ms; Depth 100 % swings them
+±1.85 ms (1.65–5.35 ms). Each point is read with linear interpolation and goes through a
+one-pole low-pass at 9 kHz, as the Juno's bucket-brigade delay dulls its copy. Mix
+crossfades the dry signal and the delayed one, each scaled by
+1 / √((1 − Mix)² + Mix²), so the loudness of a full sound stays the same. Mix and Depth
+move at most 5 % per block, and the delay line starts empty each time the chorus starts.
+
 Every parameter is clamped (NaN counts as the bottom of the range), and the output is
 limited to ±2. The output level is set so a four-note chord of the Init patch at full
 velocity peaks at 0.74–0.88 of full scale, depending on the voices' random start
@@ -342,9 +377,13 @@ images stay below −63 dB. Each bank of 32 frames takes 66.5 KB of flash.
 An idle WAVE voice still runs its LFOs. Each Mod Matrix slot in use adds about 300.
 A WAVE voice is also a VAP voice object: 6.5 KB of heap, as VAP.
 
+The effect costs about 840 instructions per synth per block with Effect None (the copy to
+the right side) and 8,900 with the Chorus, once per synth, not per voice.
+
 **Sizes:**
 - RAM: 2,064 bytes of on-chip patch RAM, for the settings, each slot's parameter copy and
-  8 engine voices.
+  8 engine voices; and 6,288 bytes for the effect (on-chip on its own, SDRAM in the all
+  bundle).
 - Flash: 483 KB, 467 KB of it the seven banks and the saw table (Super Saw and Saw).
 - The `.ptf` grows by about 1.3 MB (Intel HEX).
 - With all seven patches here bundled, the image ends at `0x6023c11c`, 2.2 MB into the
@@ -363,7 +402,7 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/synths/patch.json build/TrackerPlus_sy6.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/synths/patch.json build/TrackerPlus_sy7.ptf
 ```
 
 To combine it with other patches, list `../synths/patch.json` in a bundle (see "Choosing
@@ -381,7 +420,7 @@ patch/synths/build.sh
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_synths.py build/TrackerPlus_sy6.ptf path/to/TrackerPlus_1.2.0.ptf [wav folder] [--stress 20000]
+python tools/emu/test_synths.py build/TrackerPlus_sy7.ptf path/to/TrackerPlus_1.2.0.ptf [wav folder] [--stress 20000]
 ```
 
 It runs the firmware's own synth system: host, slots, VAP voices and the audio graph
@@ -412,13 +451,15 @@ It runs the firmware's own synth system: host, slots, VAP voices and the audio g
   - Save As takes the choice along;
   - stock firmware never opens the file.
 - **Patch files:**
-  - a WAVE patch saves to `WAVE/<name>.patch` with model id 3 and its 62 values, and
-    loads back, the Polarity switches included;
-  - a file of 60 values (as `sy3` saved them) loads with both switches Bipolar;
+  - a WAVE patch saves to `WAVE/<name>.patch` with model id 3 and its 66 values, and
+    loads back, the Polarity switches and the effect included;
+  - a file of 60 values (as `sy3` saved them) loads with both switches Bipolar and Effect
+    None, and one of 62 (`sy4`–`sy6`) with Effect None;
   - a load that fails leaves them as they were;
   - stock firmware rejects a WAVE patch, and the ACD Init patch plays.
-- **The Polarity parameters:** 62 parameters, and 62 entries in each of the patch's
-  per-parameter arrays, also after a rebuild; their range, display and flags.
+- **WAVE's own parameters:** 66 parameters, and 66 entries in each of the patch's
+  per-parameter arrays, also after a rebuild; their ranges, displays and flags; two
+  output channels.
 - **Oscillators, filters, super saw, Saw, Digital mode and envelopes:**
   - pitch within 1 cent;
   - no aliasing above −60 dB on a saw at notes 96–108;
@@ -442,8 +483,19 @@ It runs the firmware's own synth system: host, slots, VAP voices and the audio g
 - **Voice allocation:** the same voice for every note as stock VAP.
 - **Banks:** every table band-limited; the 9 waves within 3 dB of each other.
 - **More voices, Macros, export.**
-- **Stress:** random notes, parameters (garbage too), swaps, Model list picks and
-  restarts, with a watch on every memory write.
+- **The effect:**
+  - Effect None: the right side a copy of the left, sample for sample; Mix 0: dry;
+  - the chorus's two delays, measured from clicks: around 3.5 ms, moving in opposite
+    directions by Depth × 1.85 ms at Rate;
+  - switching it on and off fades, with no step;
+  - nothing touched in its RAM before boot; cleared after a start, whatever the RAM held,
+    with each synth's values from its patch;
+  - through the whole synth output with 4 voices: the loudness within 1.5 dB of dry, the
+    two sides different;
+  - its cost.
+- **Stress:** random notes, parameters (garbage too, the effect's included), swaps,
+  Model list picks and restarts, with a watch on every memory write and the effect's
+  state checked.
 
 With a folder given, it also writes WAV files of test phrases:
 - VAP's Init patch, and WAVE's ending on a chord;
@@ -451,13 +503,14 @@ With a folder given, it also writes WAV files of test phrases:
 - a ladder filter sweep;
 - a pad;
 - super saw chords;
-- a resonant sweep in Digital mode.
+- a resonant sweep in Digital mode;
+- chords dry, then with the chorus at its defaults, then at Depth 100 % (stereo).
 
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched `.ptf` to
 `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then Config →
-Firmware → the patched file. Config should show `1.2.0-sy6 Build 1504`.
+Firmware → the patched file. Config should show `1.2.0-sy7 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`.
 - Synths that were WAVE play the replaced model's Init patch.

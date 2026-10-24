@@ -19,8 +19,9 @@ The cover set: the web patcher offers every mix of the mods (1023 for ten). Byte
 identity and the layout checks run on all of them (the harness does that in minutes);
 the emulator tests run on the fewest mixes that between them contain every case that
 differs from mix to mix:
-  - each patch's RAM block in each region it can land in, at the region's start, in
-    its middle and in its last 64 bytes (where a short read past the end faults);
+  - each patch's RAM block (and late RAM block, "late_ram") in each region it can land
+    in, at the region's start, in its middle and in its last 64 bytes (where a short
+    read past the end faults);
   - each pair of patches that sit next to each other in a hook chain on a shared site;
   - an image that the sector padding pads, and one it doesn't.
 Each mix runs the emulator test of every patch it contains.
@@ -127,14 +128,15 @@ def mix_features(ptf: Path, sites: dict[str, set[int]]) -> tuple[list[str], set]
     names = [p["name"] for p in m["patches"]]
     feats = set()
     for p in m["patches"]:
-        ram = p.get("ram")
-        if not ram:
-            continue
-        start, end = int(ram["start"], 16), int(ram["end"], 16)
-        region = ram["region"]
-        lo, hi, _ = RAM_REGIONS[region]
-        edge = "start" if start - lo < EDGE else "end" if hi - end < EDGE else "middle"
-        feats.add(("ram", p["name"], region, edge))
+        for kind in ("ram", "late_ram"):
+            ram = p.get(kind)
+            if not ram:
+                continue
+            start, end = int(ram["start"], 16), int(ram["end"], 16)
+            region = ram["region"]
+            lo, hi, _ = RAM_REGIONS[region]
+            edge = "start" if start - lo < EDGE else "end" if hi - end < EDGE else "middle"
+            feats.add((kind, p["name"], region, edge))
     every_site = set().union(*(sites.get(n, set()) for n in names)) if names else set()
     for site in every_site:
         chain = [n for n in names if site in sites.get(n, set())]

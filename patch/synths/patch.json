@@ -1,6 +1,6 @@
 {
   "name": "synths",
-  "description": "WAVE, a wavetable synth (7 banks, a super saw and a saw, Digital mode, ladder and OB filters, 2 LFOs with a Bipolar/Unipolar switch, a mod envelope and a Mod Matrix), in place of one synth model per project: Config > Project Settings > Synth Engines > WAVE replaces (Off, ACD, FAT, VAP, WTFM, PERC); the Model list then shows WAVE, with its own controls",
+  "description": "WAVE, a wavetable synth (7 banks, a super saw and a saw, Digital mode, ladder and OB filters, 2 LFOs with a Bipolar/Unipolar switch, a mod envelope, a Mod Matrix and a stereo chorus), in place of one synth model per project: Config > Project Settings > Synth Engines > WAVE replaces (Off, ACD, FAT, VAP, WTFM, PERC); the Model list then shows WAVE, with its own controls",
   "firmware": "TrackerPlus 1.2.0",
   "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
   "ram_startup": true,
@@ -8,6 +8,7 @@
     "ocram_tail",
     "dtcm_above_heap"
   ],
+  "late_ram": "mt_syn_late_ram",
   "bin": "build/synths.bin",
   "sym": "build/synths.sym",
   "rel": "build/synths.rel",
@@ -99,6 +100,14 @@
       "note": "VAP voice vtable +0x10: render 0x6014a8b1 -> mt_syn_voice_render (the wavetable engine for a WAVE voice, else VAP)"
     },
     {
+      "at": "0x600667F8",
+      "old": "11a81460",
+      "to": "mt_syn_voice_post",
+      "next": "mt_syn_next_post",
+      "thumb": true,
+      "note": "VAP voice vtable +0x14: after the slot's voices have rendered, voice 0's 0x6014a811 (nothing) -> mt_syn_voice_post (a WAVE slot's effect, on its output, in stereo)"
+    },
+    {
       "at": "0x600667FC",
       "old": "1da81460",
       "to": "mt_syn_voice_sounding",
@@ -135,7 +144,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-sy6"
+      "note": "version text 1.2.0-sy7"
     }
   ]
 }

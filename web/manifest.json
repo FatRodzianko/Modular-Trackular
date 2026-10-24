@@ -69,7 +69,7 @@
       "bit": 7,
       "spec": "patch/synths/patch.json",
       "title": "WAVE Synth",
-      "summary": "A wavetable synth that takes the place of one synth model per project (Config > Project Settings > Synth Engines): wavetables, a super saw, ladder and OB filters, two LFOs and a Mod Matrix, with its own controls and patches.",
+      "summary": "A wavetable synth that takes the place of one synth model per project (Config > Project Settings > Synth Engines): wavetables, a super saw, ladder and OB filters, two LFOs, a Mod Matrix and a stereo chorus, with its own controls and patches.",
       "status": "Tested on hardware"
     },
     {
@@ -111,6 +111,8 @@
     "4ccd24c538a814e7f930130d7cf69bfb9733515ae362569e1d41cf1aa6996e36": "synths (1.2.0-sy5)",
     "05d5d8153c41a81d2b40a50f9c300befd76a850608f4b8d0cb40f9b151b363d7": "all ten mods with synths sy5 (1.2.0-MS5)",
     "6f56aa00881797f55bec494b359d1248badd0fa11a66e4b3b15cd1adb878dc52": "synths (1.2.0-sy6)",
-    "764994f1711bddafa691d44567239442cc1729fd5da776ab1510ae1e0b416457": "all ten mods (1.2.0-MS6)"
+    "764994f1711bddafa691d44567239442cc1729fd5da776ab1510ae1e0b416457": "all ten mods with synths sy6 (1.2.0-MS6)",
+    "dddf733b197e59d8a6dc7f3e1ee253ec450518238ca991d651f03ce4e0dc940f": "synths (1.2.0-sy7)",
+    "5ed2e44bed5432a84e4787d10b0222072f1a9d72776a1d3de357582679cafefd": "all ten mods (1.2.0-MS7)"
   }
 }

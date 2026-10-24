@@ -24,14 +24,15 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
   - legato alone, and patch/all in reverse order (legato first; with condtrig,
     both with ITCM hooks),
 and checks that a bundle with ramdiag (standalone) is refused, and so is one where a
-shared site isn't chained by both patches, and one where two patches pass different
-registers at one ITCM site.
+shared site isn't chained by both patches, one where two patches pass different
+registers at one ITCM site, and a "late_ram" word that holds no size.
 For each output it reads the image back and its .map.json, and checks:
   - the patches sit in the listed order, each right after the one before (16-byte
     aligned), or at its fixed base; the gaps are 0xFF;
   - each patch's RAM block lies in a RAM region it may use (no SDRAM for patches that
     use RAM at startup; the ITCM tail only when named), 16-byte aligned, and no two
-    blocks overlap;
+    blocks overlap; a late RAM block ("late_ram") too, in any region of the default
+    order, its size the one its word held, and the word now its address;
   - each patch's bytes equal its .bin, except the words its relocation table lists,
     which equal the .bin's value plus the code move or the RAM move, exactly;
   - each chain word ("next") holds what its site pointed to before that patch: the
@@ -138,6 +139,17 @@ def verify(label: str, out: Path, specs: list[Path], version: str | None, stock:
                 v = struct.unpack_from("<I", blob, off)[0]
                 struct.pack_into("<I", want, off, (v + d) & 0xFFFFFFFF)
         syms = {k: v + delta for k, v in p["syms"].items()}
+        if "late_ram" in spec:                      # a second block, for state used after boot
+            late = layout[name].get("late_ram")
+            woff = syms[spec["late_ram"]] - base
+            size = struct.unpack_from("<I", blob, woff)[0]
+            start, rend, region = (int(late["start"], 16), int(late["end"], 16), late["region"]) if late else (0, 0, "")
+            lo, hi, _ = RAM_REGIONS.get(region, (0, 0, set()))
+            check(late is not None and region in RAM_DEFAULT_ORDER and lo <= start and rend <= hi
+                  and start % ALIGN == 0 and rend - start == size,
+                  f"{name}: {size} B of late RAM at {start:#x} in {region}, its word's size")
+            ram_blocks.append((start, rend, name + " (late)"))
+            struct.pack_into("<I", want, woff, start)
         chained = 0
         for kind, hook in [("bl", br) for br in spec["branches"]] + \
                 [("word", w) for w in spec.get("words", []) if not (version and w.get("version"))]:
@@ -391,6 +403,16 @@ def main() -> int:
         r = subprocess.run([sys.executable, "-I", str(ROOT / "tools" / "patch_ptf.py"), str(stock), str(bad_spec),
                             str(outdir / "itcm-bad.ptf")], capture_output=True, text=True)
         check(r.returncode != 0 and refusal in (r.stdout + r.stderr), f"refused: {what}")
+    print("a late RAM word that holds no size")
+    sy_spec = json.loads(sy.read_text())
+    no_size = dict(sy_spec, name="synths-no-size", late_ram="mt_syn_next_post")    # a chain word: 0
+    for k in ("bin", "sym", "rel", "prebuilt_bin", "prebuilt_sym", "prebuilt_rel"):
+        no_size[k] = str((sy.parent / sy_spec[k]).resolve())
+    bad_spec = outdir / "synths-no-size.json"
+    bad_spec.write_text(json.dumps(no_size, indent=2))
+    r = subprocess.run([sys.executable, "-I", str(ROOT / "tools" / "patch_ptf.py"), str(stock), str(bad_spec),
+                        str(outdir / "synths-no-size.ptf")], capture_output=True, text=True)
+    check(r.returncode != 0 and "not a late RAM size" in (r.stdout + r.stderr), "refused: a late RAM word holding 0")
     print(f"outputs in {outdir}")
     print(f"{len(failures)} failure(s)")
     return 1 if failures else 0

@@ -2355,12 +2355,20 @@ turn gets a 2 s attack (Sustain 1), the others an instant one:
   Env 2, so the filter envelope sits where VAP's does; the slots and saved patches are
   unchanged. Its filter envelope answers CCs 46–49, not VAP's 80–83.
 
-### A per-slot hook point and room for WAVE's effects (`patch/synths` sy6, emulator)
+### A per-slot hook point and room for WAVE's effects (`patch/synths` sy6, sy7, emulator)
 
 - **Voice 0's `+0x14`** is called once per block, after every voice has rendered, as
-  `(voice, ctx, L, R)` with the slot's output buffers: the output itself with one voice
-  (`0x200278e4` / `0x20027ae4`), the slot's mix buffers with more. It is the place for an
-  effect on a slot's summed output. VAP's does nothing.
+  `(voice, ctx, L, R)` with the slot's output buffers (`synth_slot_render`, ITCM
+  `0x1f24e`; not called when the word is the ITCM no-op `0x1dc55`). With one voice, the
+  voice renders straight into them. With more, the slot first clears both, renders each
+  voice into its scratch (`+0x17c` / `+0x37c`) and adds both scratch buffers in, R too
+  (a VAP voice leaves its scratch R as it was). Either way `+0x14` gets the slot's final
+  L and R. It is the place for an effect on a slot's summed output. VAP's does nothing.
+- **The output channels** (patch container `+0x28`) are read by the synth output object's
+  update (`0x60036634`) every block, not kept from setup: with 1, L is scaled into both of
+  the slot's 16-bit outputs (indices slot and slot + 3); with 2, L and R are scaled each
+  into its own, and the sends get (L + R) / 2. With R a copy of L, 2 gives the same
+  outputs as 1. A patch whose builder sets 2 (PERC's; WAVE's from `sy7`) is stereo.
 - **Room:** in the all bundle (`1.2.0-MS6`), `dtcm_above_heap` keeps 16 bytes after synths
   and `ocram_tail` is full. `sdram_top` has about 25 KB free. Whether SDRAM is ready before
   `main` is still unchecked: the startup copy and zero tables list SDRAM sections, but empty,
@@ -2368,3 +2376,149 @@ turn gets a 2 s attack (Sustain 1), the others an instant one:
   only from `0x60093c60` and `0x600989a0`).
 - **VAP's parameter 38** (Mix Env Amt, −2..2, no CC, no rebuild flag) is 0 in every WAVE
   patch; WAVE uses it for Drive.
+- **WAVE's effect (`sy7`)** uses all three: voice 0's `+0x14` (VAP voice vtable word
+  `0x600667f8`, `0x6014a811`), 2 output channels, and its state (6,288 bytes) in a second
+  RAM block the patcher places after every patch's own ("late_ram"): on-chip with synths
+  alone, `sdram_top` in the all bundle. It touches the block only after the Pattern
+  screen's first update, so SDRAM's readiness before `main` doesn't matter to it.
+
+## 27. Sample play modes and Beat Slice (emulator and static)
+
+Found while planning Beat Slice (Play Through), `docs/BEAT_SLICE_THROUGH_PLAN.md`.
+`ins(i)` = instrument i (0..47) at `0x20200000 + 0x174·i`.
+
+### The instrument struct and the `.pti`
+
+- Tracker+ keeps the original Tracker's 0x174-byte instrument layout:
+  - `+0` active;
+  - `+4` sample type;
+  - `+0x28` sample address;
+  - `+0x2c` length in frames;
+  - `+0x3c` play mode;
+  - `+0x3e`/`+0x40`/`+0x42`/`+0x44` start, loop 1, loop 2 and end (`u16`,
+    0..65535 of the sample);
+  - `+0x108` 48 slice starts (`u16`), `+0x168` slice count, `+0x169` selected slice.
+- Bytes the original Tracker left free are used here: `+0x173` is a pitch offset added
+  to the tune (`0x60100b50`; set to `0xf4` by a loader at `0x60115af0`), and `+0x102`
+  is read as a `u16` into `voice+0x80`.
+- **`.pti` files.** `0x600c19d8` writes a 16-byte header (two magic words,
+  `0x09090909`, `u16 0x174`), the struct as it is in RAM, and a CRC at `+0x184`: 0x188
+  bytes, then the sample. `0x600c1990` copies 0x174 bytes back, after upgrading
+  header versions below 9 (`0x600c5a48`). Copying an instrument (`0x60113c80`) copies
+  the whole struct too.
+
+### Play modes
+
+- 0 1-Shot, 1 Forward Loop, 2 Backward Loop, 3 Pingpong Loop, 4 Slice, 5 Beat Slice,
+  6 Wavetable, 7 Granular.
+- The names: 15-byte slots at `0x60042618`. Their one reader is the screen's start
+  method `0x600f57f0` (literal `0x600f5b24`), which puts 8 pointers at `scr+0xb70`
+  (`scr` = `0x200254b4`).
+- **Note-on:** `0x60030d50(voice, instrument, note)` starts the amp envelope and calls
+  the dispatcher `0x60032abc`, a switch on `ins+0x3c`:
+  - 0 → `0x60035310`;
+  - 1–3 → `0x60034888` (2 and 3 through veneers `0x60034358`, `0x60034dd8`);
+  - 4 → `0x600357c4`;
+  - 5 → `0x60032b50` (one call site, `0x60032b3a`);
+  - 6 → `0x60035904`;
+  - 7 → `0x60032d40`;
+  - any other value returns 0 without touching the voice (emulator, mode 8).
+
+  The other callers: the restart after a fade (`0x600313a2`) and the preview
+  `0x60100ed4`.
+- **Latching** (`0x60100b50`, called by each note-on):
+  - the mode into `voice+0x21`;
+  - `ins+0x2c` into `voice+0x68`;
+  - the sample address into `voice+0x24`, from `0x20204dc4 + 8·i + 4·channel`
+    (`voice+0x28` = channel).
+- **Render:** the voice update `0x600327e4` switches on `voice+0x21` (bounded at 7;
+  higher values give no block):
+  - 0, 4 and 5 → `0x600357b4` (1-shot: forward `0x600353fc`, reverse `0x600355d4`, by
+    `voice+0xb0`);
+  - 1 → `0x60034dc8`, 2 → `0x60034878`, 3 → `0x60035300`;
+  - 6 → `0x60035a2c`;
+  - 7 → `0x60034318`, by grain loop type `voice+0x9c`.
+
+  Each per-mode entry picks forward or reverse, so these render functions have no
+  direct references.
+- **Voice fields set by a 1-shot/slice note-on:**
+
+  | Field | Value |
+  |---|---|
+  | `+0x34`, `+0x38` | start and end frames |
+  | `+0x50` | frames to play |
+  | `+0x18` | sample address + 2·start |
+  | `+0x1c` | length − start |
+  | `+0x7c` | reverse start |
+  | `+0x20` | 1, playing |
+
+  The render stops at `+0x50` frames and clears `+0x20`. A right-channel voice with
+  `voice+0x118` set copies `+0x34`/`+0x38` from its partner. Frames come from
+  `0x60100694(point, length, address)`.
+- **Players:** `0x2001a138 + 0x848·t`, sample voices in the vector at
+  `player+0x73c`..`+0x740`.
+
+### Beat Slice (emulator, `0x60032b50`)
+
+- **Slice choice:** note n → slice n − 24, clamped to 0..count − 1 (notes below 24 →
+  slice 0). With the Slice FX set (`voice+0xae`), the slice is `voice+0xc4`. No slices:
+  start 0, end `0xffff`.
+- **End:** the next slice's start, or `0xffff` (sample end, not the instrument's End
+  point) for the last slice. The end point goes through `bl 0x60100694` at
+  `0x60032c62` (r0 = the point).
+- **Measured:** 4 equal slices of 44,100 frames give 11,025 frames per slice. With r0
+  forced to `0xffff` at `0x60032c62`, notes 24, 25 and 27 play 44,100, 33,075 and 11,025
+  frames to the sample end. Reverse and the Slice FX work from the new end. The render
+  costs 4,916 instructions per block either way.
+- **Pitch:** fixed at note 60 (`*(voice+0x23) = 60`; `0x601001bc` tests
+  `voice+0x21 == 5` for the same reason).
+- **Note-off** (ITCM `0x5678`):
+  - −3 cut (`0x60030f9c` + `0x60031040`);
+  - −2 fade (`0x60030c80`);
+  - otherwise `0x54b4` → `0x60030f9c`: the amp envelope's release, or an immediate stop
+    with the envelope off (`voice+0xee`, read from the code).
+  - A new note on a busy voice fades it first (envelope state 7), then starts the
+    pending note.
+- **Code that tests "mode == 5" or "mode 4..5" directly** (static scan of
+  `ldrb [r, #0x3c]` + compare, flash and ITCM, mirrored ITCM image excluded): 31 sites
+  in 26 functions. Among them:
+  - pads and live recording (`0x600c6a4c`, `0x600c6b1c`, `0x600c6bd8`, `0x600c72ec`,
+    with pad → note `0x6010eea8`);
+  - pad lights per slice (`0x600d3f08`, `0x600e1310`);
+  - the Sample Playback screen's functions `0x600f3dd4`–`0x600f7c54`.
+
+  The voice's copy `voice+0x21` is tested at 7 more places.
+
+### The slice editor (a slicer object; the instrument is the second argument)
+
+| Function | Address | What |
+|---|---|---|
+| Add | `0x6010f000` | after the selected slice, half-way to the next start or `0xffff`; at most 48 |
+| Remove | `0x6010f094` | the selected slice |
+| Adjust | `0x6010f100` | bounded by the neighbours |
+| Auto | `0x6010f1b8` | clears the table, then transient detection `0x600aff4c` |
+| Evenly | `0x6010f1f0` | n starts at i × 65535 / n |
+| Confirmation | `0x600f76e8` | "rewrite the current slices" |
+
+### The Sample Playback screen (`scr` = `0x200254b4`)
+
+- **Vtable** at `0x60042690`: update `0x600f6071` at word `0x60042698`, start
+  `0x600f57f0`, create-controls `0x600f8390`. These slots are by analogy with the
+  Pattern and Config vtables, not yet run.
+- **The Play Mode list's data block** `scr+0xb58` (`0x600f7c54`):
+  - `+0` = the mode;
+  - `+2` = 8;
+  - `+4` = 9;
+  - `+0x14` = `scr+0xb70` (the names).
+
+  It is passed by `bl disp_ctrl_set_data` at `0x600f7cac`. The field meanings beyond
+  that are not checked.
+- **The only UI writer of `ins+0x3c`:** `0x600f5b98(step)`, clamped to 0..7. Its
+  callers, all with the list focused (`scr+0xd6 == 6`, `scr+0x70 == 0`):
+  - the encoder callback `0x600c92e0` (tail call `0x600c9322`);
+  - +1 `0x600c9d84` (`0x600c9dc6`);
+  - −1 `0x600ca7a4` (`0x600ca7e6`);
+  - buttons 7/8 `0x600f5e1c` (`bl` at `0x600f5e8a` −1, `0x600f5e80` +1).
+- **The callbacks' pointers** are in the literal pool of `0x600f5018` (`0x600f512c`,
+  21 entries): `0x600f5140` −1, `0x600f5144` +1, `0x600f5164` buttons, `0x600f5178`
+  encoder. Those are their only references.
