@@ -5,8 +5,10 @@
 Works with the slicethru-only build and with bundles that include it. The voice checks
 call the firmware's play-mode dispatcher (0x60032abc) and the sample voice's render
 (0x600327e4) directly, on a voice object the test builds, in the patched and the stock
-firmware side by side. The patch's flags are set in its RAM (phase 2: no list entry or
-settings file yet).
+firmware side by side. The screen checks run the Sample Playback screen (its create and
+start methods, the Play Mode list's draw and the input callbacks) on the real synth
+system's app objects (tools/emu/synth_rig.py). No settings file yet (phase 4): the
+flags are set in the patch's RAM or through the list.
 
 1. Sites: the dispatcher's Beat Slice call (0x60032b3a) and the Beat Slice note-on's end
    point (0x60032c62) branch into the patch; its version text.
@@ -23,6 +25,12 @@ settings file yet).
 7. Re-entry: a note-on made while another is in progress (as when the audio interrupt
    cuts into a pad preview) uses its own flag and leaves the other's.
 8. The patch writes nothing outside its RAM and the stack; cost of a note-on.
+9. The Play Mode list: 9 names, the highlight on the instrument's row, no scroll bar.
+10. The inputs (encoder, +1, -1, buttons 7 and 8) from every row: the row, mode and flag
+    move by the step; steps that don't touch Beat Slice Thru leave the instrument as
+    stock's same step does; Beat Slice <-> Thru changes only the flag.
+11. Off the list (another control focused, a pop-up open): the inputs as stock.
+12. From the list to the voice: Beat Slice Thru chosen with a button plays to the end.
 """
 from __future__ import annotations
 
@@ -39,6 +47,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from patch_ptf import bl_target  # noqa: E402
 from layout import patch_code, patch_ram  # noqa: E402
 import seq_timing as st  # noqa: E402
+import synth_rig as sr  # noqa: E402
+from machine import FAKE_DISPLAY_VT  # noqa: E402
 
 INS = 0x20200000                    # 48 instruments, 0x174 bytes each
 INS_SIZE = 0x174
@@ -50,6 +60,19 @@ UPDATE = 0x600327E4                 # the sample voice's render (one 128-frame b
 AUDIO_MEM_INIT = 0x600FF704         # (pool, blocks)
 SPRINTF, FMT_LITERAL = 0x60167194, 0x600CBF9C
 STACK = (0x20050000, 0x20058000)
+# the Sample Playback screen (FINDINGS section 27)
+SCR = 0x200254B4
+SCR_CREATE, SCR_START, SCR_SHOW_MODE = 0x600F8390, 0x600F57F0, 0x600F7C54
+SCR_POPUP, SCR_FOCUS, SCR_LIST_ID, SCR_LIST_DATA = 0x70, 0xD6, 0xCC, 0xB58
+FOCUS_PLAY_MODE = 6
+CONTROLS = 0x20027D64
+LIST_DATA_SITE, BUTTON_PLUS_SITE, BUTTON_MINUS_SITE = 0x600F7CAC, 0x600F5E80, 0x600F5E8A
+ENCODER_WORD, PLUS_WORD, MINUS_WORD = 0x600F5178, 0x600F5144, 0x600F5140
+BUTTONS = 0x600F5E1C                # (button): 6 = the 7th (-1), 7 = the 8th (+1)
+PAD_LIGHTS, APP_GET = 0x600F5508, 0x600AA860
+STOCK_NAMES = ["1-Shot", "Forward Loop", "Backward Loop", "Pingpong Loop", "Slice", "Beat Slice",
+               "Wavetable", "Granular"]
+NAMES = STOCK_NAMES[:6] + ["Beat Slice Thru"] + STOCK_NAMES[6:]
 BT_MAGIC = 0x5442544D
 VOICE_SIZE = 0x140
 BEAT_SLICE = 5
@@ -161,9 +184,14 @@ def site_checks(p: Rig) -> None:
     print("sites and version")
     img = p.m.image
     lo, hi = p.code
-    for at, name in ((BS_SITE, "the dispatcher's Beat Slice call"), (END_SITE, "the Beat Slice end point")):
+    for at, name in ((BS_SITE, "the dispatcher's Beat Slice call"), (END_SITE, "the Beat Slice end point"),
+                     (LIST_DATA_SITE, "the Play Mode list's data"), (BUTTON_PLUS_SITE, "the 8th button's step"),
+                     (BUTTON_MINUS_SITE, "the 7th button's step")):
         t = bl_target(img, 0x60030000, at)
         check(lo <= t < hi, f"{name} ({at:#x}) branches into the patch ({t:#x})")
+    for at, name in ((ENCODER_WORD, "encoder"), (PLUS_WORD, "+1"), (MINUS_WORD, "-1")):
+        w = p.m.r32(at)
+        check(bool(w & 1) and lo <= w - 1 < hi, f"the {name} callback word ({at:#x}) points into the patch ({w:#x})")
     m = p.m
     buf = m.alloc(64)
     m.call(SPRINTF, buf, m.r32(FMT_LITERAL), 1, 2, 0)
@@ -384,6 +412,212 @@ def write_checks(p: Rig, s: Rig) -> None:
                                     f"(+{costs[0] - costs[1]})")
 
 
+# ---- the Sample Playback screen -------------------------------------------------------
+
+class ScreenRig:
+    """The Sample Playback screen of one firmware, on the real synth system's app objects
+    (tools/emu/synth_rig.py), with a Beat Slice instrument 0. Pad lights (0x600f5508) need
+    a pad LED object the rig doesn't have and are skipped; the text list's marquee clock
+    (0x600aa860 -> +0x14 -> +0x30) is a fake at time 0."""
+
+    def __init__(self, ptf: Path, patched: bool):
+        self.r = r = sr.SynthRig(ptf)
+        self.m = m = r.m
+        self.patched = patched
+        self.ram = patch_ram(ptf, "slicethru") if patched else None
+        m.w32(0x20027D18, r.fake("clock", 8))
+        title = m.alloc(0x100)
+        m.w8(title + 2, 0x7F)                   # no control: its disp_ctrl_* calls do nothing
+        m.w32(title + 0x60, sr.S)
+        m.w32(0x200209F0, title)
+        m.w32(FAKE_DISPLAY_VT + 0x40, r.add_stub(self._dl_string))
+        m.stub_function(PAD_LIGHTS, lambda mm: None)
+        clock = r.fake("time", 4)
+        app = r.fake("app", 8, ret={0x14: r.fake("app14", 16, ret={0x30: clock})})
+        m.stub_function(APP_GET, lambda mm: app)
+        self.buf = m.alloc(FRAMES * 2 + 64)
+        self.instrument(0)
+        m.call(SCR_CREATE, SCR, max_insns=50_000_000)
+        m.call(SCR_START, SCR, max_insns=50_000_000)
+        self.list = m.r32(CONTROLS + 4 * ((m.r32(SCR + SCR_LIST_ID) & 0xFF) + 4))
+
+    @staticmethod
+    def _dl_string(mm):                         # the display's string write (vtable +0x40)
+        raw = mm.cstr(mm.arg(1)).encode("latin-1") + bytes(1)
+        raw += bytes(-len(raw) % 4)
+        for k in range(0, len(raw), 4):
+            mm.display_list.append(struct.unpack_from("<I", raw, k)[0])
+        return len(raw)
+
+    def instrument(self, i: int, mode: int = BEAT_SLICE) -> None:
+        m = self.m
+        a = INS + INS_SIZE * i
+        m.write(a, bytes(INS_SIZE))
+        m.w8(a, 1)
+        m.w32(a + 0x2C, FRAMES)
+        m.w32(a + 0x28, self.buf)
+        m.w8(a + 0x3C, mode)
+        m.w16(a + 0x40, 1)
+        m.w16(a + 0x42, 0xFFFE)
+        m.w16(a + 0x44, 0xFFFF)
+        m.w8(a + 0x100, 50)
+        for k, q in enumerate(QUARTERS):
+            m.w16(a + 0x108 + 2 * k, q)
+        m.w8(a + 0x168, len(QUARTERS))
+        m.w32(SAMPLE_TABLE + 8 * i, self.buf)
+        m.w32(SAMPLE_TABLE + 8 * i + 4, self.buf)
+
+    def set(self, mode: int, flag: bool) -> None:
+        """Instrument 0's mode and flag, shown on the screen (as after a step)."""
+        m = self.m
+        m.w8(INS + 0x3C, mode)
+        m.w8(INS + 4, 1 if mode == 6 else 0)
+        if self.patched:
+            m.w32(self.ram, BT_MAGIC)
+            m.w32(self.ram + 4, 1 if flag else 0)
+            m.w32(self.ram + 8, 0)
+        m.w8(SCR + SCR_POPUP, 0)
+        m.w8(SCR + SCR_FOCUS, FOCUS_PLAY_MODE)
+        m.call(SCR_SHOW_MODE, SCR, max_insns=50_000_000)
+
+    def state(self) -> tuple[int, bool]:
+        mode = self.m.uc.mem_read(INS + 0x3C, 1)[0]
+        flag = bool(self.m.r32(self.ram + 4) & 1) if self.patched else False
+        return mode, flag
+
+    def ins(self) -> bytes:
+        return bytes(self.m.uc.mem_read(INS, INS_SIZE))
+
+    def draw(self) -> tuple[list[str], int, int, bool]:
+        """The list's names, its highlighted row, item count and whether it drew a scroll bar."""
+        m = self.m
+        m.display_list.clear()
+        m.call(m.r32(m.r32(self.list)), self.list, max_insns=5_000_000)
+        dl = list(m.display_list)
+        names = []
+        for k, w in enumerate(dl):
+            if w == 0xFFFFFF0C:
+                raw = b"".join(struct.pack("<I", x) for x in dl[k + 3:k + 9])
+                names.append(raw.split(b"\0")[0].decode("latin-1"))
+        row, scroll = struct.unpack("<hh", bytes(m.uc.mem_read(self.list + 0x36, 4)))
+        count, rows = struct.unpack("<HH", bytes(m.uc.mem_read(SCR + SCR_LIST_DATA + 2, 4)))
+        return names, row + scroll, count, rows < count
+
+    def step(self, how: str, n: int = 0) -> None:
+        m = self.m
+        if how == "encoder":
+            m.call(m.r32(ENCODER_WORD) & ~1, n & 0xFFFFFFFF, max_insns=50_000_000)
+        elif how == "+1":
+            m.call(m.r32(PLUS_WORD) & ~1, 0, max_insns=50_000_000)
+        elif how == "-1":
+            m.call(m.r32(MINUS_WORD) & ~1, 0, max_insns=50_000_000)
+        elif how == "8th button":
+            m.call(BUTTONS, 7, max_insns=50_000_000)
+        elif how == "7th button":
+            m.call(BUTTONS, 6, max_insns=50_000_000)
+
+
+def row_of(mode: int, flag: bool) -> int:
+    if mode == BEAT_SLICE and flag:
+        return 6
+    return mode + 1 if mode > BEAT_SLICE else mode
+
+
+def of_row(row: int) -> tuple[int, bool]:
+    return (BEAT_SLICE, True) if row == 6 else (row - 1 if row > 6 else row, False)
+
+
+def list_checks(q: ScreenRig, t: ScreenRig) -> None:
+    print("the Play Mode list")
+    names, row, count, bar = t.draw()
+    check(names == STOCK_NAMES and row == 5 and count == 8, f"stock: 8 names, Beat Slice highlighted ({row})")
+    bad = []
+    for mode in range(8):
+        for flag in (False, True):
+            q.set(mode, flag)
+            names, row, count, bar = q.draw()
+            if names != NAMES or row != row_of(mode, flag) or count != 9 or bar:
+                bad.append((mode, flag, row, count, bar, names))
+    check(not bad, "every mode, flag off and on: 9 names in order, no scroll bar, the highlight on "
+                   f"its row (Beat Slice Thru only for Beat Slice with the flag){'' if not bad else f' {bad[:2]}'}")
+
+
+STEPS = [("encoder", n) for n in (1, -1, 2, -2, 3, -3, 4, -4, 9, -9)] + \
+        [("+1", 1), ("-1", -1), ("8th button", 1), ("7th button", -1)]
+
+
+def input_checks(q: ScreenRig, t: ScreenRig) -> None:
+    print("the inputs")
+    bad, stock_diff = [], []
+    for row in range(9):
+        for how, n in STEPS:
+            mode, flag = of_row(row)
+            q.set(mode, flag)
+            q.step(how, n)
+            s = max(-4, min(4, n))
+            to = max(0, min(8, row + s))
+            got = q.state()
+            if got != of_row(to) or q.draw()[1] != to:
+                bad.append((row, how, n, got, of_row(to)))
+            if row != 6 and to != 6 and (row < 6) == (to < 6):
+                t.set(mode, False)
+                t.step(how, n)
+                if q.ins() != t.ins():
+                    stock_diff.append((row, how, n))
+    check(not bad, f"from every row, {len(STEPS)} steps (encoder +-1..+-4 and +-9, +1, -1, buttons 7 and 8): "
+                   f"the row, mode and flag move by the step, clamped to 0..8{'' if not bad else f' {bad[:3]}'}")
+    check(not stock_diff, "steps that don't touch Beat Slice Thru: the instrument as stock after the same step"
+                          f"{'' if not stock_diff else f' {stock_diff[:3]}'}")
+    q.set(BEAT_SLICE, False)
+    before = q.ins()
+    q.step("encoder", 1)
+    on = q.ins()
+    q.step("encoder", -1)
+    check(q.state() == (BEAT_SLICE, False) and before == on == q.ins(),
+          "Beat Slice -> Thru -> Beat Slice: only the flag changes, the instrument stays byte-identical")
+    q.set(6, False)                         # Wavetable
+    q.step("7th button")
+    check(q.state() == (BEAT_SLICE, True) and q.ins()[4] == 0,
+          "from Wavetable one row up: Beat Slice Thru (mode 5, sample type 0, as stock's step to Beat Slice)")
+
+
+def off_list_checks(q: ScreenRig, t: ScreenRig) -> None:
+    print("the inputs off the list")
+    bad = []
+    for popup, focus in ((0, 0), (0, 1), (0, 2), (0, 3), (1, FOCUS_PLAY_MODE)):
+        for how, n in (("encoder", 1), ("encoder", -2), ("+1", 1), ("-1", -1)):
+            for r in (q, t):
+                r.instrument(0)             # the same instrument in both, whatever ran before
+                r.set(BEAT_SLICE, False)
+                r.m.w8(SCR + SCR_POPUP, popup)
+                r.m.w8(SCR + SCR_FOCUS, focus)
+                try:
+                    r.step(how, n)
+                except RuntimeError as e:
+                    bad.append((popup, focus, how, "faulted", str(e)[:60]))
+            if q.ins() != t.ins() or q.state()[0] != t.state()[0]:
+                bad.append((popup, focus, how, n))
+    check(not bad, "another control focused, or a pop-up open: the encoder, +1 and -1 do what stock does "
+                   f"(the same instrument afterwards){'' if not bad else f' {bad[:3]}'}")
+
+
+def ui_play_checks(q: ScreenRig) -> None:
+    print("from the list to the voice")
+    q.set(BEAT_SLICE, False)
+    q.step("8th button")
+    m = q.m
+    m.call(AUDIO_MEM_INIT, 0x20004378, 80)
+    v = m.alloc(VOICE_SIZE)
+    m.call(DISPATCH, v, 0, 25)
+    end = m.r32(v + V_END)
+    q.step("7th button")
+    w = m.alloc(VOICE_SIZE)
+    m.call(DISPATCH, w, 0, 25)
+    check(end == FRAMES and m.r32(w + V_END) == frames_of(0x8000),
+          f"Beat Slice Thru chosen with the 8th button: note 25 ends at {end}; back to Beat Slice: "
+          f"{m.r32(w + V_END)}")
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print(__doc__)
@@ -398,6 +632,11 @@ def main() -> int:
     stereo_checks(p, s)
     reentry_checks(p, s)
     write_checks(p, s)
+    q, t = ScreenRig(ptf, True), ScreenRig(stock, False)
+    list_checks(q, t)
+    input_checks(q, t)
+    ui_play_checks(q)
+    off_list_checks(ScreenRig(ptf, True), ScreenRig(stock, False))     # fresh: the same history in both
     print(f"{len(failures)} failure(s)")
     return 1 if failures else 0
 

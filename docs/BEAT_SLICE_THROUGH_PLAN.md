@@ -9,9 +9,10 @@ All addresses are firmware 1.2.0. `ins(i)` = instrument `i` (0..47) at
 `0x20200000 + 0x174·i`; `voice` = a sample voice object (section 2.3); `scr` = the
 Sample Playback screen object `0x200254b4`. The facts are in FINDINGS section 27.
 
-Status: phases 1 and 2 done (section 8): the stock screen in the emulator, and the
-voice hooks in `patch/slicethru` with their emulator checks. No list entry or settings
-file yet, so nothing for hardware.
+Status: phases 1 to 3 done (section 8): the stock screen in the emulator, and in
+`patch/slicethru` the voice hooks and the Play Mode list entry with their emulator
+checks. No settings file yet (the choice is lost at power-off), so nothing for
+hardware.
 
 ## 1. Verdict
 
@@ -349,7 +350,8 @@ RAM (`.mt_ram`, about 48 bytes):
 - **CPU per voice:**
   - per rendered block, unchanged: 4,916 instructions with and without play-through
     (emulator, measured);
-  - per Beat Slice note-on, 47 instructions more (303 against stock's 256, measured);
+  - per Beat Slice note-on, 54 instructions more (310 against stock's 256, measured with
+    phase 3's code);
   - per screen update, the file tick: tens of instructions, plus a 16-byte SD access a
     moment after a change.
 
@@ -399,7 +401,22 @@ starts.
    - **Re-entry (2.6):** checked by starting a note-on with `cur` already set, as an
      interrupted outer note-on leaves it. Unicorn can't start a second emulation from
      inside a hook, so a real nested call isn't run.
-3. **List and input hooks.** Checks: 3.1–3.4.
+3. **List and input hooks. Done.** `mt_bt_list_data` (`0x600F7CAC`), the encoder, +1
+   and −1 callback words (`0x600F5178`, `0x600F5144`, `0x600F5140`) and the two button
+   steps (`0x600F5E80`, `0x600F5E8A`), all chained.
+   - **Version and size:** `1.2.0-bt2`, 849 bytes of code, the same 16 bytes of RAM.
+     The nine names are a const table in flash (eight stock string addresses and the
+     patch's own).
+   - **Rig:** the screen rig from phase 1 is now part of
+     `tools/emu/test_slicethru.py`.
+   - **Results:** checks 3.1–3.3 and the list-to-voice check pass, on the patch alone
+     and on the local patch/all + slicethru bundle. The whole test runs in 10.9 s (11.2
+     s on the bundle).
+   - **Rig lesson:** the off-the-list comparison runs on a fresh pair of rigs. A rig
+     the input checks had used carries screen state (the selected slice's position)
+     that stock's rig never had.
+   - **Left for phase 4:** the second half of 3.4, clearing a stale flag at the file
+     tick.
 4. **Settings file.** Checks: 4.1–4.4.
 5. **On its own.** README, PATCHING table, root README, `test_layout.py`;
    `run_tests.py --tier quick`. Then the user's hardware check (section 10).
@@ -423,7 +440,7 @@ existing tests, to be replaced by the runner's measured times once the test exis
 | 2.6 | Re-entry: an interrupt note-on (a different instrument) injected at stock's `audio_irq_disable` inside an outer note-on; both voices end where they should | about 1 s (estimate) |
 | 3.1 | The list shows nine names; selection = V for each (mode, flag); rows drawn as the phase-1 rig found them | about 2 s (measured: the phase-1 list script, setup included, 1.8 s) |
 | 3.2 | Every input path (encoder ±1..±4, +1, −1, buttons 7/8): mode and flag after each step, clamping at 0 and 8, Beat Slice ↔ Thru without Wavetable's setup running | about 2 s (measured: the phase-1 input script, 13 steps, 1.9 s) |
-| 3.3 | Off the list (other focus, pop-up open): the four callbacks behave as stock (same calls, same state) | about 2 s (estimate) |
+| 3.3 | Off the list (other focus, pop-up open): the four callbacks behave as stock (same calls, same state) | part of the 10.9 s run (measured) |
 | 3.4 | Changing the mode away from Thru clears the flag; mode set by loading another instrument clears it at the next tick | about 2 s (estimate) |
 | 4.1 | `slicethru.bin` written a moment after a change, 16 bytes, right checksum; nothing written without a change | about 5 s (estimate; swing's whole test with its file checks takes 16 s) |
 | 4.2 | Loaded on a project change; a bad magic, checksum or high bits, or no file: no Thru instruments | about 3 s (estimate) |
