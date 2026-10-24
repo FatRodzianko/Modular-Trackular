@@ -1,0 +1,37 @@
+{
+  "name": "slicethru",
+  "description": "Beat Slice (Play Through): a Beat Slice instrument whose notes play from their slice to the end of the sample",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "bin": "build/slicethru.bin",
+  "sym": "build/slicethru.sym",
+  "rel": "build/slicethru.rel",
+  "prebuilt_bin": "prebuilt/slicethru.bin",
+  "prebuilt_sym": "prebuilt/slicethru.sym",
+  "prebuilt_rel": "prebuilt/slicethru.rel",
+  "branches": [
+    {
+      "at": "0x60032B3A",
+      "old": "00f009f8",
+      "to": "mt_bt_bs_note_on",
+      "next": "mt_bt_next_bs_note_on",
+      "note": "play-mode dispatcher 0x60032abc, Beat Slice case: bl 0x60032b50(voice, instrument, note) -> mt_bt_bs_note_on (the instrument's play-through flag for the call)"
+    },
+    {
+      "at": "0x60032C62",
+      "old": "cdf017fd",
+      "to": "mt_bt_end_frames",
+      "next": "mt_bt_next_end_frames",
+      "note": "Beat Slice note-on: bl 0x60100694(end point, length, address) -> mt_bt_end_frames (the sample end 0xffff while playing through)"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "version": true,
+      "note": "version text 1.2.0-bt1"
+    }
+  ]
+}

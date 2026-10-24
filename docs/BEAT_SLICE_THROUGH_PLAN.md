@@ -9,8 +9,9 @@ All addresses are firmware 1.2.0. `ins(i)` = instrument `i` (0..47) at
 `0x20200000 + 0x174·i`; `voice` = a sample voice object (section 2.3); `scr` = the
 Sample Playback screen object `0x200254b4`. The facts are in FINDINGS section 27.
 
-Status: plan, with phase 1 done (the stock screen in the emulator, section 8). No
-patch code yet.
+Status: phases 1 and 2 done (section 8): the stock screen in the emulator, and the
+voice hooks in `patch/slicethru` with their emulator checks. No list entry or settings
+file yet, so nothing for hardware.
 
 ## 1. Verdict
 
@@ -348,7 +349,7 @@ RAM (`.mt_ram`, about 48 bytes):
 - **CPU per voice:**
   - per rendered block, unchanged: 4,916 instructions with and without play-through
     (emulator, measured);
-  - per Beat Slice note-on, about 30 instructions more (estimate);
+  - per Beat Slice note-on, 47 instructions more (303 against stock's 256, measured);
   - per screen update, the file tick: tens of instructions, plus a 16-byte SD access a
     moment after a change.
 
@@ -384,9 +385,20 @@ starts.
      hook.
    - Each scratch script runs in 1.8–1.9 s, setup included.
    - The facts are in FINDINGS section 27. The rig moves into
-     `tools/emu/test_slicethru.py` with phase 2.
-2. **Voice hooks.** `mt_bt_bs_note_on`, `mt_bt_end_frames`; the test sets the flag in
-   the patch's RAM. Checks: 2.1–2.6 below.
+     `tools/emu/test_slicethru.py` with phase 3.
+2. **Voice hooks. Done.** `patch/slicethru` (version text `1.2.0-bt1`) has
+   `mt_bt_bs_note_on` (`0x60032B3A`) and `mt_bt_end_frames` (`0x60032C62`), both
+   chained.
+   - **Size:** 169 bytes of code and 16 bytes of RAM (magic, the 48 flags, `cur`).
+   - **Test:** `tools/emu/test_slicethru.py <patched> <stock>` sets the flags in the
+     patch's RAM and checks 2.1–2.6 plus the sites, the version, stray writes and the
+     cost. It runs in 5.3 s and passes on the patch alone.
+   - **Bundle:** it also passes on a test bundle of patch/all plus slicethru (built
+     locally, not committed), where the RAM lands in the last 16 bytes of
+     `dtcm_above_heap`.
+   - **Re-entry (2.6):** checked by starting a note-on with `cur` already set, as an
+     interrupted outer note-on leaves it. Unicorn can't start a second emulation from
+     inside a hook, so a real nested call isn't run.
 3. **List and input hooks.** Checks: 3.1–3.4.
 4. **Settings file.** Checks: 4.1–4.4.
 5. **On its own.** README, PATCHING table, root README, `test_layout.py`;
@@ -403,7 +415,7 @@ existing tests, to be replaced by the runner's measured times once the test exis
 
 | # | Check | Time |
 |---|---|---|
-| 2.1 | Flag off: for modes 0–7 and notes 0–127, every note-on leaves the voice object byte-identical to stock | about 2 s (measured experiment ran 18 note-ons in well under 1 s) |
+| 2.1 | Flag off: for modes 0–7 and notes 0–127, every note-on leaves the voice object byte-identical to stock | the whole phase-2 test runs in 5.3 s (measured) |
 | 2.2 | Flag on: notes 24..24+n−1 start at slice k and end at `0xffff` (frames = length − start); notes below 24 and past the last slice as stock; 1 and 48 slices; no slices | about 1 s (measured, part of the 1.7 s run) |
 | 2.3 | Render to the end: frames played = length − start; per-block instructions equal to stock | about 1 s (measured: 4,916 instructions per block in both) |
 | 2.4 | `S` FX, reverse (start position and direction), tune and finetune unchanged | under 1 s (measured for `S` and reverse) |
