@@ -65,6 +65,13 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   [patch/copypattern/README.md](patch/copypattern/README.md).
 - **all**: all ten mods above in one firmware (version text `1.2.0-MS7`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
+- **slicethru**: Beat Slice (Play Through), a ninth play mode in the Sample Playback
+  screen's Play Mode list, after Beat Slice. You slice a sample as in Beat Slice, and
+  each note plays from its slice to the end of the sample instead of stopping at the
+  next slice. The instrument stays a Beat Slice instrument, so stock firmware plays it
+  as Beat Slice; the choice is saved per project. Emulator-tested; not yet tested on
+  hardware, and not yet in `patch/all` or the web patcher. See
+  [patch/slicethru/README.md](patch/slicethru/README.md).
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
   future patches. See [patch/ramdiag/README.md](patch/ramdiag/README.md).
@@ -125,6 +132,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/legato/` | Legato: a Glide FX on a MIDI or synth note sends its note-on before the previous note's note-off |
 | `patch/copypattern/` | Copy to New: copies the current pattern into the next empty one |
 | `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern in one firmware |
+| `patch/slicethru/` | Beat Slice Thru: a play mode whose notes play from their slice to the sample end |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
 | `patch/itcmtest/` | No-op test of ITCM hooks (stubs in the ITCM tail, loaded by the startup copy table) |
@@ -157,6 +165,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/test_condtrig.py` | condtrig: every condition in both columns, what a skipped step drops, counting and resets, encoder and grid text, Chance 0–100 as stock, cost |
 | `tools/emu/synth_rig.py` | The firmware's synth system (host, slots, voices, the audio graph) driven block by block, for the synth tools |
 | `tools/emu/test_synths.py` | synths: stock output unchanged, the swap, the WAVE model and its pages, Model list and Edit Patch drawing, settings and patch files, oscillators, filters, envelopes, LFOs and Mod Matrix, banks, voices, stress, and WAV renders |
+| `tools/emu/test_slicethru.py` | slicethru: every play mode's note-on as stock without the flag, the slice-to-end span, render cost, `S`, reverse, stereo and re-entry with it; the Play Mode list and every input on the real Sample Playback screen; the settings file |
 | `tools/emu/test_legato.py` | legato: random patterns against stock (identical without `G`, only reordered with it), the legato order and every case that keeps the stock order, other FX, stuck notes, cost; synth slots: the order, envelopes on every model and WAVE, PERC unchanged |
 | `tools/emu/test_itcmtest.py` | itcmtest: the ITCM stubs after the boot copy, Chance FX and count-in playing exactly as stock through the hooks |
 | `tools/emu/test_interpolate.py` | interpolate ramp, MIDI-rate, cost, Config menu and settings-file tests, through the real audio block |

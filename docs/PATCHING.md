@@ -99,6 +99,7 @@ must be byte-identical to these builds:
 | the one before that (without legato and copypattern) | `TrackerPlus_MSY.ptf` | `1.2.0-MSY` | tested (made with the web patcher) | `f3fee2dd07e88d3b8810cd1d9b371e0636f7ad4920c777f021b28da2afd2fd99` |
 | the one before that (without synths, legato and copypattern) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | tested | `6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437` |
 | the one before that (without condtrig, synths, legato and copypattern) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
+| slicethru (Beat Slice Thru) | `TrackerPlus_bt3.ptf` | `1.2.0-bt3` | not yet (emulator-tested) | `76e0a004302bb9e57d214cb04cf0053e906f1b6de3141a4ad4809f440de2cb2e` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 | itcmtest (ITCM hooks test, on its own) | `TrackerPlus_it1.ptf` | `1.2.0-it1` | tested | `701b35dfadb4626ebe19e94ccb3af47aff9e4d604684d59b2e8b9cbf5da18d7c` |
@@ -118,7 +119,9 @@ Each patch can be installed on its own, or several can go into one firmware:
   `patch/visualizer/patch.json` the pad visualizer, `patch/condtrig/patch.json`
   conditional trigs, `patch/synths/patch.json` the WAVE synth, `patch/legato/patch.json`
   MIDI legato,
-  `patch/copypattern/patch.json` the Copy to New button.
+  `patch/copypattern/patch.json` the Copy to New button,
+  `patch/slicethru/patch.json` the Beat Slice Thru play mode (not yet tested on
+  hardware).
 - **Several patches:** use a bundle spec, which lists the patches to combine.
   `patch/all/patch.json` is the bundle that ships (all ten: colorsong, Humanize,
   interpolate, masterfx, swing, the visualizer, condtrig, synths, legato and copypattern):
@@ -261,7 +264,11 @@ python tools/emu/test_itcmtest.py build/TrackerPlus_it1.ptf path/to/TrackerPlus_
 python tools/emu/test_synths.py build/TrackerPlus_sy4.ptf path/to/TrackerPlus_1.2.0.ptf [wav folder]
 python tools/emu/test_legato.py build/TrackerPlus_lg2.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_copypattern.py build/TrackerPlus_cp4.ptf
+python tools/emu/test_slicethru.py build/TrackerPlus_bt3.ptf path/to/TrackerPlus_1.2.0.ptf
 ```
+
+`tools/run_tests.py` runs the tests of the mods the web patcher offers. slicethru isn't
+offered yet, so run its test on its own, as above.
 
 Each test works on any firmware that contains its patch, so for a bundle run every
 contained patch's tests on the bundle's `.ptf`. The tests read where the patch's RAM
@@ -271,7 +278,8 @@ together.
 `tools/test_layout.py` checks the patcher's placement without the emulator. It builds
 each patch alone, `patch/all` (all ten) and its reverse, colorsong, humanize and interpolate in the
 other order, those three with masterfx in both orders, the six before condtrig in the other order, the six with synths in both orders,
-copypattern alone, with humanize in both orders and with all nine in both orders, and two
+copypattern alone, with humanize in both orders and with all nine in both orders,
+slicethru alone and with all ten in both orders, and two
 patches on the same chained sites, and
 checks that each patch's code and RAM sit where they
 should (RAM in a region the patch may use, no two blocks overlapping), that exactly the

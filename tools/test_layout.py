@@ -23,6 +23,8 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
     and after and before patch/all's patches,
   - legato alone, and patch/all in reverse order (legato first; with condtrig,
     both with ITCM hooks),
+  - slicethru alone, and after and before patch/all's patches (it chains the Pattern
+    screen's update slot with most of them),
 and checks that a bundle with ramdiag (standalone) is refused, and so is one where a
 shared site isn't chained by both patches, one where two patches pass different
 registers at one ITCM site, and a "late_ram" word that holds no size.
@@ -315,6 +317,15 @@ def main() -> int:
     all_lg_rev = dict(rev, name="all-legato-reversed", include=[str(x) for x in all_lg_list[::-1]], version="LGR")
     all_lg_rev_spec = outdir / "all-legato-reversed.json"
     all_lg_rev_spec.write_text(json.dumps(all_lg_rev, indent=2))
+    bt = ROOT / "patch" / "slicethru" / "patch.json"
+    all_bt_list = all_cp_list + [bt]
+    all_bt = dict(rev, name="all-slicethru", include=[str(x) for x in all_bt_list], version="BTA")
+    all_bt_spec = outdir / "all-slicethru.json"
+    all_bt_spec.write_text(json.dumps(all_bt, indent=2))
+    all_bt_rev = dict(rev, name="all-slicethru-reversed", include=[str(x) for x in all_bt_list[::-1]],
+                      version="BTR")
+    all_bt_rev_spec = outdir / "all-slicethru-reversed.json"
+    all_bt_rev_spec.write_text(json.dumps(all_bt_rev, indent=2))
     stock_img = bytes(read_ptf(stock).image)
 
     for label, spec, specs, version, sha in (
@@ -361,7 +372,10 @@ def main() -> int:
             ("patch/all's patches, then copypattern", all_cp_spec, all_cp_list, "CPA", None),
             ("copypattern, then patch/all's patches reversed", all_cp_rev_spec, all_cp_list[::-1], "CPR", None),
             ("legato alone", lg, [lg], None, None),
-            ("patch/all reversed (legato first)", all_lg_rev_spec, all_lg_list[::-1], "LGR", None)):
+            ("patch/all reversed (legato first)", all_lg_rev_spec, all_lg_list[::-1], "LGR", None),
+            ("slicethru alone", bt, [bt], None, None),
+            ("patch/all's patches, then slicethru", all_bt_spec, all_bt_list, "BTA", None),
+            ("slicethru, then patch/all's patches reversed", all_bt_rev_spec, all_bt_list[::-1], "BTR", None)):
         out = outdir / f"{spec.stem if spec.parent == outdir else spec.parent.name}.ptf"
         if not build(stock, spec, out):
             check(False, f"{label}: patch_ptf failed")

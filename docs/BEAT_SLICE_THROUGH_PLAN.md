@@ -9,10 +9,9 @@ All addresses are firmware 1.2.0. `ins(i)` = instrument `i` (0..47) at
 `0x20200000 + 0x174·i`; `voice` = a sample voice object (section 2.3); `scr` = the
 Sample Playback screen object `0x200254b4`. The facts are in FINDINGS section 27.
 
-Status: phases 1 to 4 done (section 8): the stock screen in the emulator, and in
-`patch/slicethru` the voice hooks, the Play Mode list entry and the settings file,
-with their emulator checks. Next: phase 5 (docs, `run_tests.py`, then the hardware
-check).
+Status: phases 1 to 5 done (section 8): `patch/slicethru` (`1.2.0-bt3`) with its
+voice hooks, Play Mode list entry and settings file, emulator-tested, documented and
+in the layout test. Next: the hardware check (section 10), then phase 6.
 
 ## 1. Verdict
 
@@ -436,8 +435,19 @@ starts.
      On that bundle the colorsong, copypattern, humanize, visualizer, swing,
      interpolate and condtrig tests also pass. legato, masterfx and synths wait for
      `run_tests.py` in phase 5.
-5. **On its own.** README, PATCHING table, root README, `test_layout.py`;
-   `run_tests.py --tier quick`. Then the user's hardware check (section 10).
+5. **On its own. Done.**
+   - **Docs:** `patch/slicethru/README.md`, `prebuilt/` (the patcher's output from it
+     is byte-identical to the local build's, SHA-256 `76e0a004…2cb2e`), and the root
+     README and PATCHING entries.
+   - **Layout test:** `tools/test_layout.py` builds slicethru alone and with patch/all's
+     patches in both orders. It passes (49.8 s), and `test_slicethru.py` passes on both
+     bundles (15 s each).
+   - **Quick tier:** `run_tests.py --tier quick` passes: 21 jobs, 0 failures, 5.8 min,
+     nothing from the cache.
+   - **What the runner doesn't cover yet:** it tests the mods in the web patcher's
+     manifest, so slicethru's own test isn't in it until phase 6 adds it there. Until
+     then it runs on its own.
+   - **Next:** the user's hardware check (section 10).
 6. **Bundle, after the hardware check and the user's go-ahead.** `patch/all`, the web
    patcher manifest, `run_tests.py --tier release` (ask first, section 7 #8), the
    hardware bundle check.
@@ -478,13 +488,19 @@ Through `tools/run_tests.py`:
 
 ## 10. Hardware check (the user, after phase 5; about 15 minutes)
 
-1. Install `1.2.0-bt1` through Config → Firmware. Boot; Config shows `1.2.0-bt1`.
+1. Install `TrackerPlus_bt3.ptf` (`1.2.0-bt3`, SHA-256 `76e0a004…2cb2e`, the
+   PATCHING table) through Config → Firmware. Boot; Config shows `1.2.0-bt3`.
 2. A drum loop instrument: Beat Slice, Auto slice. Pads play slices as before.
-3. Choose Beat Slice Thru. The pads now play from each slice to the end of the loop.
+3. The Play Mode list shows nine entries, Beat Slice Thru between Beat Slice and
+   Wavetable, all readable, no scroll bar. Choose Beat Slice Thru: the pads now play
+   from each slice to the end of the loop.
 4. A pattern with notes on steps 1 and 9 only: each plays on until the next note.
    Then an OFF step, a `q` gate, `S` and `r` on a step.
 5. Switch Beat Slice ↔ Beat Slice Thru with the encoder, the arrows and buttons 7/8.
    Switch to Wavetable and back.
-6. Save the project, open another, reopen it: still Beat Slice Thru.
-7. Revert: reinstall stock 1.2.0. The project opens and the instrument plays Beat
+6. Save the project, open another, reopen it: still Beat Slice Thru. Power off and on,
+   open it again: still Beat Slice Thru.
+7. Save As under a new name and open the copy: note whether it is Beat Slice Thru or
+   Beat Slice (the one point the emulator can't answer).
+8. Revert: reinstall stock 1.2.0. The project opens and the instrument plays Beat
    Slice.
