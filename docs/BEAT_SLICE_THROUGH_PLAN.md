@@ -9,10 +9,10 @@ All addresses are firmware 1.2.0. `ins(i)` = instrument `i` (0..47) at
 `0x20200000 + 0x174·i`; `voice` = a sample voice object (section 2.3); `scr` = the
 Sample Playback screen object `0x200254b4`. The facts are in FINDINGS section 27.
 
-Status: phases 1 to 3 done (section 8): the stock screen in the emulator, and in
-`patch/slicethru` the voice hooks and the Play Mode list entry with their emulator
-checks. No settings file yet (the choice is lost at power-off), so nothing for
-hardware.
+Status: phases 1 to 4 done (section 8): the stock screen in the emulator, and in
+`patch/slicethru` the voice hooks, the Play Mode list entry and the settings file,
+with their emulator checks. Next: phase 5 (docs, `run_tests.py`, then the hardware
+check).
 
 ## 1. Verdict
 
@@ -283,7 +283,7 @@ extended) and never reaches `0x60032c62`.
 
 ### 4.3 State and file
 
-RAM (`.mt_ram`, about 48 bytes):
+RAM (`.mt_ram`, 32 bytes as built):
 - magic;
 - project session (the FNV-1a hash of name and path, as swing);
 - the flags as a 48-bit mask in a `u64`, and the saved copy;
@@ -325,8 +325,9 @@ RAM (`.mt_ram`, about 48 bytes):
   - a `.pti` saved from the Sample Playback screen and loaded elsewhere is plain Beat
     Slice;
   - copying the instrument doesn't copy the Thru choice;
-  - Save As keeps the choice only if the firmware copies the project's extra files, as
-    for swing.bin and the other settings files. To check in phase 4.
+  - Save As under a new name counts as another project, as for swing.bin and the
+    other settings files. So the choice carries over only if the firmware copies the
+    project's extra files. Not checked in the emulator; part of the hardware check.
 
 ## 5. Interactions with the other patches
 
@@ -341,10 +342,10 @@ RAM (`.mt_ram`, about 48 bytes):
 
 ## 6. Budget
 
-- **Flash:** about 1.5–2.5 KB (estimate). For comparison, swing is 1.7 KB and condtrig
-  1.0 KB in patch/all; this patch needs swing's file logic plus small UI and voice
-  hooks.
-- **RAM:** about 48 bytes. `ocram_tail` is full in patch/all; `sdram_top` has about
+- **Flash:** 1,813 bytes as built in phase 4. For comparison, swing is 1.7 KB and
+  condtrig 1.0 KB in patch/all.
+- **RAM:** 32 bytes. In the local patch/all + slicethru bundle it lands in `sdram_top`.
+  `ocram_tail` is full in patch/all; `sdram_top` has about
   25 KB left and `dtcm_after_audio` 832 bytes. The voice hook reads it once per
   note-on, so SDRAM is fine.
 - **CPU per voice:**
@@ -417,7 +418,24 @@ starts.
      that stock's rig never had.
    - **Left for phase 4:** the second half of 3.4, clearing a stale flag at the file
      tick.
-4. **Settings file.** Checks: 4.1–4.4.
+4. **Settings file. Done.** `mt_bt_playback_update` (Sample Playback update, word
+   `0x60042698`) and `mt_bt_pattern_update` (Pattern update, word `0x600403DC`, now
+   shared with nine patches), both chained.
+   - **Version and size:** `1.2.0-bt3`, 1,813 bytes of code, 32 bytes of RAM.
+   - **File handling:**
+     - The file is read and written only while the file manager is idle (the stock
+       test at `0x600bc990`, as copypattern uses).
+     - On a project change the flags are cleared at once, then read from the file once
+       the file manager is idle.
+     - A load while the Sample Playback screen shows a sample instrument redraws the
+       list (`0x600f7c54`).
+     - A flag whose instrument isn't an active Beat Slice instrument is cleared, but
+       only while the file manager is idle, so never in the middle of a project load.
+   - **Results:** checks 4.1–4.4 and the stale-flag checks pass. The whole test (65
+     checks) runs in 12.0 s, and in 12.5 s on the local patch/all + slicethru bundle.
+     On that bundle the colorsong, copypattern, humanize, visualizer, swing,
+     interpolate and condtrig tests also pass. legato, masterfx and synths wait for
+     `run_tests.py` in phase 5.
 5. **On its own.** README, PATCHING table, root README, `test_layout.py`;
    `run_tests.py --tier quick`. Then the user's hardware check (section 10).
 6. **Bundle, after the hardware check and the user's go-ahead.** `patch/all`, the web
@@ -442,10 +460,10 @@ existing tests, to be replaced by the runner's measured times once the test exis
 | 3.2 | Every input path (encoder ±1..±4, +1, −1, buttons 7/8): mode and flag after each step, clamping at 0 and 8, Beat Slice ↔ Thru without Wavetable's setup running | about 2 s (measured: the phase-1 input script, 13 steps, 1.9 s) |
 | 3.3 | Off the list (other focus, pop-up open): the four callbacks behave as stock (same calls, same state) | part of the 10.9 s run (measured) |
 | 3.4 | Changing the mode away from Thru clears the flag; mode set by loading another instrument clears it at the next tick | about 2 s (estimate) |
-| 4.1 | `slicethru.bin` written a moment after a change, 16 bytes, right checksum; nothing written without a change | about 5 s (estimate; swing's whole test with its file checks takes 16 s) |
-| 4.2 | Loaded on a project change; a bad magic, checksum or high bits, or no file: no Thru instruments | about 3 s (estimate) |
-| 4.3 | Unnamed project: flags kept until the first save, then written | about 2 s (estimate) |
-| 4.4 | Stock firmware with the same project: the instruments play Beat Slice (note-on as stock) | about 1 s (estimate) |
+| 4.1 | `slicethru.bin` written a moment after a change, 16 bytes, right checksum; nothing written without a change | part of the 12.0 s run (measured) |
+| 4.2 | Loaded on a project change; a bad magic, checksum or high bits, or no file: no Thru instruments | part of the 12.0 s run (measured) |
+| 4.3 | Unnamed project: flags kept until the first save, then written | part of the 12.0 s run (measured) |
+| 4.4 | Stock firmware with the same project: the instruments play Beat Slice (note-on as stock) | part of the 12.0 s run (measured) |
 | 5.1 | Version text `1.2.0-bt1` (`check_version.py`) | 1 s (comparable) |
 | 6.1 | In patch/all: the Play Mode list renders the same with synths' list hook in; every check above passes | the patch's own run, about 30 s (estimate) |
 

@@ -7,8 +7,7 @@ call the firmware's play-mode dispatcher (0x60032abc) and the sample voice's ren
 (0x600327e4) directly, on a voice object the test builds, in the patched and the stock
 firmware side by side. The screen checks run the Sample Playback screen (its create and
 start methods, the Play Mode list's draw and the input callbacks) on the real synth
-system's app objects (tools/emu/synth_rig.py). No settings file yet (phase 4): the
-flags are set in the patch's RAM or through the list.
+system's app objects (tools/emu/synth_rig.py).
 
 1. Sites: the dispatcher's Beat Slice call (0x60032b3a) and the Beat Slice note-on's end
    point (0x60032c62) branch into the patch; its version text.
@@ -31,6 +30,13 @@ flags are set in the patch's RAM or through the list.
     stock's same step does; Beat Slice <-> Thru changes only the flag.
 11. Off the list (another control focused, a pop-up open): the inputs as stock.
 12. From the list to the voice: Beat Slice Thru chosen with a button plays to the end.
+13. The settings file (slicethru.bin, the fake SD card of tools/emu/fakefs.py), through
+    the Sample Playback and Pattern screens' update hooks: written once, a moment
+    after a change; read on a project change and the list redrawn; a damaged or short
+    file, or bits above instrument 48: none; nothing read while the file manager is
+    busy, and the old project's flags cleared at once; stale flags (an instrument no
+    longer an active Beat Slice instrument) cleared only while it is idle; projects
+    without a name; stock firmware plays the instrument as Beat Slice.
 """
 from __future__ import annotations
 
@@ -49,6 +55,7 @@ from layout import patch_code, patch_ram  # noqa: E402
 import seq_timing as st  # noqa: E402
 import synth_rig as sr  # noqa: E402
 from machine import FAKE_DISPLAY_VT  # noqa: E402
+from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
 
 INS = 0x20200000                    # 48 instruments, 0x174 bytes each
 INS_SIZE = 0x174
@@ -70,6 +77,12 @@ LIST_DATA_SITE, BUTTON_PLUS_SITE, BUTTON_MINUS_SITE = 0x600F7CAC, 0x600F5E80, 0x
 ENCODER_WORD, PLUS_WORD, MINUS_WORD = 0x600F5178, 0x600F5144, 0x600F5140
 BUTTONS = 0x600F5E1C                # (button): 6 = the 7th (-1), 7 = the 8th (+1)
 PAD_LIGHTS, APP_GET = 0x600F5508, 0x600AA860
+SCR_INSTRUMENT = 0xF4
+CUR_INS = INS + 0x46C5
+PLAYBACK_UPDATE_WORD, PATTERN_UPDATE_WORD, PATTERN_UPDATE = 0x60042698, 0x600403DC, 0x600E1F98
+FM_STATE = 0x2001E488 + 0x13D
+FILE_MAGIC = 0x31535442             # "BTS1"
+SAVE_DELAY = 25
 STOCK_NAMES = ["1-Shot", "Forward Loop", "Backward Loop", "Pingpong Loop", "Slice", "Beat Slice",
                "Wavetable", "Granular"]
 NAMES = STOCK_NAMES[:6] + ["Beat Slice Thru"] + STOCK_NAMES[6:]
@@ -618,6 +631,156 @@ def ui_play_checks(q: ScreenRig) -> None:
           f"{m.r32(w + V_END)}")
 
 
+# ---- the settings file -----------------------------------------------------------------
+
+def fnv1a(data: bytes) -> int:
+    h = 2166136261
+    for b in data:
+        h = ((h ^ b) * 16777619) & 0xFFFFFFFF
+    return h
+
+
+def bts1(mask: int) -> bytes:
+    body = struct.pack("<Q", mask)
+    return struct.pack("<I", FILE_MAGIC) + body + struct.pack("<I", fnv1a(body))
+
+
+def file_checks(ptf: Path, stock: Path) -> None:
+    print("the settings file (slicethru.bin), through the screens' update hooks")
+    q = ScreenRig(ptf, True)
+    m = q.m
+    fs = FakeFS(m, Path("."))
+    m.stub_function(PATTERN_UPDATE, lambda mm: 0)       # the Pattern screen's own update: not needed here
+    play_hook, pat_hook = m.r32(PLAYBACK_UPDATE_WORD) & ~1, m.r32(PATTERN_UPDATE_WORD) & ~1
+    for i in (1, 2, 40):
+        q.instrument(i)                     # more Beat Slice instruments
+
+    def tick(n=1, hook=None):
+        for _ in range(n):
+            m.call(hook or play_hook, SCR, max_insns=50_000_000)
+
+    def mask() -> int:
+        return m.r32(q.ram + 4) | m.r32(q.ram + 8) << 32
+
+    def path(name):
+        return f"Projects/User/{name}/slicethru.bin"
+
+    def writes():
+        return len([x for x in fs.log if "slicethru.bin mode 3" in x])
+
+    def on_screen(i: int = 0) -> None:      # instrument i on the Sample Playback screen
+        m.w8(CUR_INS, i)
+        m.w32(SCR + SCR_INSTRUMENT, INS + INS_SIZE * i)
+        m.call(SCR_SHOW_MODE, SCR, max_insns=50_000_000)
+
+    fs.set_project(Path("."), "A", "Projects/User")
+    tick()
+    check(mask() == 0, "a project without slicethru.bin: no Beat Slice Thru instruments")
+    tick(SAVE_DELAY + 5)
+    check(writes() == 0, "nothing written while nothing changed")
+    m.w8(SCR + SCR_FOCUS, FOCUS_PLAY_MODE)
+    m.w8(SCR + SCR_POPUP, 0)
+    on_screen(0)
+    q.step("8th button")
+    on_screen(40)
+    q.step("8th button")
+    check(mask() == 1 | 1 << 40, f"Beat Slice Thru chosen for instruments 1 and 41 (mask {mask():#x})")
+    tick(SAVE_DELAY - 2)
+    check(writes() == 0, "no write right after a change")
+    tick(5)
+    check(writes() == 1 and fs.overlay.get(path("A")) == bts1(1 | 1 << 40),
+          "the change is written once, a moment later (BTS1, the mask, the checksum: 16 bytes)")
+    check(max(fs.read_sizes + fs.write_sizes, default=0) <= 256, "every read and write is at most 256 bytes")
+
+    fs.set_project(Path("."), "B", "Projects/User")
+    tick()
+    check(mask() == 0, "another project without the file: none")
+    on_screen(0)
+    fs.set_project(Path("."), "A", "Projects/User")
+    tick()
+    names, row, count, bar = q.draw()
+    check(mask() == 1 | 1 << 40 and row == 6,
+          f"back to the first project: instruments 1 and 41 again, and the list redrawn on Beat Slice Thru ({row})")
+
+    good = fs.overlay[path("A")]
+    for label, bad in (("a wrong checksum", good[:15] + bytes([good[15] ^ 1])),
+                       ("a wrong magic", b"X" + good[1:]),
+                       ("bits above instrument 48", bts1(1 | 1 << 50)),
+                       ("a short file", good[:12])):
+        fs.overlay[path("A")] = bad
+        fs.set_project(Path("."), "B", "Projects/User")
+        tick()
+        fs.set_project(Path("."), "A", "Projects/User")
+        tick()
+        check(mask() == 0, f"{label}: none")
+    fs.overlay[path("A")] = good
+
+    fs.set_project(Path("."), "B", "Projects/User")
+    tick()
+    m.w8(FM_STATE, 5)                       # the file manager busy (a project being opened)
+    fs.set_project(Path("."), "A", "Projects/User")
+    reads = len([x for x in fs.log if "slicethru.bin mode 0" in x])
+    tick(3)
+    after = len([x for x in fs.log if "slicethru.bin mode 0" in x])
+    check(after == reads and mask() == 0, "while the file manager is busy: the file isn't read yet (no flags)")
+    m.w8(FM_STATE, 0)
+    tick()
+    check(mask() == 1 | 1 << 40, "once it is idle: read")
+    m.w8(FM_STATE, 5)
+    fs.set_project(Path("."), "B", "Projects/User")
+    tick()
+    check(mask() == 0, "another project opened while the file manager is busy: the flags cleared at once")
+    m.w8(FM_STATE, 0)
+    fs.set_project(Path("."), "A", "Projects/User")
+    tick()
+
+    print("stale flags")
+    m.w8(INS + INS_SIZE * 40 + 0x3C, 0)     # instrument 41 is now a 1-Shot instrument
+    m.w8(FM_STATE, 5)
+    tick()
+    check(mask() & 1 << 40, "an instrument's mode changed while the file manager is busy: its flag kept for now")
+    m.w8(FM_STATE, 0)
+    tick()
+    check(mask() == 1, "once it is idle: the flag of the instrument that isn't Beat Slice any more is cleared")
+    m.w8(INS + INS_SIZE * 40 + 0x3C, BEAT_SLICE)
+    tick(SAVE_DELAY + 5)
+    check(mask() == 1 and fs.overlay.get(path("A")) == bts1(1),
+          "it stays cleared when the instrument becomes Beat Slice again, and the file follows")
+    m.w32(q.ram + 4, 1 | 1 << 2)
+    m.w8(INS + INS_SIZE * 2, 0)             # instrument 3 deleted
+    tick()
+    check(mask() == 1, "a flag on a deleted instrument is cleared")
+
+    print("projects without a name")
+    m.write(PROJECT_NAME, b"\0")
+    tick()
+    check(mask() == 0, "a new project without a name: none")
+    m.w32(q.ram + 4, 1 << 1)
+    n = writes()
+    tick(SAVE_DELAY * 2)
+    check(writes() == n, "while it has no name: nothing written")
+    fs.set_project(Path("."), "C", "Projects/User")
+    tick(SAVE_DELAY + 5)
+    check(mask() == 1 << 1 and fs.overlay.get(path("C")) == bts1(1 << 1),
+          "its first save (a name, no file yet): the flags kept and written")
+    m.write(PROJECT_NAME, b"\0")
+    tick()
+    fs.set_project(Path("."), "A", "Projects/User")
+    tick()
+    check(mask() == 1, "a project with a file, opened after an unnamed one: the file's flags")
+
+    print("stock firmware with the same project")
+    s = Rig(stock, False)
+    s.instrument(0)
+    v = s.voice()
+    s.note_on(v, 0, 25)
+    check(s.fields(v)["end"] == frames_of(0x8000),
+          "stock firmware never reads slicethru.bin: the instrument plays Beat Slice (note 25 ends at its slice end)")
+
+    tick(1, pat_hook)
+    check(True, "the Pattern screen's update hook runs the same tick")
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print(__doc__)
@@ -637,6 +800,7 @@ def main() -> int:
     input_checks(q, t)
     ui_play_checks(q)
     off_list_checks(ScreenRig(ptf, True), ScreenRig(stock, False))     # fresh: the same history in both
+    file_checks(ptf, stock)
     print(f"{len(failures)} failure(s)")
     return 1 if failures else 0
 

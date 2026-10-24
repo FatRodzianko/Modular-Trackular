@@ -29,7 +29,17 @@
  *    a step moves V, sets the flag, and calls the stock handler with the mode's step.
  *    A step that neither starts nor ends on row 6 goes to stock unchanged.
  *
- * Phase 3: the flags live in this patch's RAM only; the settings file comes in phase 4.
+ * The flags are saved per project in <project folder>/slicethru.bin (16 bytes: magic,
+ * a 48-bit mask, a checksum), read and written from the Sample Playback and Pattern
+ * screens' update methods (chained), one small read or write per call, only while the
+ * file manager is idle:
+ *  - another project: the flags are cleared at once (nothing of the old project plays
+ *    through in the new one), then read from its file once the file manager is idle.
+ *    A new project without a name keeps its flags for its first save, as swing does;
+ *  - a flag whose instrument isn't an active Beat Slice instrument any more (another
+ *    sample loaded into the slot, its mode changed elsewhere) is cleared;
+ *  - a change is written a moment later.
+ * Stock firmware never reads the file: there the instruments play Beat Slice.
  *
  * Shared hooks go through chain words (mt_bt_next_*) that tools/patch_ptf.py fills with
  * what the site pointed to before, so other patches can hook them too.
@@ -37,17 +47,26 @@
 #include <stdint.h>
 
 #ifndef SLICETHRU_VERSION
-#define SLICETHRU_VERSION "bt2"
+#define SLICETHRU_VERSION "bt3"
 #endif
 
 /* ---- firmware 1.2.0 ------------------------------------------------------------------ */
 #define FW_INSTRUMENTS      0x20200000u     /* 48 instruments, 0x174 bytes each */
+#define FW_CURRENT_INSTR    0x202046C5u     /* the selected instrument */
 #define INSTR_SIZE          0x174u
 #define INSTR_COUNT         48u
+#define INSTR_ACTIVE        0x00u           /* 1: the slot holds an instrument */
 #define INSTR_PLAY_MODE     0x3Cu
 #define MODE_BEAT_SLICE     5u
-#define MODE_LAST           7u              /* Granular */
 #define POINT_SAMPLE_END    0xFFFFu         /* points are 0..65535 of the sample */
+
+#define FW_FM               0x2001E488u     /* file manager object; *FW_FM = FS object */
+#define FM_STATE            0x13Du          /* file manager state; 0 or 0x0c when idle */
+#define FM_SUBSTATE         0x13Fu
+#define FW_PROJECT_PATH     ((const uint8_t *)(FW_FM + 0x241u))
+#define FW_PROJECT_NAME     ((const uint8_t *)(FW_FM + 0x340u))
+#define FW_SNPRINTF         0x6016712Du
+#define FW_SHOW_MODE        0x600F7C55u     /* (screen): the Play Mode list and the mode's controls */
 
 #define FW_SCREEN           0x200254B4u     /* the Sample Playback screen object */
 #define SCR_POPUP           0x70u           /* nonzero: the inputs go elsewhere */
@@ -72,6 +91,9 @@ typedef uint32_t (*to_frames_fn)(uint32_t point, uint32_t length, uint32_t addre
 typedef void (*set_data_fn)(void *controls, uint32_t id, void *data);
 typedef void (*callback_fn)(uint32_t r0, uint32_t r1, uint32_t r2, uint32_t r3);
 typedef void (*change_fn)(int32_t step);
+typedef void (*update_fn)(void *screen, void *a1, void *a2, void *a3);
+typedef void (*show_fn)(void *screen);
+typedef int (*snprintf_fn)(char *buf, uint32_t size, const char *fmt, ...);
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
  * compiler must read them, not assume the 0 they are linked with. */
@@ -84,15 +106,27 @@ CHAIN_WORD(mt_bt_next_plus);                /* +1 callback 0x600c9d85 */
 CHAIN_WORD(mt_bt_next_minus);               /* -1 callback 0x600ca7a5 */
 CHAIN_WORD(mt_bt_next_button_plus);         /* mode-change handler 0x600f5b99 (8th button) */
 CHAIN_WORD(mt_bt_next_button_minus);        /* mode-change handler 0x600f5b99 (7th button) */
+CHAIN_WORD(mt_bt_next_playback_update);     /* Sample Playback screen update 0x600f6071 */
+CHAIN_WORD(mt_bt_next_pattern_update);      /* Pattern screen update 0x600e1f99 */
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
 #define BT_MAGIC            0x5442544Du     /* "MTBT" */
+#define SAVE_DELAY          25u             /* screen updates between a change and the save */
+#define LOAD_NONE           0u
+#define LOAD                1u              /* read the file; none: no flags */
+#define LOAD_OR_KEEP        2u              /* read the file; none: keep the flags (a first save) */
 
 struct bt_state {
     uint32_t magic;
     uint32_t flags[2];                      /* bit i: instrument i plays through (i < 48) */
     volatile uint8_t cur;                   /* the Beat Slice note-on in progress plays through */
+    uint8_t saved_valid;                    /* saved[] is what the file holds */
+    uint8_t unnamed;                        /* the session is a project without a name */
+    uint8_t wait;                           /* updates left before saving */
+    uint32_t session;                       /* project name + path the flags belong to */
+    uint32_t saved[2];
+    uint8_t load;                           /* LOAD_*: the project's file is still to be read */
     uint8_t pad[3];
 };
 static struct bt_state bt_state_ram __attribute__((section(".mt_ram")));    /* the start of the patch's RAM */
@@ -104,6 +138,11 @@ static void bt_init_if_needed(void)         /* RAM outside .bss holds garbage at
         return;
     BT->flags[0] = BT->flags[1] = 0;
     BT->cur = 0;
+    BT->saved_valid = 0;
+    BT->unnamed = 0;
+    BT->wait = 0;
+    BT->session = 0;
+    BT->load = 0;
     BT->magic = BT_MAGIC;
 }
 
@@ -267,6 +306,202 @@ void mt_bt_button_plus(int32_t step)
 void mt_bt_button_minus(int32_t step)
 {
     list_step(step, mt_bt_next_button_minus);
+}
+
+/* ---- slicethru.bin (main loop: the screens' update methods) ---------------------- */
+
+struct fs_open_result { uint32_t handle; uint8_t ok; uint8_t pad[3]; };
+typedef void (*fs_open_fn)(struct fs_open_result *res, void *fs, const char *path, uint32_t mode, uint32_t x);
+typedef int (*fs_read_fn)(void *fs, void *buf, uint32_t size, uint32_t handle);
+typedef int (*fs_write_fn)(void *fs, const void *buf, uint32_t size, uint32_t handle);
+typedef void (*fs_close_fn)(void *fs, uint32_t handle, uint32_t x);
+typedef void (*fs_remove_fn)(void *fs, const char *path);
+#define FS_REMOVE           0x14u
+#define FS_OPEN             0x2Cu
+#define FS_READ             0x30u
+#define FS_WRITE            0x34u
+#define FS_CLOSE            0x40u
+#define FS_MODE_READ        0u
+#define FS_MODE_WRITE       3u              /* FatFs create-always + RW, as the pattern save */
+
+#define FILE_MAGIC          0x31535442u     /* "BTS1" */
+#define FILE_SIZE           16u             /* magic, the mask (8 bytes, bits 48..63 zero), checksum */
+#define MASK_HIGH           0x0000FFFFu     /* flags[1]: instruments 32..47 */
+
+static uint32_t fnv1a(uint32_t h, uint32_t byte)
+{
+    return (h ^ byte) * 16777619u;
+}
+
+static uint32_t project_session(void)
+{
+    uint32_t h = 2166136261u;
+    for (uint32_t i = 0; i < 64 && FW_PROJECT_NAME[i]; i++)
+        h = fnv1a(h, FW_PROJECT_NAME[i]);
+    h = fnv1a(h, 0);
+    for (uint32_t i = 0; i < 255 && FW_PROJECT_PATH[i]; i++)
+        h = fnv1a(h, FW_PROJECT_PATH[i]);
+    return fnv1a(h, 0) | 1;                 /* never 0 */
+}
+
+static uint32_t data_sum(const uint8_t *v)
+{
+    uint32_t h = 2166136261u;
+    for (uint32_t i = 0; i < 8; i++)
+        h = fnv1a(h, v[i]);
+    return h;
+}
+
+static void put32(uint8_t *b, uint32_t v)
+{
+    b[0] = (uint8_t)v; b[1] = (uint8_t)(v >> 8); b[2] = (uint8_t)(v >> 16); b[3] = (uint8_t)(v >> 24);
+}
+
+static uint32_t get32(const uint8_t *b)
+{
+    return b[0] | b[1] << 8 | b[2] << 16 | (uint32_t)b[3] << 24;
+}
+
+static int settings_path(char *path, uint32_t size)
+{
+    if (!FW_PROJECT_NAME[0])
+        return 0;
+    int n = ((snprintf_fn)FW_SNPRINTF)(path, size, "%s/%s/slicethru.bin",
+                                       (const char *)FW_PROJECT_PATH, (const char *)FW_PROJECT_NAME);
+    return n > 0 && (uint32_t)n < size;
+}
+
+static int file_manager_idle(void)
+{
+    const volatile uint8_t *fm = (const volatile uint8_t *)FW_FM;
+    uint8_t state = fm[FM_STATE];
+    return (state == 0 || state == 0x0C) && (fm[FM_SUBSTATE] & 0xFD) == 0;
+}
+
+/* The project's flags into BT->flags. 1: the file was read and applied. */
+static int settings_load(void)
+{
+    char path[256];
+    void *fs = *(void **)FW_FM;
+    if (!fs || !settings_path(path, sizeof path))
+        return 0;
+    void **vt = *(void ***)fs;
+    struct fs_open_result res = {0, 0, {0, 0, 0}};
+    uint8_t buf[FILE_SIZE];
+    ((fs_open_fn)vt[FS_OPEN / 4])(&res, fs, path, FS_MODE_READ, 0);
+    if (!res.ok)
+        return 0;
+    int ok = ((fs_read_fn)vt[FS_READ / 4])(fs, buf, FILE_SIZE, res.handle) == (int)FILE_SIZE;
+    ((fs_close_fn)vt[FS_CLOSE / 4])(fs, res.handle, 1);
+    ok = ok && get32(buf) == FILE_MAGIC && get32(buf + 12) == data_sum(buf + 4)
+         && (get32(buf + 8) & ~MASK_HIGH) == 0;
+    if (!ok)
+        return 0;
+    BT->flags[0] = get32(buf + 4);
+    BT->flags[1] = get32(buf + 8);
+    return 1;
+}
+
+static void settings_save(void)
+{
+    char path[256];
+    void *fs = *(void **)FW_FM;
+    if (!fs || !settings_path(path, sizeof path))
+        return;
+    void **vt = *(void ***)fs;
+    uint8_t buf[FILE_SIZE];
+    uint32_t lo = BT->flags[0], hi = BT->flags[1] & MASK_HIGH;
+    put32(buf, FILE_MAGIC);
+    put32(buf + 4, lo);
+    put32(buf + 8, hi);
+    put32(buf + 12, data_sum(buf + 4));
+    struct fs_open_result res = {0, 0, {0, 0, 0}};
+    ((fs_remove_fn)vt[FS_REMOVE / 4])(fs, path);
+    ((fs_open_fn)vt[FS_OPEN / 4])(&res, fs, path, FS_MODE_WRITE, 0);
+    if (!res.ok)
+        return;
+    int ok = ((fs_write_fn)vt[FS_WRITE / 4])(fs, buf, FILE_SIZE, res.handle) == (int)FILE_SIZE;
+    ((fs_close_fn)vt[FS_CLOSE / 4])(fs, res.handle, 1);
+    if (ok) {
+        BT->saved[0] = lo;
+        BT->saved[1] = hi;
+        BT->saved_valid = 1;
+    }
+}
+
+/* Clear the flags of instruments that aren't active Beat Slice instruments. */
+static void clear_stale(void)
+{
+    for (uint32_t i = 0; i < INSTR_COUNT; i++) {
+        if (!bt_flag(i))
+            continue;
+        const volatile uint8_t *ins = (const volatile uint8_t *)(FW_INSTRUMENTS + INSTR_SIZE * i);
+        if (ins[INSTR_ACTIVE] != 1 || ins[INSTR_PLAY_MODE] != MODE_BEAT_SLICE)
+            bt_set_flag(i, 0);
+    }
+}
+
+/* At most one small file read or write per call. 1: the flags were (re)loaded. */
+static int settings_tick(void)
+{
+    bt_init_if_needed();
+    if (!*(void **)FW_FM)
+        return 0;
+    uint32_t session = project_session();
+    int unnamed = !FW_PROJECT_NAME[0];
+    if (session != BT->session) {
+        int keep = BT->unnamed && !unnamed; /* maybe a new project being saved for the first time */
+        BT->session = session;
+        BT->unnamed = (uint8_t)unnamed;
+        BT->saved_valid = 0;
+        BT->wait = SAVE_DELAY;
+        BT->load = unnamed ? LOAD_NONE : keep ? LOAD_OR_KEEP : LOAD;
+        if (!keep)
+            BT->flags[0] = BT->flags[1] = 0;     /* nothing of the old project plays through */
+    }
+    if (!file_manager_idle())
+        return 0;
+    if (BT->load != LOAD_NONE) {
+        uint8_t how = BT->load;
+        BT->load = LOAD_NONE;
+        if (settings_load() || how == LOAD) {
+            BT->saved[0] = BT->flags[0];    /* nothing to write until a flag changes */
+            BT->saved[1] = BT->flags[1];
+            BT->saved_valid = 1;
+        }                                   /* else: the new project's first save keeps its flags */
+        return 1;
+    }
+    clear_stale();
+    if (unnamed || (BT->saved_valid && BT->flags[0] == BT->saved[0]
+                    && (BT->flags[1] & MASK_HIGH) == BT->saved[1])) {
+        BT->wait = SAVE_DELAY;
+        return 0;
+    }
+    if (BT->wait) {
+        BT->wait--;
+        return 0;
+    }
+    BT->wait = SAVE_DELAY;
+    settings_save();
+    return 0;
+}
+
+/* Sample Playback screen vtable slot 0x60042698 (update method 0x600f6071; chained). A
+ * project's flags loaded while the screen shows a sample instrument redraw its list. */
+void mt_bt_playback_update(void *screen, void *a1, void *a2, void *a3)
+{
+    int loaded = settings_tick();
+    ((update_fn)mt_bt_next_playback_update)(screen, a1, a2, a3);
+    uint32_t cur = *(volatile uint8_t *)FW_CURRENT_INSTR;
+    if (loaded && cur < INSTR_COUNT && screen_instrument() == (int32_t)cur)
+        ((show_fn)FW_SHOW_MODE)((void *)FW_SCREEN);
+}
+
+/* Pattern screen vtable slot 0x600403dc (update method 0x600e1f99; chained) */
+void mt_bt_pattern_update(void *screen, void *a1, void *a2, void *a3)
+{
+    settings_tick();
+    ((update_fn)mt_bt_next_pattern_update)(screen, a1, a2, a3);
 }
 
 /* ---- version text: Config shows 1.2.0-<SLICETHRU_VERSION> ------------------------- */

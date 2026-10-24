@@ -72,11 +72,27 @@
       "note": "Sample Playback screen callback pool: -1 0x600ca7a5 -> mt_bt_minus (Play Mode list focused: one row up)"
     },
     {
+      "at": "0x60042698",
+      "old": "71600f60",
+      "to": "mt_bt_playback_update",
+      "next": "mt_bt_next_playback_update",
+      "thumb": true,
+      "note": "Sample Playback screen vtable: update method 0x600f6071 -> mt_bt_playback_update (slicethru.bin load/save; the list redrawn after a load)"
+    },
+    {
+      "at": "0x600403DC",
+      "old": "991f0e60",
+      "to": "mt_bt_pattern_update",
+      "next": "mt_bt_next_pattern_update",
+      "thumb": true,
+      "note": "Pattern screen vtable: update method 0x600e1f99 -> mt_bt_pattern_update (slicethru.bin load/save)"
+    },
+    {
       "at": "0x600CBF9C",
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-bt2"
+      "note": "version text 1.2.0-bt3"
     }
   ]
 }
