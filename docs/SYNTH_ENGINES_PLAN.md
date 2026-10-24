@@ -869,3 +869,18 @@ the Init patch, the Macros and saved patches are unchanged. The one difference f
 WAVE's filter envelope answers MIDI CCs 46–49, where VAP's answers 80–83.
 
 `sy5` on hardware (user): alone and in the all bundle (`1.2.0-MS5`), the filter envelope on Env 1; every mod in MS5 works.
+
+### Built: `1.2.0-sy6`, Drive (emulator-tested; not on hardware yet)
+
+The first of the effects the user asked to explore. Drive (0–100 %) on the Filter page and
+tab, after Key Track: the filter's input times 1 to 16 (+24 dB) through the soft clip the
+filters already use, scaled so a held note at full velocity keeps its peak. At 0 the stage
+isn't run: the output is sample for sample `sy5`'s (emulator, four filter types). It takes
+VAP's parameter 38 (Mix Env Amt), never shown by WAVE and 0 in every WAVE patch, so no
+parameter is added and saved patches are unchanged. Cost about 2,200 instructions per voice
+per block; RAM 2,048 → 2,064 bytes, which leaves 16 bytes in DTCM in the all bundle.
+
+Next (planned, not built): a second, late RAM block in SDRAM for WAVE (a patcher change),
+then an effect slot on the Voice page (None, Chorus I/II/I+II, Flanger, Phaser; Rate,
+Depth, Mix), run once per slot on the mixed output (voice 0's `+0x14`, which gets the
+slot's output buffers), in stereo (patch channel count 2, as PERC).

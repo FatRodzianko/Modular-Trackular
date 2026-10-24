@@ -21,16 +21,20 @@ What WAVE has:
   - a saturating state-variable filter (OB), 12 or 24 dB;
   - a clean state-variable filter (SVF), 12 or 24 dB.
 
-  Each comes as low-pass, high-pass, band-pass or notch.
+  Each comes as low-pass, high-pass, band-pass or notch, with Drive: saturation into the
+  filter.
 - **Three ADSR envelopes** (amp, filter and mod), **two LFOs** (free or tempo-synced,
   bipolar or unipolar), and a 6-slot **Mod Matrix**. The matrix can modulate Position, Pitch, Mix, Cutoff,
   Resonance, Volume and Noise.
 - Glide and noise.
 
-Installed on its own, Config shows the firmware version as `1.2.0-sy5`.
+Installed on its own, Config shows the firmware version as `1.2.0-sy6`.
 
-**Status:** `sy5` is tested in the emulator and on hardware, alone and in the all bundle.
-It is `sy4` with the filter envelope on the
+**Status:** `sy6` was tested on hardware, alone and in the all bundle: it installs; `sy5` patches load
+with Drive at 0 % and sound the same; Drive changes the sound audibly and stays under
+control with Resonance above 50. It is `sy5` with Drive; with Drive at 0 it plays sample
+for sample as `sy5`, which was tested on hardware, alone and in the all bundle.
+`sy5` is `sy4` with the filter envelope on the
 Edit Patch screen's Env 1 tile (as VAP's) and the mod envelope on Env 2; the sound and
 the patch files are unchanged. `sy4` was tested on hardware, alone and bundled with all
 the other patches: it installs and plays; `sy3` patches load and play; the LFOs' Polarity
@@ -73,7 +77,7 @@ screen, the tiles open them as lists:
 | Tile | Controls |
 |---|---|
 | Osc | Wave, Position, Mix, Tune, Detune, Finetune, Noise, Digital, Reset |
-| Filter | Cutoff, Resonance, Type, Env Amt, Key Track |
+| Filter | Cutoff, Resonance, Type, Env Amt, Key Track, Drive |
 | Amp Env | The amp envelope |
 | Env 1 | The filter envelope (as on VAP) |
 | Env 2 | The mod envelope |
@@ -92,8 +96,10 @@ screen, the tiles open them as lists:
 **Oscillator (2/2):** Reset 1 and Reset 2 (each note starts the oscillator at phase 0),
 Noise (white noise into the filter), and Finetune (both oscillators, ±100 c).
 
-**Filter:** Cutoff, Resonance (0–150 %), Type, Env Amt (±100 % is ±8 octaves), and Key Track
-(cutoff follows the note around middle C; 100 % is full tracking).
+**Filter:** Cutoff, Resonance (0–150 %), Type, Env Amt (±100 % is ±8 octaves), Key Track
+(cutoff follows the note around middle C; 100 % is full tracking), and Drive (0–100 %:
+saturation into the filter, up to +24 dB into a soft clip, with the level kept about the
+same; 0 is off).
 
 **Modulation:**
 - Amp Env.
@@ -300,6 +306,11 @@ VAP does:
   - OB: the same, with its band-pass state through a soft clip.
   - Ladder: four one-pole low-passes in a feedback loop, solved for each sample, with
     its input through a soft clip, which bounds the self-oscillation.
+  - Drive: before any of them, the input times 1 to 16 through a soft clip, then scaled so
+    a held note at full velocity keeps its peak. At 0 the stage isn't run. It costs
+    about 2,200 instructions per voice per block. It uses VAP's parameter 38 (Mix Env
+    Amt), which WAVE never showed and every WAVE patch holds as 0, so saved patches play
+    as before.
 - **Envelopes:** three, advanced per block; the amp envelope is ramped per sample.
 - **LFOs:** two per voice, advanced per block. A synced LFO takes its rate from the
   tempo. A Free Running LFO also runs while its voice is silent.
@@ -332,7 +343,7 @@ An idle WAVE voice still runs its LFOs. Each Mod Matrix slot in use adds about 3
 A WAVE voice is also a VAP voice object: 6.5 KB of heap, as VAP.
 
 **Sizes:**
-- RAM: 2,048 bytes of on-chip patch RAM, for the settings, each slot's parameter copy and
+- RAM: 2,064 bytes of on-chip patch RAM, for the settings, each slot's parameter copy and
   8 engine voices.
 - Flash: 483 KB, 467 KB of it the seven banks and the saw table (Super Saw and Saw).
 - The `.ptf` grows by about 1.3 MB (Intel HEX).
@@ -352,7 +363,7 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/synths/patch.json build/TrackerPlus_sy5.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/synths/patch.json build/TrackerPlus_sy6.ptf
 ```
 
 To combine it with other patches, list `../synths/patch.json` in a bundle (see "Choosing
@@ -370,7 +381,7 @@ patch/synths/build.sh
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_synths.py build/TrackerPlus_sy5.ptf path/to/TrackerPlus_1.2.0.ptf [wav folder] [--stress 20000]
+python tools/emu/test_synths.py build/TrackerPlus_sy6.ptf path/to/TrackerPlus_1.2.0.ptf [wav folder] [--stress 20000]
 ```
 
 It runs the firmware's own synth system: host, slots, VAP voices and the audio graph
@@ -446,7 +457,7 @@ With a folder given, it also writes WAV files of test phrases:
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched `.ptf` to
 `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then Config →
-Firmware → the patched file. Config should show `1.2.0-sy5 Build 1504`.
+Firmware → the patched file. Config should show `1.2.0-sy6 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`.
 - Synths that were WAVE play the replaced model's Init patch.

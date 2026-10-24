@@ -32,7 +32,8 @@
  * state-variable filter whose band-pass state saturates, after the Oberheim SEM's; SVF
  * is the clean 2-pole one.
  * The 24 dB OB and SVF types put a second, unresonant stage before it. Cutoff, envelope
- * and key tracking are set per block.
+ * and key tracking are set per block. Drive (38) puts the filter's input through a soft
+ * clip first, up to +24 dB into it, with the level made up; at 0 there is no such stage.
  *
  * Envelopes (x3, ADSR): advanced once per block, a linear attack and exponential decay
  * and release; the amp envelope is ramped across the block. As in VAP, parameters
@@ -66,7 +67,8 @@ enum {
     WP_MENV_ATT, WP_MENV_DEC, WP_MENV_SUS, WP_MENV_REL,     /* 23-26: the mod envelope (VAP's Env 1) */
     WP_LFO1, WP_LFO2 = WP_LFO1 + 4,                         /* 27-30, 31-34: Ratio, Waveform, Retrigger, Sync */
     WP_MTX = WP_LFO2 + 4,                                   /* 42-59: 6 x Src, Dest, Amt */
-    WP_LFO_POL = WP_MTX + 18,                               /* 60, 61: LFO 1's and LFO 2's Polarity */
+    WP_DRIVE = WP_MTX + 18,                                 /* 38: Drive (VAP's unused Mix Env Amt) */
+    WP_LFO_POL,                                             /* 60, 61: LFO 1's and LFO 2's Polarity */
     WT_PARAMS = WP_LFO_POL + 2
 };
 #define WT_UNUSED           0xFFu
@@ -77,7 +79,7 @@ static const uint8_t wt_param_slot[WAVE_PARAMS] = {
     WP_AENV_ATT, WP_AENV_DEC, WP_AENV_SUS, WP_AENV_REL,                              /* 19-22 */
     WP_MENV_ATT, WP_MENV_DEC, WP_MENV_SUS, WP_MENV_REL,                              /* 23-26 */
     WP_LFO1, WP_LFO1 + 1, WP_LFO1 + 2, WP_LFO1 + 3, WP_LFO2, WP_LFO2 + 1, WP_LFO2 + 2, WP_LFO2 + 3,  /* 27-34 */
-    WP_GLIDE_MODE, WP_GLIDE_TIME, WP_TRACK, WT_UNUSED, WT_UNUSED, WP_DIGITAL, WP_NOISE,  /* 35-41 */
+    WP_GLIDE_MODE, WP_GLIDE_TIME, WP_TRACK, WP_DRIVE, WT_UNUSED, WP_DIGITAL, WP_NOISE,   /* 35-41 */
     WP_MTX, WP_MTX + 1, WP_MTX + 2, WP_MTX + 3, WP_MTX + 4, WP_MTX + 5,               /* 42-59 */
     WP_MTX + 6, WP_MTX + 7, WP_MTX + 8, WP_MTX + 9, WP_MTX + 10, WP_MTX + 11,
     WP_MTX + 12, WP_MTX + 13, WP_MTX + 14, WP_MTX + 15, WP_MTX + 16, WP_MTX + 17,
@@ -680,6 +682,9 @@ osc_block(const struct wt_osc *o, uint32_t ph, uint32_t *side, float *out, float
 #define WT_NOISE_GAIN       0.45f           /* noise at Noise 1: about an oscillator's RMS */
 #define WT_OUT_LIMIT        2.0f
 #define F_FIXED_K           1.41421356f     /* the 24 dB types' first stage: Q 0.707 */
+#define DRIVE_OCTAVES       4.0f            /* Drive 100 %: x16 (+24 dB) into the soft clip */
+#define DRIVE_REF           0.35f           /* a signal at this peak keeps its peak at any Drive: about
+                                             * a held note's at full velocity */
 
 /* x limited to +-WT_OUT_LIMIT (vmaxnm / vminnm: a NaN becomes the limit) */
 static inline float limit(float x)
@@ -793,6 +798,13 @@ static void wt_voice_render(struct wt_voice *e, const float *p, float *out, floa
             out[n] += (float)(int32_t)nz * gn;
         }
         e->noise = nz;
+    }
+    float drive = clampf(p[WP_DRIVE], 0.0f, 1.0f);
+    if (drive > 0.0f) {                     /* Drive: the filter's input through the soft clip */
+        float dg = exp2f_fast(drive * DRIVE_OCTAVES);
+        float mk = DRIVE_REF / sat(DRIVE_REF * dg);
+        for (uint32_t n = 0; n < WT_BLOCK; n++)
+            out[n] = sat(out[n] * dg) * mk;
     }
     float ic[4] = {e->ic[0], e->ic[1], e->ic[2], e->ic[3]};
     if (type & F_LADDER) {

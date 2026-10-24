@@ -139,7 +139,7 @@ MAP_FIELDS = ("state", "menu", "applied", "ready", "switches", "loads", "model_i
               "levels", "builder")
 SY_READY = 0x59444552
 CC_CUTOFF, CC_RESONANCE, CC_MACRO = 74, 71, 102     # Macro a-f arrive as CCs 102-107
-ENGINE_READS = set(range(62)) - {38}                        # the parameters wt_engine.h reads
+ENGINE_READS = set(range(62))                               # the parameters wt_engine.h reads
 
 WHERE: dict[str, int] = {}          # set in main(): the patch's state and its layout
 CODE = (0, 0)                       # set in main(): the patch's code, start and end
@@ -480,18 +480,18 @@ WAVE_INIT = {0: ("Position 1", 0.6667), 1: ("Position 2", 0.6667), 2: ("Wave 1",
              25: ("Sustain", 0.0), 26: ("Release", 0.5), 27: ("Ratio", 1.0), 28: ("Waveform", 0.0),
              29: ("Retrigger", 2.0), 30: ("Sync", 0.0), 31: ("Ratio", 0.25), 32: ("Waveform", 1.0),
              33: ("Retrigger", 2.0), 34: ("Sync", 0.0), 35: ("Glide Mode", 0.0), 36: ("Glide Time", 0.0),
-             37: ("Key Track", 0.5), 40: ("Digital", 0.0), 41: ("Noise", 0.0), 42: ("Src 1", 3.0),
+             37: ("Key Track", 0.5), 38: ("Drive", 0.0), 40: ("Digital", 0.0), 41: ("Noise", 0.0), 42: ("Src 1", 3.0),
              43: ("Dest 1", 0.0), 44: ("Amt 1", 0.0), 45: ("Src 2", 2.0), 46: ("Dest 2", 0.0), 47: ("Amt 2", 0.0),
              60: ("Polarity", 0.0), 61: ("Polarity", 0.0)}
 WAVE_GROUPS = [("Oscillator", [("(1/2)", [2, 3, 4, 0, 1, 40, 5, 6, 7, -1]), ("(2/2)", [9, 10, 41, -1, -1, 8, -1, -1])]),
-               ("Filter", [("", [12, 13, 11, 14, -1, 37, -1, -1, -1])]),
+               ("Filter", [("", [12, 13, 11, 14, -1, 37, 38, -1, -1])]),
                ("Modulation", [("Amp Env", [19, 20, 21, 22, -1, -1]),
                                ("Flt Env/LFO 1", [15, 16, 17, 18, 60, 30, 27, 28, 29]),
                                ("Mod Env/LFO 2", [23, 24, 25, 26, -1, 61, 34, 31, 32, 33])]),
                ("Matrix", [("(1/2)", list(range(42, 51))), ("(2/2)", list(range(51, 60)) + [-1])]),
                ("FX", [("", [])]),
                ("Voice", [("", [35, 36, 39])])]
-WAVE_PAGES = [("Oscillators", "Osc", [2, 0, 3, 1, 4, 5, 6, 8, 7, 41, 40, 9, 10]), ("Filter", "", [12, 13, 11, 14, 37]),
+WAVE_PAGES = [("Oscillators", "Osc", [2, 0, 3, 1, 4, 5, 6, 8, 7, 41, 40, 9, 10]), ("Filter", "", [12, 13, 11, 14, 37, 38]),
               ("Amp Envelope", "Amp Env", [19, 20, 21, 22]), ("Filter Envelope", "Flt Env", [15, 16, 17, 18]),
               ("Mod Envelope", "Mod Env", [23, 24, 25, 26]), ("LFO 1", "", [30, 27, 28, 29, 60]),
               ("LFO 2", "", [34, 31, 32, 33, 61]), ("Modulation", "Mod", list(range(42, 60))), ("Voice", "", [35, 36, 39])]
@@ -601,7 +601,7 @@ def wave_model_checks(ptf: Path) -> None:
     srcs, dests = range(42, 60, 3), range(43, 60, 3)
     check(ranges[2] == ranges[3] == (0.0, 8.0) and flags[2] == flags[3] == flags[11] and (flags[2] >> 16) & 1
           and all(ranges[i] == (0.0, 6.0) for i in srcs) and all(ranges[i] == (0.0, 10.0) for i in dests)
-          and all(ranges[i] == vap_ranges[i] for i in range(60) if i not in (2, 3, *srcs, *dests)),
+          and all(ranges[i] == vap_ranges[i] for i in range(60) if i not in (2, 3, 38, *srcs, *dests)),
           f"Wave 1 and 2: 0-8, stepped, as Type; Src 0-6, Dest 0-10; every other range as VAP's "
           f"(Wave {ranges[2]}, flags {flags[2]:#x})")
     shown_src = [display(m, ents[42], float(k)) for k in range(7)]
@@ -617,6 +617,10 @@ def wave_model_checks(ptf: Path) -> None:
           f"value displays: Wave {shown_wave}, Type {shown_type[:3]}..., Digital Off/On")
     check(clamped == ["Formant", "Saw", "Formant", "Notch 12"],
           f"out-of-range values show the nearest name ({clamped})")
+    drive = [display(m, ents[P_DRIVE], v) for v in (0.0, 0.35, 1.0, 7.0, -1.0, float("nan"))]
+    check(ranges[P_DRIVE] == (0.0, 1.0) and drive == ["0 %", "35 %", "100 %", "100 %", "0 %", "0 %"]
+          and m.uc.mem_read(ents[P_DRIVE] + 0x23, 1)[0] == 0xFF,
+          f"Drive (38, VAP's unused Mix Env Amt): 0-1, shown as a percentage ({drive}), no CC")
     pol = [[display(m, ents[i], v) for v in (0.0, 1.0, 5.0, float("nan"))] for i in (P_LFO1_POL, P_LFO2_POL)]
     rebuild = [m.uc.mem_read(q + 0x24, 1)[0] for q in ents]
     check(ranges[60] == ranges[61] == (0.0, 1.0) and flags[60] == flags[61] == flags[11]
@@ -1083,7 +1087,7 @@ P_POS1, P_POS2, P_WAVE1, P_WAVE2, P_MIX, P_TUNE1, P_TUNE2, P_DETUNE, P_FINE, P_R
 P_TYPE, P_CUTOFF, P_RES, P_ENVAMT = 11, 12, 13, 14
 P_FENV_ATT, P_FENV_DEC, P_FENV_SUS, P_FENV_REL = range(15, 19)       # the filter envelope
 P_AENV_ATT, P_AENV_DEC, P_AENV_SUS, P_AENV_REL = range(19, 23)       # the amp envelope
-P_GLIDE_MODE, P_GLIDE_TIME, P_TRACK, P_VOLUME, P_DIGITAL, P_NOISE = 35, 36, 37, 39, 40, 41
+P_GLIDE_MODE, P_GLIDE_TIME, P_TRACK, P_DRIVE, P_VOLUME, P_DIGITAL, P_NOISE = 35, 36, 37, 38, 39, 40, 41
 FORMANT, RESONANT, HARMONIC, PWM, BASIC, SYNC, FM, SUPERSAW, SAW = range(9)    # Wave 1 / 2
 P_MENV_ATT, P_MENV_DEC, P_MENV_SUS, P_MENV_REL = range(23, 27)       # the mod envelope
 P_LFO1_RATE, P_LFO1_WAVE, P_LFO1_RETRIG, P_LFO1_SYNC = range(27, 31)
@@ -1758,6 +1762,45 @@ def digital_checks(ptf: Path) -> None:
                               "off: it morphs")
     d = float(np.abs(outs[(1.0, 15.0 / 31)] - outs[(0.0, 15.0 / 31)]).max())
     check(d > 1e-3, f"on: the same frame sounds different (8-bit, no interpolation; largest difference {d:.4f})")
+
+
+def drive_checks(ptf: Path) -> None:
+    print("Drive (the filter's input through a soft clip)")
+    h3, peaks = {}, {}
+    for d in (0.0, 0.25, 0.5, 1.0):                 # a sine at 110 Hz through the open filter
+        w = WT(ptf, **OPEN, pos1=0.0, pos2=0.0, drive=d)
+        y = w.note(45, 64)
+        h3[d] = harmonics_db(y, note_hz(45))[2]
+        peaks[d] = float(np.abs(y).max())
+    lv = [20 * np.log10(peaks[d] / peaks[0.0]) for d in (0.25, 0.5, 1.0)]
+    check(h3[0.0] < -90 and h3[0.0] < h3[0.25] < h3[0.5] < h3[1.0] and h3[1.0] > -15,
+          f"a sine's 3rd harmonic grows with Drive 0, 25, 50, 100 %: {', '.join(f'{h3[d]:.0f}' for d in h3)} dB")
+    check(all(-2.0 < x < 1.5 for x in lv),
+          f"the level stays close: a full-velocity note's peak at Drive 25, 50, 100 % is "
+          f"{', '.join(f'{x:+.1f}' for x in lv)} dB from Drive 0's")
+    hi = {}
+    for cut in (18000.0, 400.0):                    # the 7th harmonic, 770 Hz: above a 400 Hz LP 24 dB
+        w = WT(ptf, **dict(OPEN, pos1=0.0, pos2=0.0, drive=1.0, cutoff=cut, type=3.0))
+        hi[cut] = harmonics_db(w.note(45, 64), note_hz(45))[6]
+    check(hi[400.0] < hi[18000.0] - 20,
+          f"before the filter: the harmonics Drive makes above Cutoff are filtered ({hi[18000.0]:.0f} dB open, "
+          f"{hi[400.0]:.0f} dB with LP 24 dB at 400 Hz)")
+    w = WT(ptf, cutoff=18000.0, res=1.5, envamt=1.0, noise=1.0, pos1=0.5, pos2=1.0, aenv_sus=1.0, drive=1.0)
+    bad = []
+    for typ in range(15):
+        w.set(type=float(typ))
+        y = w.note(72, 30)
+        if not np.isfinite(y).all() or np.abs(y).max() > 2.0:
+            bad.append(typ)
+    check(not bad, f"Drive 100 % with Resonance 150 %: all 15 filter types finite and bounded ({bad or 'none out'})")
+    costs = []
+    for d in (0.0, 1.0):
+        w = WT(ptf, **OPEN, drive=d)
+        w.r.note_on(0, 60, 100)
+        w.r.render_voice(w.voice, 2)
+        costs.append(render_cost(w.r, w.voice, 4))
+    check(costs[1] - costs[0] < 3000, f"Drive's cost: {costs[1] - costs[0]:.0f} instructions per voice per block "
+                                      f"({costs[0]:.0f} -> {costs[1]:.0f})")
 
 
 def analog_filter_checks(ptf: Path) -> None:
@@ -2472,6 +2515,7 @@ def main() -> int:
     patch_file_checks(ptf, stock)
     osc_checks(ptf)
     filter_checks(ptf)
+    drive_checks(ptf)
     analog_filter_checks(ptf)
     supersaw_checks(ptf)
     saw_checks(ptf)

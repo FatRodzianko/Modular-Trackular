@@ -47,7 +47,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
 - **synths**: WAVE, a wavetable synth that takes the place of one of the five synth
   models per project (Config → Project Settings → Synth Engines → WAVE replaces). The
   Model list then shows WAVE, with its own controls: two oscillators on 7 wavetable
-  banks, a super saw or a saw, Digital mode, ladder, OB and SVF filters, three
+  banks, a super saw or a saw, Digital mode, ladder, OB and SVF filters with drive, three
   envelopes, two LFOs (bipolar or unipolar) and a 6-slot Mod Matrix. Its patches save
   and load like any model's. Tested on hardware. See
   [patch/synths/README.md](patch/synths/README.md).
@@ -63,7 +63,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   pattern. Its button sits next to Humanize's, or in Humanize's place without it.
   Tested on hardware. See
   [patch/copypattern/README.md](patch/copypattern/README.md).
-- **all**: all ten mods above in one firmware (version text `1.2.0-MS5`), from
+- **all**: all ten mods above in one firmware (version text `1.2.0-MS6`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for

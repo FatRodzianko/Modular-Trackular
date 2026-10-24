@@ -2354,3 +2354,17 @@ turn gets a 2 s attack (Sustain 1), the others an instant one:
   from the earlier inference. Its pages and tabs now show 15–18 on Env 1 and 23–26 on
   Env 2, so the filter envelope sits where VAP's does; the slots and saved patches are
   unchanged. Its filter envelope answers CCs 46–49, not VAP's 80–83.
+
+### A per-slot hook point and room for WAVE's effects (`patch/synths` sy6, emulator)
+
+- **Voice 0's `+0x14`** is called once per block, after every voice has rendered, as
+  `(voice, ctx, L, R)` with the slot's output buffers: the output itself with one voice
+  (`0x200278e4` / `0x20027ae4`), the slot's mix buffers with more. It is the place for an
+  effect on a slot's summed output. VAP's does nothing.
+- **Room:** in the all bundle (`1.2.0-MS6`), `dtcm_above_heap` keeps 16 bytes after synths
+  and `ocram_tail` is full. `sdram_top` has about 25 KB free. Whether SDRAM is ready before
+  `main` is still unchecked: the startup copy and zero tables list SDRAM sections, but empty,
+  and no early start-up code sets up the SDRAM controller (SEMC, `0x402f0000`, referenced
+  only from `0x60093c60` and `0x600989a0`).
+- **VAP's parameter 38** (Mix Env Amt, −2..2, no CC, no rebuild flag) is 0 in every WAVE
+  patch; WAVE uses it for Drive.

@@ -56,7 +56,7 @@
 #include <stdint.h>
 
 #ifndef SYNTHS_VERSION
-#define SYNTHS_VERSION "sy5"
+#define SYNTHS_VERSION "sy6"
 #endif
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
@@ -593,6 +593,18 @@ FMT_LIST(fmt_src, src_names, MOD_SRCS)
 FMT_LIST(fmt_dest, dest_names, MOD_DESTS)
 FMT_LIST(fmt_pol, pol_names, 2)
 
+/* invoker for a 0..1 value shown as a percentage ("35 %") */
+static struct fw_string *fmt_percent(struct fw_string *ret, const void *functor, uint32_t x,
+                                     const float *value)
+{
+    (void)functor; (void)x;
+    float v = *value;
+    char buf[8];
+    ((snprintf_fn)FW_SNPRINTF)(buf, sizeof buf, "%d %%", !(v >= 0.0f) ? 0 : v > 1.0f ? 100 : (int)(v * 100.0f + 0.5f));
+    str_init(ret, buf);
+    return ret;
+}
+
 static void set_display(struct fw_param *p, uint32_t invoker)
 {
     if (p->manager)
@@ -622,7 +634,7 @@ static const struct wave_param wave_params[] = {
     {23, 0, 0.5f}, {24, 0, 1.0f}, {25, 0, 0.0f}, {26, 0, 0.5f},        /* the mod envelope */
     {27, 0, 1.0f}, {28, 0, 0.0f}, {29, 0, 2.0f}, {30, 0, 0.0f},        /* LFO 1: 1 Hz triangle, free */
     {31, 0, 0.25f}, {32, 0, 1.0f}, {33, 0, 2.0f}, {34, 0, 0.0f},       /* LFO 2: 0.25 Hz sine, free */
-    {35, "Glide Mode", 0.0f}, {36, "Glide Time", 0.0f}, {37, "Key Track", 0.5f},
+    {35, "Glide Mode", 0.0f}, {36, "Glide Time", 0.0f}, {37, "Key Track", 0.5f}, {38, "Drive", 0.0f},
     {40, "Digital", 0.0f}, {41, "Noise", 0.0f},
     {42, 0, (float)SRC_LFO1}, {43, 0, (float)DST_POSITION}, {44, 0, 0.0f},   /* routings to try: */
     {45, 0, (float)SRC_MOD_ENV}, {46, 0, (float)DST_POSITION}, {47, 0, 0.0f}, /* raise the Amt */
@@ -648,6 +660,11 @@ static const int8_t vap_lfo2_page[] = {34, 31, 32, 33};
  * (23-26), so WAVE's filter envelope (15-18) goes there, and its mod envelope (23-26) on
  * Env 2. (The engine keeps the slots: saved patches play as before.) */
 static const int8_t fenv_page[] = {15, 16, 17, 18};
+/* The Filter page and tab, with Drive (38) after Key Track */
+static const int8_t filter_page[] = {12, 13, 11, 14, 37, 38};
+static const int8_t filter_cells[] = {12, 13, 11, 14, -1, 37, 38, -1, -1};
+static const int8_t vap_filter_page[] = {12, 13, 11, 14, 37};
+static const int8_t vap_filter_cells[] = {12, 13, 11, 14, -1, 37, -1, -1, -1};
 static const int8_t menv_page[] = {23, 24, 25, 26};
 
 static int cells_are(const struct fw_vector *v, const int8_t *cells, uint32_t n)
@@ -737,7 +754,11 @@ static void wave_rewrite(uint8_t *c)
         || !str_eq(&q[5].name, "LFO 1") || !str_eq(&q[6].name, "LFO 2")
         || !cells_are(&q[5].cells, vap_lfo1_page, sizeof vap_lfo1_page)
         || !cells_are(&q[6].cells, vap_lfo2_page, sizeof vap_lfo2_page)
-        || !cells_are(&q[3].cells, menv_page, sizeof menv_page) || !cells_are(&q[4].cells, fenv_page, sizeof fenv_page))
+        || !cells_are(&q[3].cells, menv_page, sizeof menv_page) || !cells_are(&q[4].cells, fenv_page, sizeof fenv_page)
+        || !str_eq(&g[1].name, "Filter") || vec_count(&g[1].subs, sizeof(struct fw_sub)) != 1
+        || !cells_are(&((struct fw_sub *)g[1].subs.begin)[0].cells, vap_filter_cells, sizeof vap_filter_cells)
+        || !str_eq(&q[1].name, "Filter") || !cells_are(&q[1].cells, vap_filter_page, sizeof vap_filter_page)
+        || !str_eq(&p[38].name, "Mix Env Amt"))
         return;
 
     /* WAVE's own parameters after VAP's 60: the LFOs' Polarity, Bipolar (0) or Unipolar
@@ -772,6 +793,9 @@ static void wave_rewrite(uint8_t *c)
         set_display(&p[k], (uint32_t)fmt_wave);
     }
     set_display(&p[11], (uint32_t)fmt_type);
+    p[38].lo = H_0;                         /* Drive: 0-100 % (VAP's -2..2 Mix Env Amt, unused) */
+    p[38].hi = H_1;
+    set_display(&p[38], (uint32_t)fmt_percent);
     for (uint32_t s = 0; s < MOD_SLOTS; s++) {  /* the Mod Matrix's sources and destinations */
         p[42 + 3 * s].hi = H_6;
         set_display(&p[42 + 3 * s], (uint32_t)fmt_src);
@@ -788,6 +812,8 @@ static void wave_rewrite(uint8_t *c)
     set_cells(&q[5].cells, lfo1_page, sizeof lfo1_page);
     set_cells(&q[6].cells, lfo2_page, sizeof lfo2_page);   /* one more cell: from the heap */
     set_cells(&q[0].cells, osc_page, sizeof osc_page);
+    set_cells(&((struct fw_sub *)g[1].subs.begin)[0].cells, filter_cells, sizeof filter_cells);
+    set_cells(&q[1].cells, filter_page, sizeof filter_page);    /* one more cell: from the heap */
     set_cells(&q[3].cells, fenv_page, sizeof fenv_page);    /* the Env 1 tile */
     set_cells(&q[4].cells, menv_page, sizeof menv_page);    /* the Env 2 tile */
     str_set(&q[3].name, "Filter Envelope");

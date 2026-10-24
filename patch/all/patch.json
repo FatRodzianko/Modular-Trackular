@@ -7,7 +7,7 @@
               "../masterfx/patch.json", "../swing/patch.json", "../visualizer/patch.json",
               "../condtrig/patch.json", "../synths/patch.json", "../legato/patch.json",
               "../copypattern/patch.json"],
-  "version": "MS5",
+  "version": "MS6",
   "version_word": {
     "at": "0x600CBF9C",
     "old": "34b80360",
