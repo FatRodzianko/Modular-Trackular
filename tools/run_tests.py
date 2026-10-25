@@ -1,7 +1,7 @@
 """Run the repository's tests at a chosen depth, in parallel, skipping what already passed.
 
   python tools/run_tests.py <stock TrackerPlus_1.2.0.ptf> [--tier quick|release|deep]
-                            [--jobs N] [--no-cache] [--out DIR] [--dry-run]
+                            [--jobs N] [--no-cache] [--out DIR] [--dry-run] [--update]
 
 Tiers (times with an empty cache on an 8-core PC; with the cache, only what changed runs):
   quick    (about 2 min) tools/test_layout.py, plus every patch's emulator test on each patch alone
@@ -31,6 +31,11 @@ firmware file it tests, the test and its mode, and a digest of every file under
 tools/emu/ and of the stock firmware. A key that passed before is not run again, so a
 rerun after a change only runs what the change touched. --no-cache runs everything.
 The cache also keeps each test's measured duration, for the time estimate.
+
+--update (release and deep): the harness rewrites web/expected.json (the hashes the
+page accepts) when everything else in it passes, as test_web_patcher.py --update does.
+Use it after changing a patch or web/manifest.json, instead of a separate harness run.
+The pass is recorded for the rewritten file, so the next run doesn't repeat it.
 
 Writes a log per job and a summary (summary.txt) to --out (default build/testrun).
 Exit status 0 when everything passed.
@@ -64,7 +69,7 @@ STOCK_ARG = {"masterfx", "swing", "condtrig", "synths", "legato", "slicethru"}  
 QUICK_MODE = {"masterfx", "synths"}        # tests with a --quick mode
 DEFAULT_SECONDS = 60.0                     # estimate for a test not timed yet, unless below
 MEASURED_SECONDS = {                       # alone, on an 8-core PC (the cache keeps its own, measured under load)
-    "layout": 45, "web harness": 1050, "colorsong": 1, "copypattern": 3, "humanize": 6, "visualizer": 8,
+    "layout": 45, "web harness": 800, "colorsong": 1, "copypattern": 3, "humanize": 6, "visualizer": 8,
     "swing": 16, "interpolate": 25, "condtrig": 36, "legato": 130, "slicethru": 12, "masterfx (quick)": 15,
     "masterfx (full)": 385, "synths (quick)": 127, "synths (full)": 1400,
 }
@@ -282,6 +287,9 @@ def main() -> int:
     tier = opt("--tier", "quick")
     if tier not in ("quick", "release", "deep"):
         sys.exit("--tier is quick, release or deep")
+    update = "--update" in opts
+    if update and tier == "quick":
+        sys.exit("--update needs --tier release or deep (the quick tier doesn't run the web harness)")
     workers = int(opt("--jobs", max(1, (os.cpu_count() or 2) - 1)))
     out = Path(opt("--out", ROOT / "build" / "testrun")).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -292,18 +300,21 @@ def main() -> int:
     names = [n for n, _ in patches]
 
     # 1. tools that check placement and bytes (no emulator)
+    # web/expected.json only matters to the harness, which checks it (and --update rewrites it)
+    expected = ROOT / "web" / "expected.json"
     tool_digest = digest_files([TOOLS / "patch_ptf.py", TOOLS / "test_layout.py", TOOLS / "test_web_patcher.py",
-                                *(ROOT / "web").glob("*"), *(ROOT / "patch").rglob("prebuilt/*"),
+                                *(f for f in (ROOT / "web").glob("*") if f != expected),
+                                *(ROOT / "patch").rglob("prebuilt/*"),
                                 *(ROOT / "patch").rglob("patch.json"), *(ROOT / "patch").rglob("build/*.*")])
     pre = [("test_layout", "layout", r.key("layout", tool_digest),
             [PY, "-I", str(TOOLS / "test_layout.py"), str(stock), str(out / "layout")], out / "logs" / "layout.txt")]
     harness = out / "harness"
     if tier != "quick":
-        hkey = r.key("harness", tool_digest)
+        hkey = r.key("harness", tool_digest, sha256_file(expected))
         if not (harness / "py").is_dir():           # the cover set needs its outputs even when cached
             r.cache["passed"].pop(hkey, None)
         pre.append(("test_web_patcher", "web harness", hkey,
-                    [PY, "-I", str(TOOLS / "test_web_patcher.py"), str(stock), str(harness)],
+                    [PY, "-I", str(TOOLS / "test_web_patcher.py"), str(stock), str(harness)] + (["--update"] if update else []),
                     out / "logs" / "harness.txt"))
     def emu_jobs(targets: list[tuple[Path, bool]]) -> list[tuple]:
         """Every contained patch's emulator test on each (file, masterfx/synths in full mode)."""
@@ -327,6 +338,11 @@ def main() -> int:
     print(f"tier {tier}: layout{' and web patcher' if tier != 'quick' else ''} checks, and the emulator tests "
           f"on each patch alone and patch/all", flush=True)
     failed = r.run_all(jobs)
+    if update and hkey in r.cache["passed"]:
+        # a pass with --update leaves expected.json holding what the harness checked: the
+        # pass holds for the rewritten file too
+        r.cache["passed"][r.key("harness", tool_digest, sha256_file(expected))] = r.cache["passed"][hkey]
+        r.save()
 
     # 3. release and deep: the cover set of web mixes and the bundles in other orders,
     # from the harness's outputs (byte-identical to the web patcher's, which it checks)

@@ -299,10 +299,12 @@ python tools/test_layout.py path/to/TrackerPlus_1.2.0.ptf build/layout
 the page offers and on `test_layout.py`'s other bundle orders, checks each output is
 byte-identical to `patch_ptf.py`'s, and runs `test_layout.py`'s checks on them. After
 changing a patch, or the mods in `web/manifest.json`, run it with `--update` to refresh
-`web/expected.json`; the Pages workflow refuses to publish until then:
+`web/expected.json`; the Pages workflow refuses to publish until then. The release tier
+does that in the same run when given `--update`, so the harness doesn't run twice:
 
 ```bash
-python tools/test_web_patcher.py path/to/TrackerPlus_1.2.0.ptf build/webtest --update
+python tools/run_tests.py path/to/TrackerPlus_1.2.0.ptf --tier release --update
+python tools/test_web_patcher.py path/to/TrackerPlus_1.2.0.ptf build/webtest --update   # the harness alone
 ```
 
 Each published site is a build named by a digest of its files (`web/stage.py`). The page

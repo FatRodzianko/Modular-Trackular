@@ -25,22 +25,31 @@ Needs Node (runs web/patcher.js through tools/web_patcher_node.mjs). It:
     in docs/PATCHING.md and web/manifest.json;
   - checks web/expected.json (the hashes the page accepts) holds exactly the
     selections' hashes; --update rewrites it.
-Outputs: <out dir>/js and <out dir>/py, with the .map.json files the emulator tests
-need.
+Outputs: <out dir>/py, the .ptf and .map.json files the emulator tests need, and
+<out dir>/js, the web patcher's .map.json files (its .ptf files only where they differ).
+
+Both patchers run in parallel: the web patcher in one Node process per core, patch_ptf.py
+in a pool of worker processes that parse the stock firmware once (patch_ptf.py's own
+code, called in the worker instead of in a new interpreter per selection).
 """
 from __future__ import annotations
 
 import contextlib
+import dataclasses
+import functools
 import io
 import itertools
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
+import traceback
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
@@ -51,6 +60,7 @@ import test_layout  # noqa: E402
 from ptf import read_ptf  # noqa: E402
 
 failures: list[str] = []
+PROCS = os.cpu_count() or 8
 
 
 def check(ok: bool, what: str) -> None:
@@ -59,20 +69,92 @@ def check(ok: bool, what: str) -> None:
         failures.append(what)
 
 
-def run_js(site: Path, stock: Path, jobs: list[dict], out: Path) -> tuple[dict, dict[str, dict]]:
-    jobs_path = out.parent / f"jobs-{out.name}.json"
-    jobs_path.write_text(json.dumps(jobs, indent=1))
-    r = subprocess.run(["node", str(ROOT / "tools" / "web_patcher_node.mjs"), str(site), str(stock), str(jobs_path), str(out)],
-                       capture_output=True, text=True)
-    if r.returncode:
-        sys.exit("node failed:\n" + r.stdout + r.stderr)
-    lines = [json.loads(line) for line in r.stdout.splitlines() if line.strip()]
-    return lines[0]["constants"], {d["name"]: d for d in lines[1:]}
+def run_js(site: Path, stock: Path, jobs: list[dict], out: Path, procs: int = 1) -> tuple[dict, dict[str, dict]]:
+    """The jobs in `procs` Node processes at once, each taking every procs-th job. Each
+    job writes only its own files (its outputs, and its own mix's spec)."""
+    chunks = [jobs[i::procs] for i in range(min(procs, len(jobs)))] or [[]]
+
+    def node(i: int) -> subprocess.CompletedProcess:
+        jobs_path = out.parent / f"jobs-{out.name}-{i}.json"
+        jobs_path.write_text(json.dumps(chunks[i], indent=1))
+        return subprocess.run(["node", str(ROOT / "tools" / "web_patcher_node.mjs"), str(site), str(stock),
+                               str(jobs_path), str(out)], capture_output=True, text=True)
+
+    with ThreadPoolExecutor(len(chunks)) as pool:
+        runs = list(pool.map(node, range(len(chunks))))
+    results = {}
+    for r in runs:
+        if r.returncode:
+            sys.exit("node failed:\n" + r.stdout + r.stderr)
+        lines = [json.loads(line) for line in r.stdout.splitlines() if line.strip()]
+        consts = lines[0]["constants"]
+        results.update((d["name"], d) for d in lines[1:])
+    return consts, {j["name"]: results[j["name"]] for j in jobs}
 
 
-def run_py(site: Path, stock: Path, spec: str, out: Path) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, "-I", str(ROOT / "tools" / "patch_ptf.py"), str(stock), str(site / spec), str(out)],
-                          capture_output=True, text=True)
+# ---- the Python side, in worker processes ----------------------------------------------
+
+_stock_img = b""
+
+
+def _init_worker(stock: str) -> None:
+    """Parse the stock firmware once per worker, and load each patch's files once for the
+    layout checks. patch_ptf.py gets a fresh copy of the parsed stock on every call (it
+    replaces the copy's image and record list, as it would a newly read file's)."""
+    global _stock_img
+    stock_path = Path(stock)
+    parsed = read_ptf(stock_path)
+    _stock_img = bytes(parsed.image)
+
+    def read_cached(path: Path):
+        if Path(path) == stock_path:
+            return dataclasses.replace(parsed, records=list(parsed.records), image=bytearray(parsed.image))
+        return read_ptf(path)
+
+    patch_ptf.read_ptf = read_cached
+    test_layout.patch_files = functools.lru_cache(None)(test_layout.patch_files)
+
+
+def _py_job(site: Path, name: str, spec: str | None, stock: Path, outdir: Path, compare: bool,
+            verify: tuple | None) -> SimpleNamespace | None:
+    """patch_ptf.py on one spec; then, if asked, the comparison with the web patcher's
+    output (whose .ptf is deleted when it's identical) and test_layout.py's checks."""
+    if not spec:
+        return None
+    out = outdir / "py" / f"{name}.ptf"
+    so, se = io.StringIO(), io.StringIO()
+    argv, sys.argv = sys.argv, ["patch_ptf.py", str(stock), str(site / spec), str(out)]
+    try:
+        with contextlib.redirect_stdout(so), contextlib.redirect_stderr(se):
+            rc = patch_ptf.main()
+    except SystemExit as e:                       # as the interpreter reports sys.exit()
+        rc = e.code if isinstance(e.code, int) else 0 if e.code is None else 1
+        if not isinstance(e.code, (int, type(None))):
+            se.write(f"{e.code}\n")
+    except Exception:
+        rc = 1
+        se.write(traceback.format_exc())
+    finally:
+        sys.argv = argv
+    r = SimpleNamespace(returncode=rc, stdout=so.getvalue(), stderr=se.getvalue(), same=None, same_map=None,
+                        layout_checked=False, layout_failed=0, layout_log="")
+    if rc:
+        return r
+    if compare:
+        a = outdir / "js" / f"{name}.ptf"
+        r.same = a.read_bytes() == out.read_bytes()
+        r.same_map = a.with_suffix(".map.json").read_text() == out.with_suffix(".map.json").read_text()
+        if r.same:
+            a.unlink()
+    if verify:
+        key, specs, version = verify
+        n0 = len(test_layout.failures)
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            test_layout.verify(key, out, specs, version, _stock_img)
+        r.layout_checked = True
+        r.layout_failed = len(test_layout.failures) - n0
+        r.layout_log = buf.getvalue() if r.layout_failed else ""
+    return r
 
 
 def tested_hashes() -> dict[str, tuple[str, bool]]:
@@ -173,7 +255,7 @@ def main() -> int:
 
     selections = [list(c) for n in range(1, len(ids) + 1) for c in itertools.combinations(ids, n)]
     sel_jobs = [{"name": "sel-" + "+".join(c), "ids": c} for c in selections]
-    _, js_sel = run_js(site, stock, sel_jobs, outdir / "js")
+    _, js_sel = run_js(site, stock, sel_jobs, outdir / "js", PROCS)
     extra_jobs = [{"name": n, "spec": s} for n, s in other_orders.items()]
     extra_jobs += [{"name": n, "spec": s} for n, (s, st, _) in refusals.items() if st == stock]
     extra_jobs += [{"name": "unported", "spec": "patch/swing-future/patch.json"}]
@@ -183,24 +265,30 @@ def main() -> int:
                              outdir / "js")
         js_extra.update(js_other)
 
+    def layout_args(sel: dict) -> tuple | None:
+        js = js_sel[sel["name"]]
+        if not js["ok"]:
+            return None
+        specs = [site / p["spec"] for p in manifest["patches"] if p["id"] in sel["ids"]]
+        version = None if js["kind"] == "single" else json.loads((site / js["spec"]).read_text())["version"]
+        return (js["key"], specs, version)
+
     (outdir / "py").mkdir()
-    py_jobs = [(site, sel["name"], js_sel[sel["name"]].get("spec"), stock) for sel in sel_jobs]
-    py_jobs += [(extra, n, s, stock) for n, s in other_orders.items()]
-    py_jobs += [(extra, n, s, st) for n, (s, st, _) in refusals.items()]
-    with ThreadPoolExecutor(8) as pool:
-        py = dict(zip([j[1] for j in py_jobs],
-                      pool.map(lambda j: run_py(j[0], j[3], j[2], outdir / "py" / f"{j[1]}.ptf") if j[2] else None, py_jobs)))
+    py_jobs = [(site, sel["name"], js_sel[sel["name"]].get("spec"), stock, outdir, js_sel[sel["name"]]["ok"],
+                layout_args(sel)) for sel in sel_jobs]
+    py_jobs += [(extra, n, s, stock, outdir, js_extra[n]["ok"], None) for n, s in other_orders.items()]
+    py_jobs += [(extra, n, s, st, outdir, False, None) for n, (s, st, _) in refusals.items()]
+    with ProcessPoolExecutor(PROCS, initializer=_init_worker, initargs=(str(stock),)) as pool:
+        py = dict(zip([j[1] for j in py_jobs], pool.map(_py_job, *zip(*py_jobs), chunksize=4)))
 
     def same(name: str, label: str) -> bool:
         js, pr = js_extra.get(name) or js_sel[name], py[name]
         if not js["ok"] or pr is None or pr.returncode:
             check(False, f"{label}: both patched (js: {js.get('error')}; py: {pr and (pr.stdout + pr.stderr)[-300:]})")
             return False
-        a, b = outdir / "js" / f"{name}.ptf", outdir / "py" / f"{name}.ptf"
-        ok = a.read_bytes() == b.read_bytes()
-        ok_map = (outdir / "js" / f"{name}.map.json").read_text() == (outdir / "py" / f"{name}.map.json").read_text()
-        check(ok and ok_map, f"{label}: .ptf byte-identical to patch_ptf.py's, .map.json equal ({js['sha256'][:12]}…)")
-        return ok
+        check(pr.same and pr.same_map, f"{label}: .ptf byte-identical to patch_ptf.py's, .map.json equal "
+              f"({js['sha256'][:12]}…)")
+        return pr.same
 
     print(f"every selection the page offers ({len(selections)})")
     expected = {}
@@ -222,20 +310,14 @@ def main() -> int:
           "a spec using a key the port doesn't know (future_hooks) is refused")
 
     print("test_layout.py checks on every selection")
-    stock_img = bytes(read_ptf(stock).image)
-    bad_before = len(test_layout.failures)
+    bad = 0
     for sel in sel_jobs:
-        js = js_sel[sel["name"]]
-        if not js["ok"]:
-            continue
-        specs = [site / p["spec"] for p in manifest["patches"] if p["id"] in sel["ids"]]
-        version = None if js["kind"] == "single" else json.loads((site / js["spec"]).read_text())["version"]
-        with contextlib.redirect_stdout(io.StringIO()) as buf:
-            n0 = len(test_layout.failures)
-            test_layout.verify(js["key"], outdir / "py" / f"{sel['name']}.ptf", specs, version, stock_img)
-        if len(test_layout.failures) > n0:
-            print(buf.getvalue())
-    check(len(test_layout.failures) == bad_before,
+        pr = py[sel["name"]]
+        if pr is not None and pr.layout_failed:
+            print(pr.layout_log)
+            bad += 1
+    checked = sum(1 for sel in sel_jobs if py[sel["name"]] is not None and py[sel["name"]].layout_checked)
+    check(bad == 0 and checked == len(sel_jobs),
           f"placement, RAM, relocation, chain words, hooked sites and version text for all {len(sel_jobs)}")
 
     print("hardware-tested builds")

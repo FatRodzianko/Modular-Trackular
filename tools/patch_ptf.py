@@ -213,7 +213,8 @@ def load_patch(spec: dict, pdir: Path, in_bundle: bool) -> dict:
     files = {k: spec.get(k) for k in ("bin", "sym", "rel")}
     if not (pdir / spec["bin"]).exists() and "prebuilt_bin" in spec:
         files = {k: spec.get("prebuilt_" + k) for k in ("bin", "sym", "rel")}
-        print(f"no local build, using the prebuilt patch: {(pdir / files['bin']).relative_to(pdir.parent.parent)}")
+        shown, root = pdir / files["bin"], pdir.parent.parent
+        print(f"no local build, using the prebuilt patch: {shown.relative_to(root) if shown.is_relative_to(root) else shown}")
     blob = (pdir / files["bin"]).read_bytes()
     syms = load_symbols(pdir / files["sym"])
     pinned = int(spec["base"], 16) if "base" in spec else None
