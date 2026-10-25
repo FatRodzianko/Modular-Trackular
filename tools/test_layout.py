@@ -26,6 +26,8 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
   - slicethru alone, and first with patch/all's other patches after it in reverse order
     (it chains the Pattern screen's update slot with most of them; patch/all has it
     last),
+  - resample alone, and after and before patch/all's patches (its RAM moves to another
+    region with all of them; an ITCM-image word, as swing's),
 and checks that a bundle with ramdiag (standalone) is refused, and so is one where a
 shared site isn't chained by both patches, one where two patches pass different
 registers at one ITCM site, and a "late_ram" word that holds no size.
@@ -324,6 +326,15 @@ def main() -> int:
                       version="BTR")
     all_bt_rev_spec = outdir / "all-slicethru-reversed.json"
     all_bt_rev_spec.write_text(json.dumps(all_bt_rev, indent=2))
+    rs = ROOT / "patch" / "resample" / "patch.json"
+    all_rs_list = all_bt_list + [rs]
+    all_rs = dict(rev, name="all-resample", include=[str(x) for x in all_rs_list], version="RSA")
+    all_rs_spec = outdir / "all-resample.json"
+    all_rs_spec.write_text(json.dumps(all_rs, indent=2))
+    all_rs_rev = dict(rev, name="all-resample-reversed", include=[str(x) for x in all_rs_list[::-1]],
+                      version="RSR")
+    all_rs_rev_spec = outdir / "all-resample-reversed.json"
+    all_rs_rev_spec.write_text(json.dumps(all_rs_rev, indent=2))
     stock_img = bytes(read_ptf(stock).image)
 
     for label, spec, specs, version, sha in (
@@ -372,7 +383,10 @@ def main() -> int:
             ("legato alone", lg, [lg], None, None),
             ("patch/all reversed (legato first)", all_lg_rev_spec, all_lg_list[::-1], "LGR", None),
             ("slicethru alone", bt, [bt], None, None),
-            ("slicethru, then patch/all's patches reversed", all_bt_rev_spec, all_bt_list[::-1], "BTR", None)):
+            ("slicethru, then patch/all's patches reversed", all_bt_rev_spec, all_bt_list[::-1], "BTR", None),
+            ("resample alone", rs, [rs], None, None),
+            ("patch/all's patches, then resample", all_rs_spec, all_rs_list, "RSA", None),
+            ("resample, then patch/all's patches reversed", all_rs_rev_spec, all_rs_list[::-1], "RSR", None)):
         out = outdir / f"{spec.stem if spec.parent == outdir else spec.parent.name}.ptf"
         if not build(stock, spec, out):
             check(False, f"{label}: patch_ptf failed")

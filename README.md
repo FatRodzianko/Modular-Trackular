@@ -75,6 +75,13 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   [patch/slicethru/README.md](patch/slicethru/README.md).
 - **all**: all eleven mods above in one firmware (version text `1.2.0-MS8`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
+- **resample**: live resampling in the Sample Recorder. Press Play during a recording,
+  or start it with Shift+Rec (after the count-in, if Pre Roll is on), and the pattern
+  plays with its sample and synth instruments, delay and reverb while you record your
+  input. Recordings go into the free part of the sample memory, so the loaded samples
+  stay intact; the longest recording is that free part. Otherwise the recorder is
+  stock. Tested on hardware (on its own); not yet in `patch/all` or the
+  web patcher. See [patch/resample/README.md](patch/resample/README.md).
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
   future patches. See [patch/ramdiag/README.md](patch/ramdiag/README.md).
@@ -136,6 +143,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/copypattern/` | Copy to New: copies the current pattern into the next empty one |
 | `patch/slicethru/` | Beat Slice Thru: a play mode whose notes play from their slice to the sample end |
 | `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru in one firmware |
+| `patch/resample/` | Live resampling: the pattern plays during a Sample Recorder recording (Play, or Shift+Rec); recordings after the loaded samples |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/versiontest/` | Version-text test patch |
 | `patch/itcmtest/` | No-op test of ITCM hooks (stubs in the ITCM tail, loaded by the startup copy table) |
@@ -170,6 +178,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/test_synths.py` | synths: stock output unchanged, the swap, the WAVE model and its pages, Model list and Edit Patch drawing, settings and patch files, oscillators, filters, envelopes, LFOs and Mod Matrix, banks, voices, stress, and WAV renders |
 | `tools/emu/test_phase.py` | synths' PHASE: WAVE unchanged, the PHASE model, tiles, swaps with both engines, settings and patch files; the shapes against their formulas, aliasing, pairs, ring and noise mod, envelopes, pitch, Mod Matrix, level, voices, cost, stress, and WAV renders |
 | `tools/emu/test_slicethru.py` | slicethru: every play mode's note-on as stock without the flag, the slice-to-end span, render cost, `S`, reverse, stereo and re-entry with it; the Play Mode list and every input on the real Sample Playback screen; the settings file |
+| `tools/emu/test_resample.py` | resample: the record buffer's placement and the loaded samples kept; Play during a recording against stock and normal playback, the input and Monitor, the stop; Shift+Rec and Play in the count-in through the real Rec handler; stock where not asked for; cost |
 | `tools/emu/test_legato.py` | legato: random patterns against stock (identical without `G`, only reordered with it), the legato order and every case that keeps the stock order, other FX, stuck notes, cost; synth slots: the order, envelopes on every model and WAVE, PERC unchanged |
 | `tools/emu/test_itcmtest.py` | itcmtest: the ITCM stubs after the boot copy, Chance FX and count-in playing exactly as stock through the hooks |
 | `tools/emu/test_interpolate.py` | interpolate ramp, MIDI-rate, cost, Config menu and settings-file tests, through the real audio block |

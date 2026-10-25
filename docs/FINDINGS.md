@@ -2592,3 +2592,218 @@ Found while planning Beat Slice (Play Through), `docs/BEAT_SLICE_THROUGH_PLAN.md
 - **The callbacks' pointers** are in the literal pool of `0x600f5018` (`0x600f512c`,
   21 entries): `0x600f5140` −1, `0x600f5144` +1, `0x600f5164` buttons, `0x600f5178`
   encoder. Those are their only references.
+
+## 28. The Sample Recorder: why the engine is silent, the record path (emulator and static)
+
+The plan built on these facts is [LIVE_RESAMPLING_PLAN.md](LIVE_RESAMPLING_PLAN.md).
+`E` = the audio engine object `0x20017b08`, `seq` = `0x20017274`.
+
+- **The screen object** is `0x20026100` (pointer at `0x200006b0`), vtable `0x60042c4c`:
+  update `0x600fafe8` (word `0x60042c54`), start `0x600fa228`, leave `0x600f8b74`.
+  Fields: `+0x76` mode (0 record setup, 1 crop/edit, 2 name/save), `+0x78` source
+  (0 Line In, 1 Radio, 2 Mic LG, 3 Mic HG, 4 USB (q)), `+0x7e` Monitor (0 = on),
+  `+0xb4d` recording or counting in, `+0xbf8`/`+0xbf9` count-in done/pending, `+0xbba`
+  the "stop the pattern?" pop-up, `+0xbec` codec object, `+0xbf0` radio object.
+- **Not a mute.** The output chain and codec keep running during a recording. Entering
+  the recorder:
+  - `0x600b39cc(E)` sets 48 per-instrument "blocked" bytes at `0x2001e3a8`..`d7`;
+    `voice_note_on_q` (ITCM `0x5c04`) plays only an instrument that is loaded
+    (`ins+0` == 1) and not blocked. `0x600b39e4(E)` clears them.
+  - `0x600ad600(seq, v)` sets `seq+0x7dd`. `seq_trigger_note` drops synth note-ons
+    (instruments 64..66) while it is 1 (`ldrb` at ITCM `0x14b0`). MIDI instruments
+    (48..63) take another branch with no such test, so MIDI still plays.
+  - Also: `seq+0x34` = 4 (`0x600ad418`); the count-in callback `seq+0x6fc` =
+    `0x600f8605`; delay bypass on (`0x600b2dd8`, `(E+0x2620)+0x2d` = 1); delay/reverb
+    sends to 0 (`0x600b4058`, `0x600b40c0`); 11 project mix bytes saved to `E+0x29..`
+    and set to `0x56` (`0x600b3a88`: the mix levels, below); line-in passthrough muted
+    (`0x600b3440`: bus input-3 gain `+0x24` and the line-in send gains `+0x38`/`+0x3c`,
+    saved; `0x600b3484` restores); limiter side-chain and selectors to 0
+    (`0x600b36dc(E, 0)`); Monitor level (`0x600b30ec(E, level)`: the bus input-3 gain
+    from the table at `0x6003a690`, level `0x56` for Monitor on), so **monitoring goes
+    through the master bus**. The codec volume is muted for 500 ms (`0x600fa1ec`).
+  - Leaving (`0x600f8b74`) undoes all of it and clears `seq+0x34` and `seq+0x7dd`.
+  - Emulator: synth peak at the master 21406 normally, 0 after the stock entry, 17866
+    with only the two gate calls undone (delay/reverb still bypassed). Sample voice 7998
+    / 0 / 7998. MIDI note-ons sent in all three.
+- **Why: the recording overwrites the samples.** `0x600f9074` (start recording) calls
+  `0x6010cb90(rec 0x20027f28, buf, size, ch, ch, flag)` at `0x600f90d2` with buf
+  `0x8026a000` (literal `0x600f9120`) and size `0x3c00000` (`mov.w` at `0x600f909e`).
+  That is the sample bank: base `0x8026a000` (`*0x200006ac`), size at `0x20204f44`,
+  bytes used at `0x20204f48`, instrument sample address `ins+0x28`. The loaders add
+  each sample's frames × 2 to the bytes used (`0x600c0c62`, `0x600c183c`) and check
+  room as size − used (`0x600c17e0`). Clearing the project sets size `0x3c00000` and
+  used 0 (`0x600c2a66`..`7a`). So the bank's free space starts at base + used. `0x6010cb90` keeps
+  `size / (2·ch)` frames per channel at `0x20027f24`. Every other reader gets the
+  channel pointers from `0x6010ca68(rec, ch)` (length `0x6010ca8c`); among the
+  recorder's functions only `0x600f9074` loads the base address. That includes the
+  recorder screen's own code and the save of a recording (`0x601150e0`: length, both
+  channel pointers, then `0x600c1b50`). For a mono recording `0x6010ca68` returns
+  channel 0 for both indexes. Channel k starts at buf + 2·k·frames. How stock gets the
+  overwritten samples back isn't traced (candidate: the job `0x600bc894` → `0x60115298`).
+- **The record path.** After `0x6010cb90`, `0x6010c890(rec)` (BL at `0x600f90d8`)
+  starts the record queues and sets `rec+0x2c` (recording). The copy loop `0x6010c5a8`
+  moves blocks into SDRAM **in the audio interrupt**: `engine_block_update` (ITCM
+  `0x41c8`) calls it first, through the thunk `0x1f548` → `0x6010c938` (copies only
+  while `rec+0x2c`). Stop is `0x6010c944`: it clears both queues' `+0x46`, copies what
+  they still hold, clears `rec+0x2c` and sets the line-in channel mode back
+  (`0x6003662c`, settings `+0xd4`). Its callers are `0x600faf74` (the recorder) and
+  `0x60110760`. Nothing is written to the SD card while recording. Queue sources: sources 0..3 the input queues
+  `E+0x108`/`E+0x150` (accessor `0x60111884`, BLs at `0x6010c916`/`0x6010c926`), USB
+  `E+0x1e8`/`E+0x230` (`0x60111890`). No source records the internal output; the master
+  queues `E+0x1e58`/`E+0x2248` (render/export) carry it (emulator).
+- **The record queue class** (`0x600364a1`): a 10-slot ring at `+0x18` (9 usable),
+  `+0x44` head, `+0x45` tail, `+0x46` active, drops a block when full. Begin
+  `0x60036504`, available `0x600364ec`, read `0x60036548`, free `0x6003657c`.
+- **Rec** (button `0x1c`): handler `0x600d0620`, bound by `0x600f8e3c` from the pool
+  word `0x600f9000`. In mode 0 (or mode 1 while recording) it calls `0x600fb3cc`. In
+  mode 0 with Pre Roll on (`0x600ad400`: settings `+0xe7` == 1) and the source not Radio:
+  `+0xbf8` = 0x100, `+0xb4d` = 1, count-in `0x600ac2c0`. Otherwise `0x600f9074` at once.
+  No Shift test.
+- **The count-in** runs in `seq_tick` while `+0xb4d` is set. At its end it calls
+  `seq+0x6fc` (`0x600f8605`, sets `+0xbf8`) and doesn't start the pattern (the Pattern
+  screen's count-in, `seq+0x6f8`, is the one that calls `seq_play_from`). The update
+  sees `+0xbf9 && +0xbf8` and calls `0x600f9074` (BL at `0x600fb1fa`).
+- **Play** (button `0x17`): handler `0x600d07b4`, bound by the recorder's start from
+  the pool word `0x600fa4ac`: playing → `seq_stop`; else with `0x1d` (Shift, q) held →
+  continue `0x600acd38`; else `0x600ac5f8(seq)` (song mode off, `seq_play_from`).
+  Both are bound with `btn_bind(.., flag 1, ..)`. The dispatch (`0x600cf7c0`) calls a
+  kind-1 handler only when the button's state equals that flag, so 1 = press only.
+  `0x1d` is Shift: the Play handler's held-`0x1d` branch is the manual's Shift+Play.
+- **While recording, `engine_block_update` stops after the copy.** After the copy it
+  asks the recorder "recording?" (`bl` at ITCM `0x41d8` → thunk `0x1f540` →
+  `0x6010c888`, which returns `rec+0x2c`) and returns at once if so. That skips:
+  - the tempo average;
+  - `voice_block_update_q` for the 8 players: envelopes, LFO FX, automation, and the
+    re-applying of the sends (below);
+  - `synth_fx_apply_pending_q` (`0x416c`).
+
+  The thunk's literal is ITCM `0x1f544`, loaded at boot from flash `0x601acc28`
+  (value `0x6010c889`). `0x41d8` is the thunk's only caller.
+- **What the recorder's entry changes in the sound, and how to undo each:**
+  - **Mix levels.** `0x600b3a88` sets eleven project levels to `0x56` and saves them
+    to `E+0x29..0x33`: the 8 sample-track volumes `0x20204a84..8b`, the reverb level
+    `0x20204a8c` (scales the reverb sends, ITCM `0x3fa8`), the delay level `0x20204a8d`
+    (scales the delay sends, ITCM `0x4984`) and `0x20204a91` (multiplies every track
+    volume at ITCM `0x45c0`; probably Dry Mix). These are levels on the gain table
+    `0x6003a690`: index 86 is 1.0 (0 dB), 100 is +6 dB. So the recorder plays
+    everything at 0 dB, for its preview. The Mixer screen's pointer table to the same
+    eleven bytes is `0x6003fcb0` (used by `0x600db550`). `0x600b3ae4` puts them back.
+  - **The delay and reverb.**
+    - `0x600b4058` resets the delay: `0x60032114` clears its buffers and sets bypass
+      `+0x2d` = 1. It also zeroes each player's delay send (ITCM `0x4984`, veneer
+      `0x600b40b8`) and each synth's (ITCM `0x3e68`, veneer `0x600b40b0`, value 0.0).
+    - `0x600b40c0` does the same for the reverb: `0x60031ebc` clears its buffers and
+      `+0x80`, then the player sends (ITCM `0x4bc4`) and synth sends (ITCM `0x3fa8`).
+    - `0x600b2dd8`/`0x600b2de4` set and clear the delay bypass.
+    - The sends come back only when marked:
+      - **players:** `player+0x798` bit 8 (delay) and bit 20 (reverb).
+        `voice_block_update_q` (`0x669a`, thunk `0x1f950`) calls `0x600bb6e8` and
+        `0x600bb770`. They recompute the send from `ins+0x106` / `ins+0x170`, or the
+        step's FX, or 0 for a muted track.
+      - **synths:** the pending mask `E+0x1a48 + 4·synth`, bits 0 panning, 1 delay,
+        2 reverb, 3 (`0x3db4`), 4..9 Macros a–f (the switch in `0x40e8`). The value
+        comes from `0x600b3904(E, synth, type)`: the 32-byte entries at
+        `E+0x1688 + 32·(10·synth + type)`, whose layers are added and clamped by the
+        table `0x6003aa8c`.
+  - **The limiter.** `0x600b36dc(E, 0)` sets the limiter stage's side-chain mode
+    (`0x60031b4c`) and both selectors (`0x600327c8`) to 0. `0x600b4128(E)` sets them
+    again from the project (`0x20204aae` mode, `0x20204aaf` source).
+  - **The leave** (`+0xbba` clear): stop the pattern if it plays, then call
+    `0x600b4058`, `0x600b40c0`, `0x600b2de4`, `0x600b3ae4`, `0x600b3484` and
+    `0x600b39e4`; then, in either case, `0x600b4128`, `0x600b3c90`, project
+    `0x202046c5` = `scr+0xbe8`, `seq+0x34` = 0, `seq+0x7dd` = 0, and `0x600ce1bc`.
+- **Emulator, an engine-on recording.**
+  - **Setup:**
+    - the whole graph from `synth_rig`, with `engine_block_update` run before each
+      graph update;
+    - a real recording started with `0x6010cb90`/`0x6010c890`;
+    - a stems sink object faked at `0x20026ec8`, as after boot.
+  - **Undo steps:** after the stock entry, the gate calls, `0x600b2de4`, `0x600b3ae4`,
+    `0x600b4128`, the send marks above, and `0x1f540` answering 0.
+  - **Output:** 120 blocks of two sample tracks and two synths (sends on) are
+    bit-identical to normal playback of the same notes with the recorder closed (input
+    silent, Monitor off). The recording holds the input. (The rig's sample instruments
+    had bit depth 0, so the sample tracks were silent at the master here: this covered
+    the synths only. See "Live resampling, built" below for the full check.)
+    - Without the `0x1f540` change the reverb is missing (the synth sends are never
+      re-applied).
+    - Without `0x600b3ae4` the levels differ (by up to 701).
+  - **Not exercised:** the delay's return was silent in the rig in both cases, so only
+    its bypass flag and the send setter calls are checked.
+  - **Cost and pool** (8 sample tracks and 3 synths, 24 blocks):
+
+    | Case | Instructions per block | Pool peak |
+    |---|---|---|
+    | normal playback | 539,000 | 74 |
+    | stock recording (silent) | 451,000 | 76 |
+    | engine-on recording | 532,000–536,000 | 76 |
+
+    The same 30 allocation failures appeared in every case. Even with the stems sink
+    the emulator's pool isn't the device's, so only the comparison counts.
+- **Graph notes** (Teensy-style objects, FINDINGS section 19): bus mixers
+  `E+0x1248`/`E+0x1290` (inputs: 0 track mix, 1 delay return, 2 reverb return, 3 line
+  in from `E+0x2c8`); limiter stage `E+0x241c`/`E+0x2478` (input 1 = selector
+  `E+0x2290`); master `E+0x2508`/`E+0x2574` (7 inputs: 0 limiter, 5 preview player
+  `E+0xdb4`, 6 metronome `E+0xed0`); output sink `E+0x24d4` (class `0x600306cc`)
+  copies into the DMA buffers at `+0x24`/`+0x28`. Codec input object `E+0x98`, USB in
+  `E+0xb0` (q), class `0x60030649`. The stems mixer `E+0x2328` returns without receiving
+  while `*(0x20026ec8)` == 0, so in the emulator (no project mix) it holds 28 blocks:
+  the emulator's block-pool numbers aren't representative.
+
+### Live resampling, built (`patch/resample` rs2 and rs3, emulator and static)
+
+- **Recorder object fields:** `rec+0x00` buffer, `+0x04` size, `+0x08` channels, `+0x0c`
+  ch2, `+0x10` flag (`0x6010cb90` copies its arguments there); `+0x14`/`+0x18` the channel
+  vector (8-byte entries, pointer at `+4`; `0x6010ca68` reads entry 1's pointer only when
+  the vector holds 2 entries). `0x6010c888(rec)` is `ldrb r0, [r0, #0x2c]`.
+- **The Play handler** `0x600d07b4` takes no arguments. "Playing" is `seq+0x2d` == 0 and
+  (`seq+0x1d` or `seq+0x2a`): then stop `0x600acd90(seq)`. Not playing: Shift
+  (`0x600cf90c(*0x200209e8, 0x1d)`) → continue `0x600acd38`, else play `0x600ac5f8`. In
+  the recorder before Play, `seq+0x2d` = 1; after play, `+0x2d` = 0 and `+0x2a` = 1.
+- **The Rec handler** `0x600d0620` takes no arguments: mode 0 → `0x600fb3cc`; mode 1 only
+  while `+0xb4d`. In `0x600fb3cc`, past the pop-up checks (`+0x75`, `+0xbba`, `+0xbbc`,
+  `+0xbbd`, `+0xbbf`, `+0xbb8`/`9`), mode 0 tests Pre Roll (`0x600ad400`: settings
+  `0x2002061c+0xe7` == 1) and the source (not Radio): count-in (`+0xbf8` = 0x100,
+  `+0xb4d` = 1, `0x600ac2c0`), else `0x600f9074` at once. The mode stays 0 while
+  recording.
+- **`scr+0xb4d`** has three writers: set at `0x600fb528` (count-in) and `0x600f9080`
+  (record start), cleared at `0x600faf2e` in the update's stop path, which then calls
+  `0x600b4058`, `0x600b40c0` and the stop `0x6010c944`. So it is set from the count-in
+  to the stop.
+- **A second recording path:** a factory self-test around `0x601106f0`..`0x601107f4`
+  records `/line_in_test.wav` and `/mic_test.wav` with its own buffers (`*0x200006a8` +
+  `0x61a80`, size `0x3c0000`; BLs to `0x6010cb90` at `0x60110734`/`0x601107ea`, queue
+  start at `0x6011073a`/`0x601107f0`, stop at `0x60110760`). It doesn't go through
+  `0x600f9074`.
+- **New-instrument defaults:** `0x600c1b50(_, ins)` clears the 0x174 bytes and sets a
+  new instrument's defaults (`ins+0` = 1, mode `+0x3c` = 0, volume `+0x100` = 50, bit
+  depth `+0x172` = 16, ...). The save of a recording calls it (`0x601150e0`). Emulator
+  rigs should build sample instruments with it: with bit depth 0 a sample track is
+  silent at the master.
+- **The per-track bit crusher:** each player has one (vtable `0x60042eb0`, update
+  `0x6003080c`, which ANDs every sample with the mask at `+0x18`). `0x6003084c(obj,
+  bits)` sets the depth (clamped to 4..16, into `+0x14`) and the mask; the per-block
+  player update calls it.
+- **The sends come back one block late:** after `0x600b4058`/`0x600b40c0` zero the
+  sends, the marks (`player+0x798`, `E+0x1a48`) recompute them in the next engine block,
+  so a note in the first block after reopening plays with the old sends. Stock's leave
+  has the same order. Measured against normal playback: at most 27 of a 32268 peak
+  (-61 dB), for about 20 blocks.
+- **The bypassed delay keeps writing:** after `0x600b4058` clears its buffer and bypasses
+  it, the delay object (`0x6003235a`/`0x60032366`) still writes small values from its
+  state into its buffer (`0x800e2000`, 0x188000 bytes) every block. Stock does this too
+  when the recorder is entered right after playing (max 33 there); the leave clears the
+  buffer again.
+- **Gain ramps:** the bytes from `E+0xf00` (the sends' gains, as far as traced) move every
+  block in the audio objects' updates (`0x60036d44`, `0x60036e50`), so a state check
+  compares them after the same number of blocks, not right after a call.
+- **The line-in during an engine-on recording:** with Monitor off, an input of ±1000
+  changes no output sample (the entry's `0x600b3440` mute holds); with Monitor on it
+  reaches the master at 1.0, as in the stock recorder.
+- **Count-in timing in the rig:** with `seq+0x6fc` = `0x600f8605`, the count-in ends after
+  577 sequencer ticks at the rig's settings; the first note after `0x600ac5f8` comes 12
+  ticks (one micro-step) later.
+- **Rec during the count-in** (mode 0, `+0xb4d` set) goes through `0x600fb3cc` again. In
+  the rig a second press right after the first leaves the count-in running and stock
+  records at its end (577 ticks; whether a later press restarts the count is not
+  checked). On hardware too there is no way to cancel the count-in.

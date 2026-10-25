@@ -367,3 +367,61 @@
 601018e8	fonts_load_q	(display, {address, length} x n, n): run-length decode each font, keep the 0x94-byte metric blocks at 0x83fcd374 (0xac apart)
 6011ff44	font_rle_decode	(src, pairs, dst): pairs of value and count
 600aa860	app_get_q	returns the app object (its +0x14 -> +0x30 is the clock the text list's marquee reads)
+600fafe8	recorder_update	Sample Recorder screen update (vtable 0x60042c4c, word 0x60042c54); starts the recording after the count-in (BL 0x600fb1fa)
+600fa228	recorder_start	Sample Recorder screen start: stop-pattern prompt, block the engine, bind Play (pool word 0x600fa4ac)
+600f8b74	recorder_leave	Sample Recorder screen leave: restores the engine, clears seq+0x7dd
+600f8e3c	recorder_bind_buttons_q	binds the recorder's buttons; Rec handler from pool word 0x600f9000
+600d0620	recorder_rec_button	Rec (0x1c) handler: mode 0, or mode 1 while recording -> recorder_rec_press
+600fb3cc	recorder_rec_press	mode 0: count-in (Pre Roll, not Radio) or recorder_start_recording
+600d07b4	play_button_generic	Play (0x17) handler: stop / Shift continue / play pattern
+600f9074	recorder_start_recording	+0xb4d = 1; recorder_obj_start(0x20027f28, 0x8026a000, 0x3c00000, ch, ch, flag); recq start
+600f8605	recorder_countin_done	seq+0x6fc callback: sets recorder +0xbf8
+6010cb90	recorder_obj_start	(rec, buf, size, ch, ch, flag): channel buffers, frames per channel at 0x20027f24
+6010c890	recorder_obj_begin_queues	(rec): fetches and begins the record queues for the source
+6010c944	recorder_obj_stop	clears the record queues' active flag
+6010ca68	recorder_obj_channel_ptr	(rec, ch): channel buffer pointer
+6010ca8c	recorder_obj_length	recorded length (0x20027f20)
+6010c5a8	recorder_copy_loop_q	main loop: record queue blocks -> SDRAM buffer
+600b39cc	engine_block_samples	(E): 48 blocked bytes at 0x2001e3a8 = 1 (recorder)
+600b39e4	engine_unblock_samples	(E): clears the 48 blocked bytes
+600ad600	seq_set_synth_block	(seq, v): seq+0x7dd = v; 1 drops synth note-ons
+600ad418	seq_set_mode34_q	(seq, v): seq+0x34 = v (4 in the recorder)
+600ad400	settings_preroll_on	settings +0xe7 == 1
+600ac2c0	seq_countin_start_q	starts the metronome count-in
+600ac5f8	seq_play_pattern	(seq): song mode off, seq_play_from
+600acd38	seq_continue_q	(seq): Shift+Play continue
+600b30ec	engine_set_line_monitor	(E, level): bus input-3 gain from table 0x6003a690
+600b3440	engine_mute_line_passthrough	saves and zeroes line-in bus and send gains
+600b3484	engine_restore_line_passthrough	undoes engine_mute_line_passthrough
+600b2dd8	engine_delay_bypass_on	(E): (E+0x2620)+0x2d = 1
+600b2de4	engine_delay_bypass_off	(E)
+600b3a88	engine_save_mix_bytes_q	saves 11 project mix bytes to E+0x29.., sets them to 0x56
+600b3ae4	engine_restore_mix_bytes_q	undoes engine_save_mix_bytes_q
+600b36dc	engine_set_limiter_sel_q	(E, v): limiter-stage +0x59 and selectors +0x14
+600fa1ec	recorder_mute_codec_q	codec volume (vt+0x18) to 0.0
+60036504	recq_begin	record queue (class 0x600364a1) begin
+600364ec	recq_available	record queue blocks available
+60036548	recq_read	record queue read block
+6003657c	recq_free	record queue free block
+60111884	engine_input_recq_q	accessor: input record queues (E+0x108/E+0x150)
+60111890	engine_usb_recq_q	accessor: USB-in record queues (E+0x1e8/E+0x230)
+6010c888	recorder_obj_is_recording	(rec): rec+0x2c; asked by engine_block_update (ITCM 0x41d8 via thunk 0x1f540, literal flash 0x601acc28)
+6010c938	recorder_obj_copy_if_recording	(rec): copy loop while rec+0x2c; first thing in engine_block_update (thunk 0x1f548)
+600b4128	engine_apply_limiter_from_project	(E): limiter side-chain mode and selectors from 0x20204aae/aaf
+600b4058	engine_delay_reset	(E): clear delay (bypass on), player and synth delay sends 0
+600b40c0	engine_reverb_reset	(E): clear reverb, player and synth reverb sends 0
+60032114	delay_clear	(delay obj): clear buffers and state, bypass +0x2d = 1
+60031ebc	reverb_clear	(reverb obj): clear buffers, +0x80 = 0
+600bb6e8	player_apply_delay_send	(player): if +0x798 bit 8: send from ins+0x106 / step FX / mute -> ITCM 0x4984
+600bb770	player_apply_reverb_send	(player): if +0x798 bit 20: send from ins+0x170 / step FX / mute -> ITCM 0x4bc4
+00004984	player_set_delay_send_q	(player, send): gain from table 0x6003a824 x delay level 0x20204a8d
+00004bc4	player_set_reverb_send_q	(player, send)
+00003e68	synth_set_delay_send_q	(E, synth, float send)
+00003fa8	synth_set_reverb_send_q	(E, synth, float send): x reverb level 0x20204a8c, into E+0xee8
+600b3904	synth_fx_value_q	(E, synth, type): layered value at E+0x1688 + 32*(10*synth+type), clamped by 0x6003aa8c
+600cf7c0	btn_dispatch_q	(entry, state): kind 1 calls +4 only when state == entry +0x10
+600db550	mixer_levels_q	uses the 11 mix-level pointers at 0x6003fcb0
+600c1b50	instrument_set_defaults	(_, ins): clears the 0x174 bytes, sets a new instrument's defaults (volume 50, bit depth +0x172 = 16)
+6003080c	bitcrush_update	per-track bit crusher (vtable 0x60042eb0): ANDs each sample with the mask at +0x18
+6003084c	bitcrush_set_bits	(obj, bits): depth clamped to 4..16 into +0x14, mask into +0x18
+600cf90c	buttons_is_held_q	(buttons *0x200209e8, id): the Play handler's Shift (0x1d) test

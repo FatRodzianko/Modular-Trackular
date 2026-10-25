@@ -1,0 +1,69 @@
+{
+  "name": "resample",
+  "description": "Live resampling: the Sample Recorder records into the sample bank's free space; Play during a recording, or a recording started with Shift+Rec, plays the pattern with the engine on",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "bin": "build/resample.bin",
+  "sym": "build/resample.sym",
+  "rel": "build/resample.rel",
+  "prebuilt_bin": "prebuilt/resample.bin",
+  "prebuilt_sym": "prebuilt/resample.sym",
+  "prebuilt_rel": "prebuilt/resample.rel",
+  "branches": [
+    {
+      "at": "0x600F90D2",
+      "old": "13f05dfd",
+      "to": "mt_rs_rec_buffer",
+      "next": "mt_rs_next_rec_buffer",
+      "note": "record start 0x600f9074: bl 0x6010cb90(rec, 0x8026a000, 0x3c00000, ch, ch, flag) -> mt_rs_rec_buffer (the buffer moved above the loaded samples)"
+    },
+    {
+      "at": "0x600F90D8",
+      "old": "13f0dafb",
+      "to": "mt_rs_rec_started",
+      "next": "mt_rs_next_rec_started",
+      "note": "record start 0x600f9074: bl 0x6010c890(rec), the record queues' start (from Rec and from the count-in's end) -> mt_rs_rec_started (Shift+Rec: open the gates, play the pattern)"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x600F9000",
+      "old": "21060d60",
+      "to": "mt_rs_rec_button",
+      "next": "mt_rs_next_rec_button",
+      "thumb": true,
+      "note": "the recorder's button binder's pool word for the Rec handler 0x600d0621 -> mt_rs_rec_button (Shift held: arm the pattern start)"
+    },
+    {
+      "at": "0x600FA4AC",
+      "old": "b5070d60",
+      "to": "mt_rs_play_button",
+      "next": "mt_rs_next_play_button",
+      "thumb": true,
+      "note": "the recorder start's pool word for the Play button handler 0x600d07b5 -> mt_rs_play_button (opens the gates first during a moved recording)"
+    },
+    {
+      "at": "0x60042C54",
+      "old": "e9af0f60",
+      "to": "mt_rs_update",
+      "next": "mt_rs_next_update",
+      "thumb": true,
+      "note": "Sample Recorder vtable, update 0x600fafe9 -> mt_rs_update (closes the gates once the recording has stopped)"
+    },
+    {
+      "at": "0x601ACC28",
+      "old": "89c81060",
+      "to": "mt_rs_is_recording",
+      "next": "mt_rs_next_is_recording",
+      "thumb": true,
+      "note": "ITCM image (copied to ITCM 0x1f544 at boot): the literal of the thunk 0x1f540 that engine_block_update (0x41d8) asks, rec+0x2c 0x6010c889 -> mt_rs_is_recording (no early return while the gates are open)"
+    },
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "version": true,
+      "note": "version text 1.2.0-rs4"
+    }
+  ]
+}
