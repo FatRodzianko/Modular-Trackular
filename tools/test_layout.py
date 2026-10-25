@@ -7,7 +7,7 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
     visualizer alone, ramdiag alone,
   - versiontest alone (pinned base; byte-identical to MT0),
   - patch/all (colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig,
-    synths, legato, copypattern, slicethru),
+    synths, legato, copypattern, slicethru, resample),
   - colorsong, humanize and interpolate the other way round (interpolate, humanize,
     colorsong),
   - colorsong, humanize, interpolate and masterfx, both ways round, and with swing and
@@ -26,8 +26,9 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
   - slicethru alone, and first with patch/all's other patches after it in reverse order
     (it chains the Pattern screen's update slot with most of them; patch/all has it
     last),
-  - resample alone, and after and before patch/all's patches (its RAM moves to another
-    region with all of them; an ITCM-image word, as swing's),
+  - resample alone, and first with patch/all's other patches after it in reverse order
+    (its RAM moves to another region with all of them; an ITCM-image word, as swing's;
+    patch/all has it last),
 and checks that a bundle with ramdiag (standalone) is refused, and so is one where a
 shared site isn't chained by both patches, one where two patches pass different
 registers at one ITCM site, and a "late_ram" word that holds no size.
@@ -328,9 +329,6 @@ def main() -> int:
     all_bt_rev_spec.write_text(json.dumps(all_bt_rev, indent=2))
     rs = ROOT / "patch" / "resample" / "patch.json"
     all_rs_list = all_bt_list + [rs]
-    all_rs = dict(rev, name="all-resample", include=[str(x) for x in all_rs_list], version="RSA")
-    all_rs_spec = outdir / "all-resample.json"
-    all_rs_spec.write_text(json.dumps(all_rs, indent=2))
     all_rs_rev = dict(rev, name="all-resample-reversed", include=[str(x) for x in all_rs_list[::-1]],
                       version="RSR")
     all_rs_rev_spec = outdir / "all-resample-reversed.json"
@@ -348,7 +346,7 @@ def main() -> int:
             ("synths alone", sy, [sy], None, None),
             ("ramdiag alone", rd, [rd], None, None),
             ("patch/all: colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig, synths, legato, "
-             "copypattern, slicethru", all_spec, [cs, hz, ip, mx, sw, vz, ct, sy, lg, cp, bt],
+             "copypattern, slicethru, resample", all_spec, [cs, hz, ip, mx, sw, vz, ct, sy, lg, cp, bt, rs],
              json.loads(all_spec.read_text())["version"], None),
             ("reversed: interpolate, humanize, colorsong", rev_spec, [ip, hz, cs], "MTR", None),
             ("colorsong, humanize, interpolate, masterfx", with_mx_spec, [cs, hz, ip, mx], "MTX", None),
@@ -385,7 +383,6 @@ def main() -> int:
             ("slicethru alone", bt, [bt], None, None),
             ("slicethru, then patch/all's patches reversed", all_bt_rev_spec, all_bt_list[::-1], "BTR", None),
             ("resample alone", rs, [rs], None, None),
-            ("patch/all's patches, then resample", all_rs_spec, all_rs_list, "RSA", None),
             ("resample, then patch/all's patches reversed", all_rs_rev_spec, all_rs_list[::-1], "RSR", None)):
         out = outdir / f"{spec.stem if spec.parent == outdir else spec.parent.name}.ptf"
         if not build(stock, spec, out):

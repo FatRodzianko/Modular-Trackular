@@ -717,8 +717,9 @@ export function selectionKey(manifest, ids) {
 
 // Which spec a selection uses: one mod's own, patch/all's, or a bundle of the mods in
 // the manifest's order with a 3-character version text from the selection's bits: a
-// letter for bits 8 and up ("M" for none, "N" for bit 8, ...), then bits 0-7 as two
-// hex digits. Mixes of the first eight mods keep their "M" names.
+// letter for bits 8 and up ("M" for none, "N" for bit 8, ... "Z" for 13, then "A" and
+// "B" for 14 and 15), then bits 0-7 as two hex digits. Mixes of the first eight mods
+// keep their "M" names.
 export function planSelection(manifest, allSpec, ids) {
   const chosen = manifest.patches.filter((p) => ids.includes(p.id));
   if (!chosen.length || chosen.length !== new Set(ids).size) throw new PatchError("unknown or empty selection");
@@ -729,8 +730,10 @@ export function planSelection(manifest, allSpec, ids) {
     return { kind: "all", key, specPath: manifest.all, spec: null };
   }
   const mask = chosen.reduce((m, p) => m | (1 << p.bit), 0);
-  if (mask >> 8 > 13) throw new PatchError("selection code needs a letter past Z");
-  const version = String.fromCharCode(0x4d + (mask >> 8)) + (mask & 0xff).toString(16).toUpperCase().padStart(2, "0");
+  const high = mask >> 8;
+  if (high > 15) throw new PatchError("selection code needs a letter past B");
+  const letter = high <= 13 ? 0x4d + high : 0x41 + (high - 14);
+  const version = String.fromCharCode(letter) + (mask & 0xff).toString(16).toUpperCase().padStart(2, "0");
   const names = chosen.map((p) => p.id);
   const spec = {
     name: `mix-${version}`,

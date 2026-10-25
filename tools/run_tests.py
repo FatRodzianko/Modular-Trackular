@@ -16,7 +16,7 @@ Tiers (times with an empty cache on an 8-core PC; with the cache, only what chan
   deep     (hours) release with masterfx and synths in full mode on every mix. Overnight, and
            only when their audio code changes.
 
-The cover set: the web patcher offers every mix of the mods (2047 for eleven). Byte
+The cover set: the web patcher offers every mix of the mods (4095 for twelve). Byte
 identity and the layout checks run on all of them (the harness does that in minutes);
 the emulator tests run on the fewest mixes that between them contain every case that
 differs from mix to mix:
@@ -74,13 +74,13 @@ PY = sys.executable
 CACHE = ROOT / "build" / "test_cache.json"
 EDGE = 64                                  # bytes from a region's start or end that count as "at the edge"
 FLASH_SECTOR, FLASH_PAGE = 0x1000, 0x100
-STOCK_ARG = {"masterfx", "swing", "condtrig", "synths", "phase", "legato", "slicethru"}   # tests that take the stock .ptf too
+STOCK_ARG = {"masterfx", "swing", "condtrig", "synths", "phase", "legato", "slicethru", "resample"}   # tests that take the stock .ptf too
 QUICK_MODE = {"masterfx", "synths", "phase"}   # tests with a --quick mode
 EXTRA_TESTS = {"synths": ["phase"]}        # a patch's tests besides test_<patch>.py (PHASE: test_phase.py)
 DEFAULT_SECONDS = 60.0                     # estimate for a test not timed yet, unless below
 MEASURED_SECONDS = {                       # alone, on an 8-core PC (the cache keeps its own, measured under load)
     "layout": 45, "web harness": 800, "colorsong": 1, "copypattern": 3, "humanize": 6, "visualizer": 8,
-    "swing": 16, "interpolate": 25, "condtrig": 36, "legato": 130, "slicethru": 12, "masterfx (quick)": 15,
+    "swing": 16, "interpolate": 25, "condtrig": 36, "legato": 130, "slicethru": 12, "resample": 245, "masterfx (quick)": 15,
     "masterfx (full)": 385, "synths (quick)": 127, "synths (full)": 1400, "phase (quick)": 150,
     "phase (full)": 660,
 }

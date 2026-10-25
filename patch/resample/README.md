@@ -9,8 +9,8 @@ stock. Installed on its own, Config shows the firmware version as `1.2.0-rs4`.
 [docs/LIVE_RESAMPLING_PLAN.md](../../docs/LIVE_RESAMPLING_PLAN.md) has the
 investigation and the plan.
 
-**Status:** tested on hardware, installed on its own; not yet in `patch/all` or
-the web patcher.
+**Status:** tested on hardware, on its own and in `patch/all` (`1.2.0-MR4`). It is also
+in the web patcher.
 
 ## Using it
 

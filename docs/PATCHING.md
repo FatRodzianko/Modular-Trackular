@@ -38,13 +38,15 @@ Python command below does, without installing anything:
    one in step 1) and the image's, and refuses anything else, including a file that's
    already patched.
 2. Tick the mods you want. One mod gives its own build, "Select all" gives the
-   `patch/all` bundle (all eleven, `1.2.0-MS8`), and any other mix gets a version text
+   `patch/all` bundle (all twelve, `1.2.0-MR4`), and any other mix gets a version text
    that says which mods are in it: `M` plus two hex digits for colorsong 01, humanize 02,
    interpolate 04, masterfx 08, swing 10, visualizer 20, condtrig 40 and synths 80
    (colorsong + swing is `1.2.0-M11`); `N` instead of `M` when legato is in it
    (colorsong + legato is `1.2.0-N01`), `O` when copypattern is (colorsong + copypattern
    is `1.2.0-O01`), `P` when both are, and four letters further on (`Q` to `T`) when
-   slicethru is in it too (colorsong + slicethru is `1.2.0-Q01`).
+   slicethru is in it too (colorsong + slicethru is `1.2.0-Q01`). With resample the
+   letter is eight further on, `U` to `Z` and then `A` and `B` (colorsong + resample is
+   `1.2.0-U01`).
 3. Patch and download. The page only offers the file when its SHA-256 is the one
    `tools/patch_ptf.py` makes for that selection (`web/expected.json`), and says when
    it's also one of the hardware-tested builds in the table below. A mix that isn't in
@@ -67,7 +69,7 @@ python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.js
 ```
 
 Use `patch/humanize/patch.json` for Humanize alone, `patch/interpolate/patch.json` for
-interpolate alone, or `patch/all/patch.json` for all eleven in one firmware (see "Choosing patches" below for your own
+interpolate alone, or `patch/all/patch.json` for all twelve in one firmware (see "Choosing patches" below for your own
 mix).
 
 The patcher checks the stock image, checks the original bytes at every patched
@@ -92,7 +94,8 @@ must be byte-identical to these builds:
 | legato (MIDI and synth slots) | `TrackerPlus_lg2.ptf` | `1.2.0-lg2` | tested | `a7bab99688e6036e58b66bd8e60806170a045b10c57a218d6607ab9261f81a75` |
 | the previous legato (MIDI only) | `TrackerPlus_lg1.ptf` | `1.2.0-lg1` | tested | `f266ed1f131fc15edf12b224e081f16d9109938b004d8410e2cb0cdb380a68e6` |
 | copypattern | `TrackerPlus_cp4.ptf` | `1.2.0-cp4` | tested (also with humanize) | `7bfbc3eb09a7eb9d9dd4ccf3a8a52b1221743be7061397048f72bbc32908db01` |
-| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru) | `TrackerPlus_MS8.ptf` | `1.2.0-MS8` | tested | `ee0c901bd8cc7c7786e68c19d7c9e97fc93847fb10adbaa48a80b138638fbd4d` |
+| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample) | `TrackerPlus_MR4.ptf` | `1.2.0-MR4` | tested | `b2376c91b9382658c39018a78daf78c9b22a083bfb1b4c739e147bffea84748f` |
+| the previous all (without resample) | `TrackerPlus_MS8.ptf` | `1.2.0-MS8` | tested | `ee0c901bd8cc7c7786e68c19d7c9e97fc93847fb10adbaa48a80b138638fbd4d` |
 | the previous all (the same with synths sy7) | `TrackerPlus_MBT.ptf` | `1.2.0-MBT` | tested | `f610374f5bbf29a100272dc5fa4af545ecd778932d57b9a913d54f1a30a4c33c` |
 | the previous all (without slicethru) | `TrackerPlus_MS7.ptf` | `1.2.0-MS7` | tested | `5ed2e44bed5432a84e4787d10b0222072f1a9d72776a1d3de357582679cafefd` |
 | the previous all (the same with synths sy6) | `TrackerPlus_MS6.ptf` | `1.2.0-MS6` | tested | `764994f1711bddafa691d44567239442cc1729fd5da776ab1510ae1e0b416457` |
@@ -128,16 +131,16 @@ Each patch can be installed on its own, or several can go into one firmware:
   `patch/slicethru/patch.json` the Beat Slice Thru play mode,
   `patch/resample/patch.json` live resampling.
 - **Several patches:** use a bundle spec, which lists the patches to combine.
-  `patch/all/patch.json` is the bundle that ships (all eleven: colorsong, Humanize,
-  interpolate, masterfx, swing, the visualizer, condtrig, synths, legato, copypattern and
-  slicethru):
+  `patch/all/patch.json` is the bundle that ships (all twelve: colorsong, Humanize,
+  interpolate, masterfx, swing, the visualizer, condtrig, synths, legato, copypattern,
+  slicethru and resample):
 
   ```json
   "include": ["../colorsong/patch.json", "../humanize/patch.json", "../interpolate/patch.json",
               "../masterfx/patch.json", "../swing/patch.json", "../visualizer/patch.json",
               "../condtrig/patch.json", "../synths/patch.json", "../legato/patch.json",
-              "../copypattern/patch.json", "../slicethru/patch.json"],
-  "version": "MS8",
+              "../copypattern/patch.json", "../slicethru/patch.json", "../resample/patch.json"],
+  "version": "MR4",
   ```
 
 To make your own mix, copy `patch/all/` to a new folder (for example `patch/mymix/`)
@@ -239,8 +242,8 @@ python tools/run_tests.py path/to/TrackerPlus_1.2.0.ptf --tier release    # befo
   - The cover set is the fewest mixes that between them contain every case that differs
     from mix to mix: each patch's RAM at the start, middle and last 64 bytes of each
     region it can land in, each pair of patches next to each other on a shared hook, and
-    an image the sector padding pads and one it doesn't. For the eleven mods that's 18
-    of the 2036 mixes, besides `patch/all`.
+    an image the sector padding pads and one it doesn't. For the twelve mods that's 19
+    of the 4083 mixes, besides `patch/all`.
   - masterfx and synths run in `--quick` mode, which leaves out their sound, cost and
     long stress checks (these depend only on their own code), except on `patch/all`,
     where they run in full when their own files (`patch.json`, `prebuilt/`, `build/`)
@@ -253,7 +256,7 @@ test in `build/testrun/logs`, and writes `build/testrun/summary.txt`. Its cache
 (`build/test_cache.json`) remembers what passed: a test isn't run again on a firmware
 file it already passed with the same test and emulator code. The web patcher check
 keeps its own cache per selection, so after a change to one mod it redoes only the
-selections that contain it (all 2047 take about 13 minutes, none about 30 seconds).
+selections that contain it (all 4095 take about 21 minutes, none about 30 seconds).
 `--no-cache` runs everything; `--jobs N` sets how many run at once.
 
 Each check can also be run on its own:
@@ -288,11 +291,11 @@ went from the `.map.json` the patcher wrote next to the `.ptf`, so keep the two
 together.
 
 `tools/test_layout.py` checks the patcher's placement without the emulator. It builds
-each patch alone, `patch/all` (all eleven) and its reverse, colorsong, humanize and interpolate in the
+each patch alone, `patch/all` (all twelve) and its reverse, colorsong, humanize and interpolate in the
 other order, those three with masterfx in both orders, the six before condtrig in the other order, the six with synths in both orders,
 copypattern alone, with humanize in both orders and with all nine in both orders,
 slicethru alone and first with the others after it in reverse order,
-resample alone and with all eleven in both orders, and two
+resample alone and first with the others after it in reverse order, and two
 patches on the same chained sites, and
 checks that each patch's code and RAM sit where they
 should (RAM in a region the patch may use, no two blocks overlapping), that exactly the

@@ -18,8 +18,8 @@ Status: phases 1 (rig and measurements), 2 (`rs1`, the buffer move), 3 (`rs2`, P
 after Rec) and 4 (`rs3`, Shift+Rec) are done in the emulator, and phase 5 (on its own:
 README, `prebuilt/`, docs, layout test) is done (section 8). The user's hardware check
 of `1.2.0-rs3` passed except a plain Rec during a Shift+Rec count-in, fixed in `rs4`
-(section 9.1); the user's recheck of `rs4` passed. Next: phase 6 on the user's go.
-Nothing is committed. The user has
+(section 9.1); the user's recheck of `rs4` passed, and `rs4` on its own is committed.
+Phase 6 (`patch/all` `1.2.0-MR4` and the web patcher) is in progress. The user has
 answered the questions (section 10).
 
 ## 1. Verdict
@@ -553,6 +553,20 @@ starts.
    - Join `patch/all`, with a new version text.
    - Add it to the web patcher (bit 11), with its tested builds.
    - Run the release tier with `--update`.
+   **In progress** (uncommitted):
+   - `patch/all` includes resample last, version `1.2.0-MR4`. Its RAM lands in
+     `dtcm_above_heap` there. The layout test's patch/all case has it; the separate
+     "patch/all's patches, then resample" case went (it was the same bundle).
+   - The web patcher has resample at bit 11. Mix names: the letter for bits 8 and up
+     ran out at Z, so (the user's choice) 14 and 15 are `A` and `B`; every earlier mix
+     keeps its name. Resample's mixes are `U`..`Z`, `A`, `B` plus two hex digits.
+   - `run_tests.py` runs resample's test with the stock `.ptf`.
+   - Release tier with `--update` (2026-10-25): 143 jobs, 0 failed, 66.7 min. The cover
+     set is 19 of the 4083 mixes plus 4 reordered bundles; the web harness redid all
+     4095 selections (about 21 min) and rewrote `web/expected.json`.
+   - The user's hardware check of `1.2.0-MR4` passed (2026-10-25). Its row in the tested
+     builds says "tested", and the manifest lists it. Release tier again with `--update`:
+     143 jobs, 0 failed, 2.9 min (141 from the cache).
 7. **Resample source (extra, only if the user asks once 1–6 work).** Trace the
    recorder's source list, add the entry, hook the two queue accessor BLs (section 4.5).
 
@@ -601,8 +615,10 @@ with nothing plugged in; headphones at a low level.
   comes one micro-step after Play (4.8 ms at 65 BPM, stock), plus up to one block
   (2.9 ms). What else is in the rest depends on how the master reached the recorder's
   input (an analog loop adds the output and input buffers and the converters; the
-  recording's −84 dBFS noise floor, not digital zero, points to an analog path). Asked
-  the user.
+  recording's −84 dBFS noise floor, not digital zero, points to an analog path). The
+  take went through one cable from the output to Line In, so the rest is that round
+  trip, not the patch. The `rs4` sanity pass (Rec then Play, Shift+Rec, Rec then
+  Shift+Rec) passed too.
 
 ## 10. Decisions (the user's answers)
 

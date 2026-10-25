@@ -95,6 +95,14 @@
       "title": "Beat Slice Thru",
       "summary": "A play mode after Beat Slice in the Sample Playback screen's Play Mode list: slice a sample as in Beat Slice, and each note plays from its slice to the end of the sample instead of stopping at the next slice. Saved per project; stock firmware plays such an instrument as Beat Slice.",
       "status": "Tested on hardware"
+    },
+    {
+      "id": "resample",
+      "bit": 11,
+      "spec": "patch/resample/patch.json",
+      "title": "Live Resampling",
+      "summary": "The Sample Recorder can record with the pattern playing: press Play after Rec, or start the recording with Shift+Rec (after the count-in, if Pre Roll is on). Samples and synths play at the mix levels with delay and reverb; stopping the recording stops the pattern. Recordings go after the loaded samples, so they stay intact. Otherwise the recorder is stock.",
+      "status": "Tested on hardware"
     }
   ],
   "tested_builds": {
@@ -125,6 +133,8 @@
     "76e0a004302bb9e57d214cb04cf0053e906f1b6de3141a4ad4809f440de2cb2e": "slicethru (1.2.0-bt3)",
     "f610374f5bbf29a100272dc5fa4af545ecd778932d57b9a913d54f1a30a4c33c": "all eleven mods (1.2.0-MBT)",
     "75087646e0902daa7867fe5fdf91de98874348a2140f1becbd5d0ba29bee06e2": "synths (1.2.0-sy8)",
-    "ee0c901bd8cc7c7786e68c19d7c9e97fc93847fb10adbaa48a80b138638fbd4d": "all eleven mods with synths sy8 (1.2.0-MS8)"
+    "ee0c901bd8cc7c7786e68c19d7c9e97fc93847fb10adbaa48a80b138638fbd4d": "all eleven mods before resample (1.2.0-MS8)",
+    "5cf21721e8c1f9339304b24adfcc355a07f37dcaff9697a5b97ab41d50352925": "resample (1.2.0-rs4)",
+    "b2376c91b9382658c39018a78daf78c9b22a083bfb1b4c739e147bffea84748f": "all twelve mods (1.2.0-MR4)"
   }
 }
