@@ -68,8 +68,8 @@
       "id": "synths",
       "bit": 7,
       "spec": "patch/synths/patch.json",
-      "title": "WAVE Synth",
-      "summary": "A wavetable synth that takes the place of one synth model per project (Config > Project Settings > Synth Engines): wavetables, a super saw, ladder and OB filters, two LFOs, a Mod Matrix and a stereo chorus, with its own controls and patches.",
+      "title": "WAVE and PHASE Synths",
+      "summary": "Two synths, each taking the place of one synth model per project (Config > Project Settings > Synth Engines), with their own controls and patches. WAVE: wavetables, a super saw, ladder and OB filters. PHASE: Casio CZ-style phase distortion, eight shapes, DCW envelopes, ring and noise mod. Both: two LFOs, a Mod Matrix and a stereo chorus.",
       "status": "Tested on hardware"
     },
     {
@@ -123,6 +123,8 @@
     "dddf733b197e59d8a6dc7f3e1ee253ec450518238ca991d651f03ce4e0dc940f": "synths (1.2.0-sy7)",
     "5ed2e44bed5432a84e4787d10b0222072f1a9d72776a1d3de357582679cafefd": "all ten mods before slicethru (1.2.0-MS7)",
     "76e0a004302bb9e57d214cb04cf0053e906f1b6de3141a4ad4809f440de2cb2e": "slicethru (1.2.0-bt3)",
-    "f610374f5bbf29a100272dc5fa4af545ecd778932d57b9a913d54f1a30a4c33c": "all eleven mods (1.2.0-MBT)"
+    "f610374f5bbf29a100272dc5fa4af545ecd778932d57b9a913d54f1a30a4c33c": "all eleven mods (1.2.0-MBT)",
+    "75087646e0902daa7867fe5fdf91de98874348a2140f1becbd5d0ba29bee06e2": "synths (1.2.0-sy8)",
+    "ee0c901bd8cc7c7786e68c19d7c9e97fc93847fb10adbaa48a80b138638fbd4d": "all eleven mods with synths sy8 (1.2.0-MS8)"
   }
 }

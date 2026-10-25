@@ -1,6 +1,6 @@
 {
   "name": "synths",
-  "description": "WAVE, a wavetable synth (7 banks, a super saw and a saw, Digital mode, ladder and OB filters, 2 LFOs with a Bipolar/Unipolar switch, a mod envelope, a Mod Matrix and a stereo chorus), in place of one synth model per project: Config > Project Settings > Synth Engines > WAVE replaces (Off, ACD, FAT, VAP, WTFM, PERC); the Model list then shows WAVE, with its own controls",
+  "description": "WAVE, a wavetable synth (7 banks, a super saw and a saw, Digital mode, ladder and OB filters, 2 LFOs with a Bipolar/Unipolar switch, a mod envelope, a Mod Matrix and a stereo chorus), in place of one synth model per project: Config > Project Settings > Synth Engines > WAVE replaces (Off, ACD, FAT, VAP, WTFM, PERC); the Model list then shows WAVE, with its own controls. PHASE, a Casio CZ-style phase distortion synth (2 DCOs with 8 shapes and shape pairs, DCW with its own envelope and key follow, a pitch envelope, ring and noise mod, the same LFOs, Mod Matrix and chorus), the same way through PHASE replaces",
   "firmware": "TrackerPlus 1.2.0",
   "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
   "ram_startup": true,
@@ -28,21 +28,21 @@
       "old": "fef7ffff",
       "to": "mt_syn_last_item",
       "next": "mt_syn_next_last_item",
-      "note": "Config menu constructor: last item (Licenses); then adds the Synth Engines folder (WAVE replaces) to Project Settings, and resets the audio side (WAVE silent until the Pattern screen runs)"
+      "note": "Config menu constructor: last item (Licenses); then adds the Synth Engines folder (WAVE replaces, PHASE replaces) to Project Settings, and resets the audio side (WAVE silent until the Pattern screen runs)"
     },
     {
       "at": "0x60126B30",
       "old": "19f00efb",
       "to": "mt_syn_registry",
       "next": "mt_syn_next_registry",
-      "note": "synth manager constructor: the model registry's builder 0x60140150, then WAVE inserted as model 3"
+      "note": "synth manager constructor: the model registry's builder 0x60140150, then WAVE inserted as model 3 and PHASE as model 7"
     },
     {
       "at": "0x60116382",
       "old": "9bf77dfe",
       "to": "mt_syn_project_records",
       "next": "mt_syn_next_records",
-      "note": "project load: synth_slots_apply_project_q 0x600b2080, after the project's synths.bin has mapped the replaced model index to WAVE (table 0x200006b4)"
+      "note": "project load: synth_slots_apply_project_q 0x600b2080, after the project's synths.bin has mapped the replaced model indexes to WAVE and PHASE (table 0x200006b4)"
     },
     {
       "at": "0x6011B0BA",
@@ -56,14 +56,21 @@
       "old": "fff729ff",
       "to": "mt_syn_list_images",
       "next": "mt_syn_next_list_images",
-      "note": "list control draw: image items 0x6010645c, then WAVE's name as text in the row the patch's ids mark"
+      "note": "list control draw: image items 0x6010645c, then WAVE's or PHASE's name as text in the rows the patch's ids mark"
     },
     {
       "at": "0x6011EA58",
       "old": "e3f780f9",
       "to": "mt_syn_patch_label",
       "next": "mt_syn_next_patch_label",
-      "note": "Edit Patch screen: disp_ctrl_set_text for the model logo label (\"\"); for a WAVE synth, no logo and the text WAVE"
+      "note": "Edit Patch screen: disp_ctrl_set_text for the model logo label (\"\"); for a WAVE or PHASE synth, no logo and the engine's name as text"
+    },
+    {
+      "at": "0x6011E924",
+      "old": "fef780fe",
+      "to": "mt_syn_tiles",
+      "next": "mt_syn_next_tiles",
+      "note": "Edit Patch screen setup: the tiles' labels and icons 0x6011d628; for a PHASE synth, then DCO, DCW, DCA, DCW Env and DCO Env on the first five"
     }
   ],
   "words": [
@@ -89,7 +96,7 @@
       "to": "mt_syn_voice_set_param",
       "next": "mt_syn_next_set_param",
       "thumb": true,
-      "note": "VAP voice vtable +0x0c: set parameter 0x6014a8f1 -> mt_syn_voice_set_param (a WAVE voice's to the slot's copy only; others to VAP)"
+      "note": "VAP voice vtable +0x0c: set parameter 0x6014a8f1 -> mt_syn_voice_set_param (a WAVE or PHASE voice's to the slot's copy only; others to VAP)"
     },
     {
       "at": "0x600667F4",
@@ -97,7 +104,7 @@
       "to": "mt_syn_voice_render",
       "next": "mt_syn_next_render",
       "thumb": true,
-      "note": "VAP voice vtable +0x10: render 0x6014a8b1 -> mt_syn_voice_render (the wavetable engine for a WAVE voice, else VAP)"
+      "note": "VAP voice vtable +0x10: render 0x6014a8b1 -> mt_syn_voice_render (the engine for a WAVE or PHASE voice, else VAP)"
     },
     {
       "at": "0x600667F8",
@@ -105,7 +112,7 @@
       "to": "mt_syn_voice_post",
       "next": "mt_syn_next_post",
       "thumb": true,
-      "note": "VAP voice vtable +0x14: after the slot's voices have rendered, voice 0's 0x6014a811 (nothing) -> mt_syn_voice_post (a WAVE slot's effect, on its output, in stereo)"
+      "note": "VAP voice vtable +0x14: after the slot's voices have rendered, voice 0's 0x6014a811 (nothing) -> mt_syn_voice_post (a WAVE or PHASE slot's effect, on its output, in stereo)"
     },
     {
       "at": "0x600667FC",
@@ -113,7 +120,7 @@
       "to": "mt_syn_voice_sounding",
       "next": "mt_syn_next_sounding",
       "thumb": true,
-      "note": "VAP voice vtable +0x18: sounding 0x6014a81d -> mt_syn_voice_sounding (the engine's amp envelope for a WAVE voice, else VAP's)"
+      "note": "VAP voice vtable +0x18: sounding 0x6014a81d -> mt_syn_voice_sounding (the engine's amp envelope for a WAVE or PHASE voice, else VAP's)"
     },
     {
       "at": "0x60062FE0",
@@ -121,7 +128,7 @@
       "to": "mt_syn_patch_load",
       "next": "mt_syn_next_patch_load",
       "thumb": true,
-      "note": "patch storage vtable +0x0c: load into a patch 0x60124f39 (Workspace and Patches) -> mt_syn_patch_load (a WAVE patch's Polarity switches to Bipolar first, as a file saved before them holds none)"
+      "note": "patch storage vtable +0x0c: load into a patch 0x60124f39 (Workspace and Patches) -> mt_syn_patch_load (a WAVE or PHASE patch's Polarity switches to Bipolar first, as a file saved before them holds none)"
     },
     {
       "at": "0x600403DC",
@@ -144,7 +151,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-sy7"
+      "note": "version text 1.2.0-sy8"
     }
   ]
 }

@@ -1,12 +1,15 @@
-# synths: WAVE, a wavetable synth in place of one synth model
+# synths: WAVE and PHASE, two synths in place of synth models
 
-A patch for Polyend Tracker+ firmware 1.2.0. It adds **WAVE**, a wavetable synth after the
-PPG Wave and Ensoniq ESQ-1: digital wavetable oscillators through analog-style filters.
-Per project, WAVE takes the place of one of the five synth models (ACD, FAT, VAP, WTFM or
-PERC):
-- the Instrument screen's Model list shows WAVE where that model was;
-- the instrument title reads "Synth 1 (WAVE)";
-- the synth pages show WAVE's own controls.
+A patch for Polyend Tracker+ firmware 1.2.0. It adds two synths:
+- **WAVE**, a wavetable synth after the PPG Wave and Ensoniq ESQ-1: digital wavetable
+  oscillators through analog-style filters;
+- **PHASE**, a phase distortion synth after the Casio CZ series (see [PHASE](#phase)).
+
+Per project, each takes the place of one of the five synth models (ACD, FAT, VAP, WTFM or
+PERC), and both can run at once on different models:
+- the Instrument screen's Model list shows WAVE or PHASE where that model was;
+- the instrument title reads "Synth 1 (WAVE)" or "Synth 1 (PHASE)";
+- the synth pages show the synth's own controls.
 
 What WAVE has:
 - **Two oscillators.** Each plays one of 9 waves:
@@ -30,51 +33,47 @@ What WAVE has:
 - **An effect per synth:** None or a stereo **Chorus** after the Roland Juno's, with Rate,
   Depth and Mix.
 
-Installed on its own, Config shows the firmware version as `1.2.0-sy7`.
+Installed on its own, Config shows the firmware version as `1.2.0-sy8`.
 
-**Status:** `sy7` was tested on hardware, alone and in the all bundle: it installs and
-plays, and the effect works. It is `sy6` with the effect. With Effect None (the default,
-and what every patch saved before `sy7` loads with) its output is `sy6`'s on both sides. `sy6` was tested on hardware, alone and in the all bundle: it
-installs; `sy5` patches load with Drive at 0 % and sound the same; Drive changes the sound
-audibly and stays under control with Resonance above 50. It is `sy5` with Drive; with
-Drive at 0 it plays sample for sample as `sy5`, which was tested on hardware, alone and in
-the all bundle.
-`sy5` is `sy4` with the filter envelope on the
-Edit Patch screen's Env 1 tile (as VAP's) and the mod envelope on Env 2; the sound and
-the patch files are unchanged. `sy4` was tested on hardware, alone and bundled with all
-the other patches: it installs and plays; `sy3` patches load and play; the LFOs' Polarity
-switches show on the Edit Patch screen and work. With 8 WAVE voices playing, an LFO
-moving Position and full reverb and delay sends, the CPU use peaked at 56 %.
-Earlier builds were tested on hardware:
-- `sy3` (this one without the LFOs' Polarity switches): the sound and the controls.
-- `sy2` (also without the LFOs, the Mod Matrix and the Saw): swapping, and saving and
-  loading WAVE patches across projects.
+**Status:**
+- **WAVE** is tested on hardware, alone and in the all bundle (`sy7`, which had WAVE
+  only). With 8 WAVE voices playing, an LFO moving Position and full reverb and delay
+  sends, the CPU use peaked at 56 %. In `sy8`, WAVE's model and output are the same as
+  `sy7`'s, sample for sample, in the emulator. WAVE patches and projects from `sy3` on
+  load and play.
+- **PHASE** is new in `sy8`, tested on hardware alone and in the all bundle.
 
-The first build (`sy1`, a different design) was replaced; see
+The design of PHASE is in [PD_SYNTH_PLAN.md](../../docs/PD_SYNTH_PLAN.md), WAVE's in
 [SYNTH_ENGINES_PLAN.md](../../docs/SYNTH_ENGINES_PLAN.md).
 
 ## Using it
 
-1. Config → Project Settings → **Synth Engines** → **WAVE replaces**: Off (the default),
-   ACD, FAT, VAP, WTFM or PERC.
-2. On the Instrument screen, pick WAVE in a synth's Model list (where the replaced model
-   was).
+1. Config → Project Settings → **Synth Engines** → **WAVE replaces** and **PHASE
+   replaces**: each Off (the default), ACD, FAT, VAP, WTFM or PERC.
+2. On the Instrument screen, pick WAVE or PHASE in a synth's Model list (where the
+   replaced model was).
 
-Synths already set to the replaced model become WAVE at once and start from WAVE's Init
-patch. Setting "WAVE replaces" back to Off gives them the stock model again, from its Init
-patch. While WAVE replaces a model, that model isn't available in the project.
+Synths already set to the replaced model become WAVE or PHASE at once and start from its
+Init patch. Setting the item back to Off gives them the stock model again, from its Init
+patch. While a model is replaced, it isn't available in the project.
 
-The choice is saved per project (in `synths.bin` in the project's folder), a moment after
-you change it, and Save As takes it along:
+The two items can't replace the same model: each item's list leaves out the model the
+other one replaces. (A project file naming one model in both loads with PHASE Off.)
+
+The choices are saved per project (in `synths.bin` in the project's folder), a moment
+after you change them, and Save As takes them along:
 - A project without that file plays the stock models.
-- Every project plays the stock models in stock firmware. A synth that was WAVE plays
-  the replaced model's Init patch there (the project keeps its other settings).
+- Every project plays the stock models in stock firmware. A synth that was WAVE or PHASE
+  plays the replaced model's Init patch there (the project keeps its other settings).
+- `sy7` (WAVE only) should read a file with PHASE set as damaged (from its code; not
+  tested): it plays the stock models, WAVE too, and keeps the file unchanged, so going
+  back to `sy8` restores both choices.
 
-WAVE's patches save and load like any model's, in `Patches/WAVE/`. The Edit Patch screen
-shows "WAVE" where the model's logo would be. A WAVE synth stays silent until the first
-Pattern screen after a start.
+WAVE's patches save and load like any model's, in `Patches/WAVE/`, and PHASE's in
+`Patches/PHASE/`. The Edit Patch screen shows "WAVE" or "PHASE" where the model's logo
+would be. Both synths stay silent until the first Pattern screen after a start.
 
-### The controls
+### WAVE's controls
 
 The synth pages have VAP's tabs, and WAVE's controls sit where VAP's do. On the Edit Patch
 screen, the tiles open them as lists:
@@ -240,6 +239,119 @@ to hear them. LFO 2 is a 0.25 Hz sine.
 
 The pitch bend range is ±2 semitones.
 
+## PHASE
+
+PHASE is a phase distortion synth after the Casio CZ series. Each of its two DCOs reads a
+cosine through a bent phase: with no bend it plays a sine, and the more the phase is
+bent, the brighter the wave. **DCW** (the CZ's name, "digital controlled wave") sets
+how far. Sweeping it, by hand or with the DCW envelope, does what a filter sweep does on
+an analog synth.
+
+What PHASE has:
+- **Two DCOs.** Each plays one of 8 shapes: Saw, Square, Pulse, Double Sine, Saw-Pulse,
+  and three resonant waves, Reso I, II and III. A DCO can also play two shapes on
+  alternate cycles (a **pair**, as on the CZ), which adds a sub-octave and the CZ's
+  hollow, reedy sounds.
+- **Three ADSR envelopes:** DCA (the level), DCW (the timbre, with a depth per DCO) and
+  DCO (the pitch, ±48 semitones).
+- **Ring Mod** and **Noise Mod** on DCO 2, and Key Follow on the DCW.
+- WAVE's **two LFOs**, its 6-slot **Mod Matrix** (with PHASE's own sources and
+  destinations), glide, and its **Chorus**.
+
+### PHASE's controls
+
+The Edit Patch screen's tiles:
+
+| Tile | Controls |
+|---|---|
+| DCO | Wave 1, Wave 1+, Wave 2, Wave 2+, Mix, Tune 1, Tune 2, Finetune, Detune, Reset 1, Reset 2, Ring Mod, Noise Mod |
+| DCW | DCW 1, DCW 2, Env Amt 1, Env Amt 2, Key Follow |
+| DCA | The DCA (level) envelope |
+| DCW Env | The DCW (timbre) envelope |
+| DCO Env | The DCO (pitch) envelope, and DCO Env Amt |
+| LFO 1, LFO 2 | As WAVE's |
+| Mod | The Mod Matrix |
+| Voice | As WAVE's: Glide Mode, Glide Time, Volume, Effect, Rate, Depth, Mix |
+
+The Synth Parameters screen's tabs are DCO, DCW, Modulation (DCA, DCW Env/LFO 1,
+DCO Env/LFO 2), Matrix, FX and Voice.
+
+**DCO:**
+- **Wave 1, Wave 2:** each DCO's shape.
+- **Wave 1+, Wave 2+:** Off (the default), or a second shape, played on every other
+  cycle. As on the CZ, two resonant shapes can't pair: a Reso after a Reso plays as Off.
+- **Mix:** −1 DCO 1 only, 0 both, +1 DCO 2 only.
+- **Tune 1, Tune 2** (±36 st), **Finetune** (both DCOs, ±100 c), **Detune** (DCO 2 up,
+  0–100 c).
+- **Reset 1, Reset 2:** each note starts the DCO at phase 0.
+- **Ring Mod** (Off / On): DCO 2 plays DCO 1 × DCO 2, and Mix crossfades DCO 1 and that
+  product.
+- **Noise Mod** (0–100 %): noise jitters DCO 2's pitch, a slight roughness at 10 %,
+  noise at 100 %. DCO 1 is untouched.
+
+**DCW:**
+- **DCW 1, DCW 2** (0–100 %): each DCO's DCW. They keep VAP's MIDI CCs (74 and 71).
+- **Env Amt 1, Env Amt 2** (±100 %): how far the DCW envelope moves each DCO's DCW. Two
+  depths let one envelope move the two DCOs by different amounts, or opposite ways.
+- **Key Follow** (±100 %): the DCW falls (or rises, below 0) with the note around middle
+  C. At 100 % it falls by 100 % four octaves above.
+
+**Envelopes:** Attack, Decay, Sustain and Release, as WAVE's. **DCO Env Amt** (±48 st)
+sets how far the DCO envelope moves both DCOs' pitch. The CZ's pitch envelope only
+rises, so 0 to +48 is the CZ's.
+
+**Wave** (at DCW 0 and 100 %):
+
+| Shape | DCW 0 | DCW 100 % |
+|---|---|---|
+| Saw | A sine | A saw-like wave |
+| Square | A sine | A square-like wave (odd harmonics) |
+| Pulse | A sine | A narrow pulse (10 % wide) |
+| Double Sine | A sine | Two humps per cycle: the fundamental and the octave about equal |
+| Saw-Pulse | A sine | A saw in the first half of each cycle, flat in the second |
+| Reso I | A soft windowed sine | A resonance 24 times the note under a falling-saw window |
+| Reso II | The same | The same, under a triangle window |
+| Reso III | The same | The same, under a trapezoid window |
+
+On the resonant shapes, DCW moves only the resonance, from the note up to 24 times it,
+as on the CZ. To keep the top of the range clean, each shape is eased at high notes:
+the bends are made at least 4 samples long, the resonance stays under 11 kHz, and the
+Double Sine and Saw-Pulse are eased from about note 87 and 92.
+
+**Matrix:**
+
+| Src | Range |
+|---|---|
+| DCA Env, DCW Env, DCO Env | 0 to 1 |
+| LFO 1, LFO 2 | −1 to 1 (Bipolar), or 0 to 1 (Unipolar) |
+| Velocity | 0 to 1 |
+| Key | The note against middle C: ±1 over 5 octaves |
+
+| Dest | At Amt 100 % |
+|---|---|
+| Pitch, Pitch 1, Pitch 2 | An octave |
+| DCW, DCW 1, DCW 2 | The whole range (0 → 100 %) |
+| Mix | Half its range |
+| Volume | The level × (1 + the source) |
+| Detune | 100 cents more on DCO 2 |
+
+**The Init patch:**
+- two Saws at DCW 50 %, DCO 2 detuned by 8 cents;
+- the DCW envelope at 30 % on each DCO (a 0.6 s decay to 30 %);
+- a sustained DCA envelope.
+
+Its first two matrix slots are routings to try, both at Amt 0: LFO 1 (a 1 Hz triangle)
+→ Pitch, for vibrato, and LFO 2 (a 0.25 Hz sine) → DCW.
+
+**The Macros:**
+- a: Attack (the DCA's);
+- b: Decay/Release on the DCA and DCW envelopes;
+- c: DCW (DCW 1 and 2);
+- d: DCW Env Amt (Env Amt 1 and 2);
+- e: Detune;
+- f: Mix;
+- Velocity and Pressure as on the stock models.
+
 ## How it works
 
 The firmware keeps each model in a registry (FINDINGS section 23). A model's entry has
@@ -251,10 +363,15 @@ three parts:
 A project's slot records store a model index (0–4) that a small table maps to a model id.
 The patch works with those pieces:
 
-- **WAVE is model 3**, an id no stock model uses. A hook on the registry's builder adds
-  WAVE's entry at start-up. Because WAVE has an id of its own, stock firmware rejects a
-  WAVE slot's saved patch and plays the replaced model's Init patch. Borrowing ACD's id
-  would make stock firmware load WAVE's values into ACD, and that played silence.
+- **WAVE is model 3 and PHASE model 7**, ids no stock model uses. A hook on the
+  registry's builder adds their entries at start-up. Because each has an id of its own,
+  stock firmware rejects their slots' saved patches and plays the replaced model's Init
+  patch. Borrowing ACD's id would make stock firmware load WAVE's values into ACD, and
+  that played silence.
+- **PHASE is built the way WAVE is**, so what follows for WAVE holds for PHASE too: its
+  builder rewrites VAP's patch into PHASE's (the same 60 positions and the same six own
+  parameters, 60–65), its voices are VAP voice objects, and it uses the same hooks. The
+  differences are listed after WAVE's.
 - **WAVE's builder** runs VAP's builder, then rewrites the patch it made:
   - the parameter names, ranges and value displays;
   - the screen layout and the Edit Patch screen's pages;
@@ -280,20 +397,21 @@ The patch works with those pieces:
     `sy4`–`sy6`: 62) loads as it played. If the load fails, they go back to what they
     were.
   - An older build loading a patch saved with more of them ignores the extra values.
-- **The swap** sets the table entry of the replaced index to 3:
+- **The swap** sets the table entry of the replaced index to 3 (or 7):
   - At project load, the patch reads `synths.bin` before the stock code applies the slot
     records. So the stock code gives each slot its model, then loads its patch, as the
     project had them.
   - A change in the menu takes effect at the next Config screen update.
   - Records keep stock indices.
 - **The Model list** draws model logos by image id. With a swap, the patch hands the list
-  its own id table with the replaced position marked. The list draws the other four
-  logos, and the patch draws "WAVE" as text in the marked row.
+  its own id table with the replaced positions marked. The list draws the other logos,
+  and the patch draws "WAVE" or "PHASE" as text in the marked rows.
 - **The Edit Patch screen** shows the model's logo in a label, picked from a table by the
-  model index. For a WAVE synth, the patch clears the label's logo and gives it the text
-  "WAVE".
+  model index. For a WAVE or PHASE synth, the patch clears the label's logo and gives it
+  the synth's name.
 - **WAVE's voices are VAP voice objects** (VAP's factory). Six entries of the VAP voice
-  vtable (`0x600667e4`) are hooked, each chained to the stock one:
+  vtable (`0x600667e4`) are hooked, each chained to the stock one. A hooked method
+  passes a WAVE voice to WAVE's engine and a PHASE voice to PHASE's:
 
   | Entry | A WAVE voice | Any other voice |
   |---|---|---|
@@ -306,8 +424,8 @@ The patch works with those pieces:
 
   The hooks are naked trampolines. For any other voice, the jump to VAP's method leaves
   every register and stack word as it was (the render call has five stack arguments).
-- **The engine's voices:** up to 8, one per WAVE voice. That is the stock limit for all
-  three synths together. A slot with more voices (a loaded project can set that) keeps
+- **The engine's voices:** up to 8, one per WAVE or PHASE voice, from one pool the two
+  engines share. That is the stock limit for all three synths together. A slot with more voices (a loaded project can set that) keeps
   the extra ones silent until an engine voice is free.
 - **Start-up.** Running heavy DSP while the unit boots hung it before
   ([FINDINGS.md](../../docs/FINDINGS.md) section 19). So a WAVE voice renders silence until
@@ -366,6 +484,53 @@ cut at harmonic 64. There are no third-party tables. Each frame is stored at 7 l
 from 64 harmonics down to 1, with enough samples per level that a saw's interpolation
 images stay below −63 dB. Each bank of 32 frames takes 66.5 KB of flash.
 
+### What PHASE does differently
+
+- **The Edit Patch tiles.** The stock code labels the tiles from keywords in the pages'
+  names ("Oscillator" gives Osc, "Filter" Filter, and so on), and DCO, DCW and DCA match
+  none. So one more hook, chained, on the call to the tile builder (`0x6011e924`) lets
+  the stock builder run, then, for a PHASE synth only, rewrites the labels to DCO, DCW,
+  DCA, DCW Env and DCO Env, each with the icon the stock tile in that place has. The
+  other tiles and other synths keep the stock labels.
+- **The parameters** sit on VAP's positions as listed in
+  [PD_SYNTH_PLAN.md](../../docs/PD_SYNTH_PLAN.md) section 4.3. The DCW envelope is VAP's
+  filter envelope (Env 1), the DCO envelope VAP's free one (Env 2).
+- **`synths.bin`** keeps its layout: byte 4 is WAVE's choice and byte 5 PHASE's.
+- **The menu's two lists.** The stock option editor reads an item's count and names each
+  time it opens, and its value text is the name at the item's stored position. Each item
+  therefore gets a descriptor of its own from the heap (16 bytes) when the menu is built,
+  and the patch points it at a list without the other item's model. The menu stores a
+  position in that list; the item's apply callback turns it into the choice at once and
+  updates the other item's list. The positions are set again whenever the choices change
+  (a project load, the Pattern and Config screen updates). If the heap had no room, an
+  item keeps the full list, and the old rule applies: set to one model, the item changed
+  last keeps it and the other goes to Off.
+
+**The PHASE engine** (`ph_engine.h`) renders mono, 128 samples per block, as WAVE's does:
+- **The DCOs:** each has a 32-bit phase. A per-block setup turns the shape, the DCW and
+  the pitch into a bend of up to four straight segments. Per sample, the engine finds
+  the segment, bends the phase and reads a cosine table with linear interpolation. A
+  pair switches between its two shapes' bends at each cycle's end.
+- **The resonant shapes:** a sine at the resonance ratio, restarted with each cycle (hard
+  synced), times the window, so the restart can't click. DCW sets the ratio, 24 to the
+  power of the DCW, capped so the resonance stays under a quarter of the sample rate.
+- **Aliasing:** the bends' fast segments last at least 4 samples, and the Double Sine's
+  depth and the Saw-Pulse's saw part are limited at high notes. Measured at DCW 100 %,
+  notes 60–108: the plain shapes' worst alias is −45 dB; the resonant ones −63 to
+  −90 dB at note 60 and −32 to −35 dB at note 108. A step below WAVE's band-limited
+  tables at the top; the CZ itself aliased audibly.
+- **DC:** the pulse-like and resonant shapes have a DC offset. Each shape's mean is
+  worked out from its segments per block and subtracted, ramped across the block, so no
+  DC blocker is needed and a note starts without a thump.
+- **Ring Mod** multiplies the DCOs' outputs; **Noise Mod** jitters DCO 2's phase step
+  each sample by ± the amount × √(the step), so the noise grows with the amount at the
+  same rate at every note.
+- **Envelopes, LFOs, the Mod Matrix, glide, the level and the limit** work as WAVE's. The
+  output gain is 0.25: one Init note is at −20.8 dBFS RMS, and a four-note chord at full
+  velocity peaks at 0.51 of full scale.
+- **The cosine table** (1,026 floats, 4 KB) comes from `gen_phase_tables.py`, a formula
+  run at build time. The stock firmware's own sine table isn't used.
+
 **Costs** (emulator, instructions per voice per 128-sample block):
 
 | | Idle | Playing |
@@ -373,28 +538,33 @@ images stay below −63 dB. Each bank of 32 frames takes 66.5 KB of flash.
 | Stock VAP voice | 60,804 | 66,195 |
 | WAVE voice | 517 | 7,185 (Digital mode) to 19,413 (OB 24 dB and noise); 15,303 with a ladder |
 | WAVE voice, both oscillators on the super saw | 517 | 46,219 (the ladder) to 50,329 (OB 24 dB and noise) |
+| PHASE voice | 527 | 13,848 to 15,192 (one shape per DCO); 18,317 to 18,334 with everything on |
 
-An idle WAVE voice still runs its LFOs. Each Mod Matrix slot in use adds about 300.
-A WAVE voice is also a VAP voice object: 6.5 KB of heap, as VAP.
+"Everything on" is pairs on both DCOs, all six Mod Matrix slots, Ring Mod, Noise Mod and
+the DCO envelope.
+
+An idle voice still runs its LFOs. On WAVE, each Mod Matrix slot in use adds about 300.
+A WAVE or PHASE voice is also a VAP voice object: 6.5 KB of heap, as VAP.
 
 The effect costs about 840 instructions per synth per block with Effect None (the copy to
 the right side) and 8,900 with the Chorus, once per synth, not per voice.
 
 **Sizes:**
 - RAM: 2,064 bytes of on-chip patch RAM, for the settings, each slot's parameter copy and
-  8 engine voices; and 6,288 bytes for the effect (on-chip on its own, SDRAM in the all
-  bundle).
-- Flash: 483 KB, 467 KB of it the seven banks and the saw table (Super Saw and Saw).
-- The `.ptf` grows by about 1.3 MB (Intel HEX).
-- With all seven patches here bundled, the image ends at `0x6023c11c`, 2.2 MB into the
+  8 engine voices (WAVE's and PHASE's share the pool); and 6,288 bytes for the effect
+  (on-chip on its own, SDRAM in the all bundle).
+- Flash: 504 KB, 467 KB of it WAVE's seven banks and saw table, 4 KB PHASE's cosine
+  table.
+- The `.ptf` grows by about 1.4 MB (Intel HEX).
+- With all eleven patches bundled, the image ends at `0x60242585`, 2.3 MB into the
   flash (stock: 1.7 MB). Images reaching 8 MB into the flash install and run on hardware
   ([FINDINGS.md](../../docs/FINDINGS.md) section 8).
 
 **Shared hooks.** The Project Settings folder, the Config menu constructor's last item, and
 the Pattern and Config screen update methods are chained, as other patches here chain
 them. So are the registry builder, the project's slot records, the Model list's data,
-the list control's image draw, the Edit Patch label's text and the patch storage's
-load. So this patch combines with all of the others.
+the list control's image draw, the Edit Patch label's text, the Edit Patch tile builder
+and the patch storage's load. So this patch combines with all of the others.
 
 ## Build
 
@@ -402,14 +572,15 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/synths/patch.json build/TrackerPlus_sy7.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/synths/patch.json build/TrackerPlus_sy8.ptf
 ```
 
 To combine it with other patches, list `../synths/patch.json` in a bundle (see "Choosing
 patches" in [docs/PATCHING.md](../../docs/PATCHING.md)).
 
 To build the patch code from source, you need the Arm GNU Toolchain (`arm-none-eabi-gcc` on
-`PATH`, or `ARM_GCC_BIN` set to its `bin` folder) and Python with numpy (for the tables):
+`PATH`, or `ARM_GCC_BIN` set to its `bin` folder) and Python with numpy (for the tables,
+which `build.sh` generates with `gen_wavetables.py` and `gen_phase_tables.py`):
 
 ```bash
 patch/synths/build.sh
@@ -417,14 +588,21 @@ patch/synths/build.sh
 
 ### Emulator test
 
-Needs `pip install unicorn capstone numpy`:
+Needs `pip install unicorn capstone numpy`. There are two tests, one per synth:
 
 ```bash
-python tools/emu/test_synths.py build/TrackerPlus_sy7.ptf path/to/TrackerPlus_1.2.0.ptf [wav folder] [--stress 20000]
+python tools/emu/test_synths.py build/TrackerPlus_sy8.ptf path/to/TrackerPlus_1.2.0.ptf [wav folder] [--stress 20000]
 ```
 
-It runs the firmware's own synth system: host, slots, VAP voices and the audio graph
-(`tools/emu/synth_rig.py`). It checks:
+```bash
+python tools/emu/test_phase.py build/TrackerPlus_sy8.ptf path/to/TrackerPlus_1.2.0.ptf [sy7 .ptf] [--wav folder]
+```
+
+Both run the firmware's own synth system: host, slots, VAP voices and the audio graph
+(`tools/emu/synth_rig.py`). `tools/run_tests.py` runs both on every build that has
+synths.
+
+`test_synths.py` checks WAVE and what the two synths share:
 
 - **Stock:** with WAVE off, or replacing a model no synth uses, the output is identical
   to stock firmware, sample for sample. With WAVE replacing ACD, the VAP synths still
@@ -506,16 +684,60 @@ With a folder given, it also writes WAV files of test phrases:
 - a resonant sweep in Digital mode;
 - chords dry, then with the chorus at its defaults, then at Depth 100 % (stereo).
 
+`test_phase.py` checks PHASE:
+- **WAVE unchanged:** given a `sy7` build (the last with WAVE only), WAVE's model and its
+  output are the same as `sy7`'s, sample for sample.
+- **The PHASE model:** model id 7; 66 parameters in every per-parameter array, also
+  after a rebuild; its names, ranges, lists, CCs, value displays, Init values, screen,
+  Edit Patch pages and Macros; two channels; the title "Synth 1 (PHASE)"; no heap growth
+  over 50 model switches.
+- **The swap:** PHASE alone, WAVE and PHASE together, both set to one model (the one
+  changed last wins), a slot moving from WAVE to PHASE, 200 swaps with notes held.
+- **Menu, Model list, Edit Patch and file:** the "PHASE replaces" item; "PHASE" drawn
+  where the replaced logo was, beside "WAVE"; the label; the tiles DCO, DCW, DCA,
+  DCW Env and DCO Env with the stock icons, other synths' tiles stock; `synths.bin`'s
+  byte 5, damaged files kept, a `sy7` file loading with PHASE Off.
+- **The menu's lists**, through the stock menu code (constructor, editor, apply, value
+  texts): each item's editor lists Off and the models the other item doesn't replace, at
+  the right position; a pick sets the choice at once; positions before and after the
+  left-out model; 150 random picks from the lists shown, with the lists, positions,
+  texts and every synth's model checked after each; choices set outside the menu; the
+  conflict rule as a backstop; full lists when the heap has no room for the descriptors.
+- **Patch files:** `PHASE/<name>.patch` with model id 7 and 66 values, loaded back; stock
+  firmware rejects it.
+- **The engine**, against the shapes' formulas worked out in float64 in the test:
+  - every shape sample for sample (within 6.7e-6) at DCW 0, 50 and 100 %, and at notes
+    84–108 where the limits act;
+  - DCW 0 a pure sine for Saw to Saw-Pulse; harmonics within 0.011 dB of the formula's;
+    brightness rising with DCW;
+  - aliasing within the limits above; no jumps in the Double Sine and the Resos;
+  - pairs, Ring Mod, Noise Mod and the DCO envelope;
+  - pitch within 0.002 cents, Tune, Finetune, Detune, bend; the envelopes' times; Env
+    Amt 1 and 2; Key Follow; glide;
+  - each LFO through each destination; every source to every destination at ±400 %
+    finite and bounded;
+  - the Init level, velocity, voice allocation as stock VAP, the effect, the cost.
+- **Stress:** test_synths.py's, with both items swapped at random.
+
+`--quick` runs everything but the engine's checks (which depend on its code alone) and
+plays one note in their place; `--engine` runs only the engine's checks. With `--wav`,
+it writes WAV files: each shape's DCW sweep at two notes, four pairs, a Reso I sweep at
+three notes, Ring and Noise Mod, a DCO envelope pluck and an Init chord.
+
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched `.ptf` to
 `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then Config →
-Firmware → the patched file. Config should show `1.2.0-sy7 Build 1504`.
+Firmware → the patched file. Config should show `1.2.0-sy8 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`.
-- Synths that were WAVE play the replaced model's Init patch.
-- WAVE patches stay in `Patches/WAVE/`, and the projects' `synths.bin` files stay in their
-  folders. Stock firmware doesn't read either (delete them if you like).
+- Synths that were WAVE or PHASE play the replaced model's Init patch.
+- WAVE and PHASE patches stay in `Patches/WAVE/` and `Patches/PHASE/`, and the projects'
+  `synths.bin` files stay in their folders. Stock firmware doesn't read any of them
+  (delete them if you like).
+- To go back to `sy7` (WAVE only), install it the same way. PHASE synths then play the
+  replaced model's Init patch too, and a project with PHASE set should play the stock
+  models (see "Using it") until it is opened in `sy8` again.
 
 If the unit freezes, pull the power, boot, and revert through Config. If it doesn't boot, or
 Config itself doesn't work:

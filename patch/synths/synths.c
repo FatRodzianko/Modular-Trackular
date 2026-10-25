@@ -1,13 +1,21 @@
 /*
- * synths: WAVE, a wavetable synth that can stand in for one of the five synth models,
- * chosen per project (Polyend Tracker+ firmware 1.2.0).
+ * synths: WAVE, a wavetable synth, and PHASE, a phase distortion synth, each of which can
+ * stand in for one of the five synth models, chosen per project (Polyend Tracker+
+ * firmware 1.2.0).
  *
- * Project Settings gets a "Synth Engines" folder with one item, "WAVE replaces": Off
- * (the default), ACD, FAT, VAP, WTFM or PERC. The Instrument screen's Model list then
- * shows WAVE in that model's place, the instrument title reads "Synth 1 (WAVE)", and
- * the synth pages show WAVE's own controls. Each named project keeps its choice in
+ * Project Settings gets a "Synth Engines" folder with two items, "WAVE replaces" and
+ * "PHASE replaces": Off (the default), ACD, FAT, VAP, WTFM or PERC. The Instrument
+ * screen's Model list then shows WAVE (or PHASE) in that model's place, the instrument
+ * title reads "Synth 1 (WAVE)", and the synth pages show the engine's own controls. The
+ * two can replace two different models; set to the same one, the item changed last
+ * wins and the other goes back to Off. Each named project keeps its choices in
  * <project folder>/synths.bin; a project without the file, and every project in stock
  * firmware, plays the stock models.
+ *
+ * Everything below is described for WAVE; PHASE works the same way with its own model
+ * id (7), builder, engine (ph_engine.h) and parameter map. Its Edit Patch tiles get CZ
+ * names (DCO, DCW, DCA, DCW Env, DCO Env) from one more hook, after the stock function
+ * that names the tiles from the pages' names (docs/PD_SYNTH_PLAN.md section 4.1).
  *
  * How (docs/FINDINGS.md section 23 has the map):
  *
@@ -60,7 +68,7 @@
 #include <stdint.h>
 
 #ifndef SYNTHS_VERSION
-#define SYNTHS_VERSION "sy7"
+#define SYNTHS_VERSION "sy8"
 #endif
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
@@ -82,6 +90,7 @@ CHAIN_WORD(mt_syn_next_list_data);          /* disp_ctrl_set_data 0x60101df9 (Mo
 CHAIN_WORD(mt_syn_next_list_images);        /* the list control's image items 0x6010645d */
 CHAIN_WORD(mt_syn_next_patch_label);        /* disp_ctrl_set_text 0x60101d5d (Edit Patch's logo label) */
 CHAIN_WORD(mt_syn_next_patch_load);         /* patch storage +0x0c, load into a patch: 0x60124f39 */
+CHAIN_WORD(mt_syn_next_tiles);              /* the Edit Patch tiles' labels 0x6011d629 */
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */
 #define FW_SYNTHS           0x200170E8u     /* the synth system S (app + 8) */
@@ -97,6 +106,7 @@ CHAIN_WORD(mt_syn_next_patch_load);         /* patch storage +0x0c, load into a 
 #define PATCH_SET_VALUE     0x10u           /* patch vtable: set_value(patch, index, float *, source) */
 #define FW_PATCH_VTABLE     0x6006307Cu     /* every model's patch class */
 #define MODEL_WAVE          3u              /* WAVE's model id (no stock model has it) */
+#define MODEL_PHASE         7u              /* PHASE's (neither) */
 #define MODELS              5u              /* the Model list: ACD, FAT, VAP, WTFM, PERC */
 #define SLOTS               3u
 #define FW_MODEL_TABLE      ((volatile uint32_t *)0x200006B4u)  /* model index -> model id */
@@ -138,33 +148,59 @@ typedef void (*set_model_fn)(void *s, uint32_t slot, uint32_t id);
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
 #define REPLACE_NONE        0xFFu           /* "WAVE replaces" Off */
-#define SY_MAGIC            0x32594E53u     /* "SNY2": the settings fields are valid */
+#define SY_MAGIC            0x33594E53u     /* "SNY3": the settings fields are valid (SNY2: sy7's, without PHASE's) */
 #define SY_READY            0x59444552u     /* "REDY": booted, the engine may run */
 #define SAVE_DELAY          25u             /* screen updates between a change and the save */
 #define MAX_VOICES          8u              /* the stock cap for all three slots together */
-#define LIST_TEXT_ID        0x7Fu           /* an image id the list skips (ids below 0x24 draw) */
+#define LIST_TEXT_ID        0x7Fu           /* an image id the list skips (ids below 0x24 draw): WAVE's row */
+#define LIST_TEXT_PHASE     0x7Eu           /* ... PHASE's row */
 
 #include "wt_engine.h"
+#include "ph_engine.h"
+
+/* The engines: an engine voice's tag, and what a voice's patch is */
+#define ENGINE_WAVE         0u
+#define ENGINE_PHASE        1u
+#define ENGINE_NONE         0xFFu           /* a stock model's voice */
+#define CUSTOM_PARAMS       66u             /* WAVE's and PHASE's patches: VAP's 60 and the same own six */
+_Static_assert(WAVE_PARAMS == CUSTOM_PARAMS && PHASE_PARAMS == CUSTOM_PARAMS, "the own six after VAP's 60");
+
+/* An engine voice of either engine; both begin with owner, slot, engine */
+union sy_voice {
+    struct { uint32_t owner; uint16_t slot; uint8_t engine; uint8_t pad0; } h;
+    struct wt_voice wt;
+    struct ph_voice ph;
+};
+_Static_assert(sizeof(union sy_voice) == sizeof(struct wt_voice), "PHASE's voice fits WAVE's");
+_Static_assert(offsetof(struct ph_voice, engine) == offsetof(struct wt_voice, engine), "the voices' heads");
 
 struct syn_state {
     uint32_t magic;
     uint32_t session;                       /* project name + path the choice belongs to */
-    uint8_t menu;                           /* the menu edits this: 0 Off, 1 + the model index */
+    uint8_t menu;                           /* WAVE's choice: 0 Off, 1 + the model index */
     uint8_t saved;                          /* what synths.bin holds */
     uint8_t saved_valid;
     uint8_t unnamed;                        /* the session is a project without a name */
     uint8_t wait;                           /* updates left before saving */
     uint8_t applied;                        /* the model index the table maps to WAVE, or REPLACE_NONE */
     uint8_t fx_ready;                       /* the late RAM block is set up (reset at every start) */
-    uint8_t pad;
+    uint8_t menu_pos;                       /* the menu edits this: the position in WAVE's list */
     /* the audio side (reset at every start) */
     uint32_t ready;                         /* SY_READY once the unit has booted */
     uint32_t switches;                      /* slots the patch moved to another model (for the tests) */
     uint32_t loads;                         /* project loads seen (for the tests) */
-    int32_t model_ids[MODELS];              /* the Model list's image ids while WAVE replaces one */
-    float param[SLOTS][WT_PARAMS];          /* each slot's copy of the parameters it uses */
-    struct wt_voice voice[MAX_VOICES];      /* the engine's voices; .owner 0 = free */
+    int32_t model_ids[MODELS];              /* the Model list's image ids while WAVE or PHASE replaces one */
+    float param[SLOTS][WT_PARAMS];          /* each slot's copy of the parameters its engine uses */
+    union sy_voice voice[MAX_VOICES];       /* the engines' voices; .h.owner 0 = free */
+    /* PHASE's, as menu, saved and applied; last, so the rest is where sy7 had it (WAVE's
+     * voices start their oscillators from their addresses) */
+    uint8_t ph_menu;
+    uint8_t ph_saved;
+    uint8_t ph_applied;
+    uint8_t ph_menu_pos;
 };
+/* the all bundle has 2,064 bytes for it (dtcm_above_heap, docs/PD_SYNTH_PLAN.md section 1) */
+_Static_assert(sizeof(struct syn_state) <= 2064u, "synths' startup RAM");
 static struct syn_state syn_state_ram __attribute__((section(".mt_ram")));
 #define SY (&syn_state_ram)
 
@@ -183,12 +219,12 @@ static void sy_init_if_needed(void)         /* RAM outside .bss holds garbage at
 {
     if (SY->magic == SY_MAGIC)
         return;
-    SY->menu = 0;
+    SY->menu = SY->ph_menu = 0;
     SY->session = 0;
     SY->saved_valid = 0;
     SY->unnamed = 0;
     SY->wait = 0;
-    SY->applied = REPLACE_NONE;             /* as at a start: the stock table */
+    SY->applied = SY->ph_applied = REPLACE_NONE;    /* as at a start: the stock table */
     SY->magic = SY_MAGIC;
 }
 
@@ -198,9 +234,9 @@ static void sy_audio_reset(void)
 {
     SY->ready = 0;
     SY->fx_ready = 0;
-    SY->applied = REPLACE_NONE;
+    SY->applied = SY->ph_applied = REPLACE_NONE;
     for (uint32_t k = 0; k < MAX_VOICES; k++)
-        SY->voice[k].owner = 0;
+        SY->voice[k].h.owner = 0;
     SY->switches = 0;
     SY->loads = 0;
 }
@@ -222,17 +258,23 @@ static int slot_of(const uint8_t *voice)
     return -1;
 }
 
-/* The voice's patch is WAVE's */
-static int is_wave(const uint8_t *voice)
+/* The engine of a model id: ENGINE_WAVE, ENGINE_PHASE or ENGINE_NONE */
+static uint32_t engine_of_model(uint32_t id)
 {
-    uint32_t patch = *(const volatile uint32_t *)(voice + VOICE_PATCH);
-    return patch && *(const volatile uint32_t *)(patch + PATCH_MODEL) == MODEL_WAVE;
+    return id == MODEL_WAVE ? ENGINE_WAVE : id == MODEL_PHASE ? ENGINE_PHASE : ENGINE_NONE;
 }
 
-static struct wt_voice *entry_of(const void *voice)
+/* The engine of the voice's patch */
+static uint32_t engine_of(const uint8_t *voice)
+{
+    uint32_t patch = *(const volatile uint32_t *)(voice + VOICE_PATCH);
+    return patch ? engine_of_model(*(const volatile uint32_t *)(patch + PATCH_MODEL)) : ENGINE_NONE;
+}
+
+static union sy_voice *entry_of(const void *voice)
 {
     for (uint32_t k = 0; k < MAX_VOICES; k++)
-        if (SY->voice[k].owner == (uint32_t)voice)
+        if (SY->voice[k].h.owner == (uint32_t)voice)
             return &SY->voice[k];
     return 0;
 }
@@ -260,42 +302,49 @@ static void audio_irq_restore(uint32_t on)
         ((void_fn)FW_IRQ_ENABLE)();
 }
 
-/* An engine voice for a voice of a WAVE slot, or 0 when all 8 are taken (that voice
- * then stays silent until one is free). Not interrupted by the audio interrupt. */
-static struct wt_voice *entry_new(const void *voice, uint32_t slot)
+/* An engine voice for a voice of a WAVE or PHASE slot, or 0 when all 8 are taken (that
+ * voice then stays silent until one is free). Not interrupted by the audio interrupt. */
+static union sy_voice *entry_new(const void *voice, uint32_t slot, uint32_t engine)
 {
     uint32_t irq = audio_irq_save();
-    struct wt_voice *e = entry_of(voice);
+    union sy_voice *e = entry_of(voice);
     for (uint32_t k = 0; !e && k < MAX_VOICES; k++)
-        if (!SY->voice[k].owner) {
+        if (!SY->voice[k].h.owner) {
             e = &SY->voice[k];
-            wt_voice_init(e, slot);
-            e->owner = (uint32_t)voice;
+            if (engine == ENGINE_PHASE)
+                ph_voice_init(&e->ph, slot);
+            else
+                wt_voice_init(&e->wt, slot);
+            e->h.engine = (uint8_t)engine;
+            e->h.pad0 = 0;
+            e->h.owner = (uint32_t)voice;
         }
     audio_irq_restore(irq);
     return e;
 }
 
-/* The engine runs this voice: booted, a WAVE voice of a slot, with an engine voice. */
-static struct wt_voice *engine_voice(const uint8_t *voice, int *slot)
+/* The engine runs this voice: booted, a WAVE or PHASE voice of a slot, with an engine
+ * voice of its engine. */
+static union sy_voice *engine_voice(const uint8_t *voice, int *slot)
 {
-    if (SY->ready != SY_READY || !is_wave(voice))
+    uint32_t engine = engine_of(voice);
+    if (SY->ready != SY_READY || engine == ENGINE_NONE)
         return 0;
     int i = slot_of(voice);
     *slot = i;
     if (i < 0)
         return 0;
-    struct wt_voice *e = entry_of(voice);
-    return e && e->slot == (uint32_t)i ? e : 0;
+    union sy_voice *e = entry_of(voice);
+    return e && e->h.slot == (uint32_t)i && e->h.engine == engine ? e : 0;
 }
 
-/* Entries whose voice no slot holds any more (a path that bypassed the delete hook) are
- * freed; then a free entry goes to a WAVE voice that has none (one made while all 8 were
- * taken, silent so far). */
+/* Entries whose voice no slot holds any more (a path that bypassed the delete hook), or
+ * whose voice now plays another engine, are freed; then a free entry goes to a WAVE or
+ * PHASE voice that has none (one made while all 8 were taken, silent so far). */
 static void sweep(void)
 {
     for (uint32_t k = 0; k < MAX_VOICES; k++) {
-        uint32_t v = SY->voice[k].owner;
+        uint32_t v = SY->voice[k].h.owner;
         if (!v)
             continue;
         int held = 0;
@@ -306,8 +355,8 @@ static void sweep(void)
                 if (*(const volatile uint32_t *)(slot + SLOT_VOICE(r)) == v)
                     held = 1;
         }
-        if (!held || !is_wave((const uint8_t *)v))
-            SY->voice[k].owner = 0;
+        if (!held || engine_of((const uint8_t *)v) != SY->voice[k].h.engine)
+            SY->voice[k].h.owner = 0;
     }
     for (uint32_t i = 0; i < SLOTS; i++) {
         uint8_t *slot = (uint8_t *)slot_word(i, SYN_SLOT_OBJ);
@@ -316,41 +365,65 @@ static void sweep(void)
         uint32_t n = *(volatile uint32_t *)(slot + SLOT_NVOICES);
         for (uint32_t r = 0; r < n && r < MAX_VOICES; r++) {
             const uint8_t *v = (const uint8_t *)*(volatile uint32_t *)(slot + SLOT_VOICE(r));
-            if (v && is_wave(v) && slot_of(v) == (int)i && !entry_of(v))
-                entry_new(v, i);
+            uint32_t engine = v ? engine_of(v) : ENGINE_NONE;
+            if (engine != ENGINE_NONE && slot_of(v) == (int)i && !entry_of(v))
+                entry_new(v, i, engine);
         }
     }
 }
 
 /* ---- the swap ---------------------------------------------------------------------- */
 
-/* The model index table (and the Model list's ids) with `replace` mapped to WAVE */
-static void swap_table(uint32_t replace)
+/* The model index table (and the Model list's ids) with `wave` mapped to WAVE and
+ * `phase` to PHASE (REPLACE_NONE: neither; PHASE gives way if both name one index) */
+static void swap_table(uint32_t wave, uint32_t phase)
 {
+    if (phase == wave)
+        phase = REPLACE_NONE;
     for (uint32_t k = 0; k < MODELS; k++) {
         FW_MODEL_TABLE[k] = stock_model_ids[k];
         SY->model_ids[k] = stock_image_ids[k];
     }
-    if (replace < MODELS) {
-        FW_MODEL_TABLE[replace] = MODEL_WAVE;
-        SY->model_ids[replace] = LIST_TEXT_ID;
+    if (wave < MODELS) {
+        FW_MODEL_TABLE[wave] = MODEL_WAVE;
+        SY->model_ids[wave] = LIST_TEXT_ID;
     }
-    SY->applied = (uint8_t)(replace < MODELS ? replace : REPLACE_NONE);
+    if (phase < MODELS) {
+        FW_MODEL_TABLE[phase] = MODEL_PHASE;
+        SY->model_ids[phase] = LIST_TEXT_PHASE;
+    }
+    SY->applied = (uint8_t)(wave < MODELS ? wave : REPLACE_NONE);
+    SY->ph_applied = (uint8_t)(phase < MODELS ? phase : REPLACE_NONE);
 }
 
-static uint32_t menu_replace(void)
+static uint32_t replace_of(uint32_t menu)
 {
-    return SY->menu >= 1 && SY->menu <= MODELS ? SY->menu - 1u : REPLACE_NONE;
+    return menu >= 1 && menu <= MODELS ? menu - 1u : REPLACE_NONE;
 }
 
-/* The menu's choice to the table and to the slots whose model it changes (screen
+/* The two menu items set to one model: the one changed since the choices last applied
+ * wins, and the other goes back to Off (WAVE wins when both or neither changed, as a
+ * synths.bin with one model in both loads) */
+static void menu_conflict(void)
+{
+    uint32_t w = replace_of(SY->menu), ph = replace_of(SY->ph_menu);
+    if (w == REPLACE_NONE || w != ph)
+        return;
+    if (ph != SY->ph_applied && w == SY->applied)
+        SY->menu = 0;
+    else
+        SY->ph_menu = 0;
+}
+
+/* The menu's choices to the table and to the slots whose model they change (screen
  * updates only, as the Model list's own changes are; once the synth system exists) */
 static void apply_menu(void)
 {
-    uint32_t want = menu_replace();
-    if (want == SY->applied || !slot_word(0, SYN_REGISTRY))
+    menu_conflict();
+    uint32_t w = replace_of(SY->menu), ph = replace_of(SY->ph_menu);
+    if ((w == SY->applied && ph == SY->ph_applied) || !slot_word(0, SYN_REGISTRY))
         return;
-    swap_table(want);
+    swap_table(w, ph);
     for (uint32_t i = 0; i < SLOTS; i++) {
         uint32_t index = FW_RECORD_MODEL(i);
         if (index >= MODELS || !slot_word(i, SYN_SLOT_OBJ))
@@ -394,9 +467,9 @@ static void apply_menu(void)
 /* +0x04 deleting destructor (voice): free the engine voice, then the stock one */
 __attribute__((used)) int sy_obs_delete(const uint32_t *f)
 {
-    struct wt_voice *e = entry_of((const void *)f[0]);
+    union sy_voice *e = entry_of((const void *)f[0]);
     if (e)
-        e->owner = 0;
+        e->h.owner = 0;
     return CHAIN;
 }
 
@@ -404,20 +477,23 @@ __attribute__((used)) int sy_obs_delete(const uint32_t *f)
 __attribute__((used)) int sy_obs_midi(const uint32_t *f)
 {
     int slot;
-    struct wt_voice *e = engine_voice((const uint8_t *)f[0], &slot);
-    if (e)
-        wt_voice_midi(e, (const uint8_t *)f[2], SY->param[slot]);
+    union sy_voice *e = engine_voice((const uint8_t *)f[0], &slot);
+    if (e && e->h.engine == ENGINE_PHASE)
+        ph_voice_midi(&e->ph, (const uint8_t *)f[2], SY->param[slot]);
+    else if (e)
+        wt_voice_midi(&e->wt, (const uint8_t *)f[2], SY->param[slot]);
     return CHAIN;
 }
 
-/* +0x0c set_param (voice, index, float *value): a WAVE voice's go into its slot's copy
- * and stop there; every other voice's go to VAP, except an index past VAP's 60 (VAP's
- * handler table has 60 entries) */
+/* +0x0c set_param (voice, index, float *value): a WAVE or PHASE voice's go into its slot's
+ * copy (each engine's map) and stop there; every other voice's go to VAP, except an index
+ * past VAP's 60 (VAP's handler table has 60 entries) */
 __attribute__((used)) int sy_obs_set_param(const uint32_t *f)
 {
     const uint8_t *voice = (const uint8_t *)f[0];
     uint32_t index = f[1];
-    if (!is_wave(voice))
+    uint32_t engine = engine_of(voice);
+    if (engine == ENGINE_NONE)
         return index < VAP_PARAMS ? CHAIN : 0;
     int i = slot_of(voice);
     if (i < 0)
@@ -428,48 +504,58 @@ __attribute__((used)) int sy_obs_set_param(const uint32_t *f)
             FXR->fx[i].p[index - FX_FIRST] = v;
         return 0;
     }
-    if (index < WAVE_PARAMS && wt_param_slot[index] != WT_UNUSED)
-        SY->param[i][wt_param_slot[index]] = v;
-    struct wt_voice *e = entry_of(voice);
+    const uint8_t *map = engine == ENGINE_PHASE ? ph_param_slot : wt_param_slot;
+    if (index < CUSTOM_PARAMS && map[index] != WT_UNUSED)
+        SY->param[i][map[index]] = v;
+    union sy_voice *e = entry_of(voice);
     if (!e)
-        e = entry_new(voice, (uint32_t)i);
-    if (e && index == VAP_VOLUME)
-        e->volume = v;
+        e = entry_new(voice, (uint32_t)i, engine);
+    if (e && index == VAP_VOLUME) {
+        if (e->h.engine == ENGINE_PHASE)
+            e->ph.volume = v;
+        else
+            e->wt.volume = v;
+    }
     return 0;
 }
 
 /* +0x10 render (voice, ctx, 0, 0, [sp] 0, [sp+4] L, [sp+8] R, [sp+0xc] 2, [sp+0x10] ...):
- * a WAVE voice: the engine overwrites L (mono, as VAP), or 128 zeros before the unit has
- * booted or while it has no engine voice; every other voice: VAP renders */
+ * a WAVE or PHASE voice: the engine overwrites L (mono, as VAP), or 128 zeros before the
+ * unit has booted or while it has no engine voice; every other voice: VAP renders */
 __attribute__((used)) int sy_obs_render(const uint32_t *f)
 {
     const uint8_t *voice = (const uint8_t *)f[0];
-    if (!is_wave(voice))
+    if (engine_of(voice) == ENGINE_NONE)
         return CHAIN;
     float *out = (float *)f[FRAME_STACK + 1];
     int slot;
-    struct wt_voice *e = engine_voice(voice, &slot);
+    union sy_voice *e = engine_voice(voice, &slot);
     const float *ctx = (const float *)f[1];     /* the render context: ctx[0] is the tempo */
-    if (e && WT_ENGINE_ON)
-        wt_voice_render(e, SY->param[slot], out, ctx ? ctx[0] : 120.0f);
+    float tempo = ctx ? ctx[0] : 120.0f;
+    if (e && e->h.engine == ENGINE_PHASE)
+        ph_voice_render(&e->ph, SY->param[slot], out, tempo);
+    else if (e && WT_ENGINE_ON)
+        wt_voice_render(&e->wt, SY->param[slot], out, tempo);
     else
         for (uint32_t n = 0; n < WT_BLOCK; n++)
             out[n] = 0.0f;
     return 0;
 }
 
-/* +0x18 sounding (voice): a WAVE voice: the engine's amp envelope is not idle */
+/* +0x18 sounding (voice): a WAVE or PHASE voice: the engine's amp envelope is not idle */
 __attribute__((used)) int sy_obs_sounding(const uint32_t *f)
 {
     const uint8_t *voice = (const uint8_t *)f[0];
-    if (!is_wave(voice))
+    if (engine_of(voice) == ENGINE_NONE)
         return CHAIN;
     int slot;
-    struct wt_voice *e = engine_voice(voice, &slot);
-    return e ? wt_voice_sounding(e) : 0;
+    union sy_voice *e = engine_voice(voice, &slot);
+    if (!e)
+        return 0;
+    return e->h.engine == ENGINE_PHASE ? ph_voice_sounding(&e->ph) : wt_voice_sounding(&e->wt);
 }
 
-static float *wave_values(uint8_t *patch);
+static float *custom_values(uint8_t *patch);
 
 /* A slot's effect state, once the unit has booted. The first call after a start sets
  * the block up: cleared, with each slot's effect values from its patch (set_param only
@@ -483,7 +569,7 @@ static struct wt_fx *fx_slot(uint32_t slot)
         for (uint32_t k = 0; k < sizeof(struct fx_ram) / 4u; k++)
             w[k] = 0;
         for (uint32_t i = 0; i < SLOTS; i++) {
-            const float *v = wave_values((uint8_t *)slot_word(i, SYN_SLOT_PATCH));
+            const float *v = custom_values((uint8_t *)slot_word(i, SYN_SLOT_PATCH));
             const float *src = v ? v + FX_FIRST : fx_defaults;
             for (uint32_t k = 0; k < FX_PARAMS; k++)
                 FXR->fx[i].p[k] = src[k];
@@ -494,12 +580,13 @@ static struct wt_fx *fx_slot(uint32_t slot)
 }
 
 /* +0x14 (voice, ctx, L, R), voice 0's, once per block after the slot's voices have
- * rendered into L and R (the slot's output): for a WAVE slot, the effect, which writes
- * both sides (its patch has two channels); before boot, R = L. Others: VAP's (nothing). */
+ * rendered into L and R (the slot's output): for a WAVE or PHASE slot, the effect, which
+ * writes both sides (its patch has two channels); before boot, R = L. Others: VAP's
+ * (nothing). */
 __attribute__((used)) int sy_obs_post(const uint32_t *f)
 {
     const uint8_t *voice = (const uint8_t *)f[0];
-    if (!is_wave(voice))
+    if (engine_of(voice) == ENGINE_NONE)
         return CHAIN;
     float *L = (float *)f[2], *R = (float *)f[3];
     int slot = slot_of(voice);
@@ -580,7 +667,7 @@ static uint32_t vec_count(const struct fw_vector *v, uint32_t size)
     return (uint32_t)(v->end - v->begin) / size;
 }
 
-/* ---- WAVE: the descriptor and its builder -------------------------------------------- */
+/* ---- WAVE and PHASE: the descriptors and their builders -------------------------------------------- */
 
 /* A parameter entry (0x38 bytes), a screen-layout group and its sub-screens, a Macro
  * editor page, a Macro (FINDINGS section 23) */
@@ -704,6 +791,10 @@ static void set_display(struct fw_param *p, uint32_t invoker)
 #define H_6                 0x4600u         /* Src: 7 sources */
 #define H_8                 0x4800u         /* Wave: 9 waves */
 #define H_10                0x4900u         /* Dest: 11 destinations */
+#define H_7                 0x4700u         /* PHASE's Wave: 8 shapes */
+#define H_M1                0xBC00u         /* -1 */
+#define H_48                0x5200u         /* DCO Env Amt: +-48 semitones */
+#define H_M48               0xD200u
 
 /* WAVE's names (0: VAP's) and Init values over VAP's entries */
 struct wave_param { uint8_t index; const char *name; float value; };
@@ -811,12 +902,9 @@ static void wave_macros(const void *functor, struct fw_vector *macros)
     }
 }
 
-/* VAP's patch -> WAVE's. Checked first: anything unexpected leaves it VAP's (model 4).
- * The screen keeps VAP's tabs and cells (Oscillator, Filter, Modulation, Matrix, FX,
- * Voice), with WAVE's oscillator cells and names. WAVE's filter envelope is VAP's
- * Envelope 2 (15-18) and its mod envelope VAP's Envelope 1 (23-26); the pages and tabs
- * show the filter envelope first, as VAP shows its own (23-26: VAP's filter envelope). */
-static void wave_rewrite(uint8_t *c)
+/* VAP's patch as its builder leaves it, the layout WAVE's and PHASE's rewrites start from.
+ * Checked first: anything unexpected leaves the patch VAP's (model 4). */
+static int vap_layout_ok(uint8_t *c)
 {
     struct fw_vector *pv = (struct fw_vector *)(c + C_PARAMS);
     struct fw_vector *gv = (struct fw_vector *)(c + C_GROUPS);
@@ -827,12 +915,12 @@ static void wave_rewrite(uint8_t *c)
     uint32_t *init = (uint32_t *)(c + C_MACRO_INIT);       /* functor[2], manager, invoker */
     if (vec_count(pv, sizeof *p) != VAP_PARAMS || vec_count(gv, sizeof *g) != 6 || vec_count(qv, sizeof *q) != 9
         || *(uint32_t *)(c + C_MODEL) != 4u || init[3] != FW_VAP_MACROS)
-        return;
+        return 0;
     if (!str_eq(&g[0].name, "Oscillator") || !str_eq(&g[2].name, "Modulation")
         || vec_count(&g[0].subs, sizeof(struct fw_sub)) != 2 || vec_count(&g[2].subs, sizeof(struct fw_sub)) != 3
         || !str_eq(&q[3].name, "Envelope 1") || !str_eq(&q[4].name, "Envelope 2") || !str_eq(&p[2].name, "PW 1")
         || !str_eq(&p[40].name, "Sync") || !str_eq(&p[42].name, "Src 1") || !str_eq(&p[59].name, "Amt 6"))
-        return;
+        return 0;
     struct fw_sub *osc = (struct fw_sub *)g[0].subs.begin;
     struct fw_sub *mod = (struct fw_sub *)g[2].subs.begin;
     if ((uint32_t)(osc[0].cells.cap - osc[0].cells.begin) < sizeof osc_cells * sizeof(struct fw_cell)
@@ -851,21 +939,26 @@ static void wave_rewrite(uint8_t *c)
         || !cells_are(&((struct fw_sub *)g[5].subs.begin)[0].cells, vap_voice_page, sizeof vap_voice_page)
         || !str_eq(&q[8].name, "Voice") || !cells_are(&q[8].cells, vap_voice_page, sizeof vap_voice_page)
         || *(uint32_t *)(c + C_CHANNELS) != 1u)
-        return;
+        return 0;
+    return 1;
+}
 
-    /* WAVE's own parameters after VAP's 60: the LFOs' Polarity, Bipolar (0) or Unipolar
-     * (1), then the effect's (wt_fx.h). First, as the firmware's own append makes the
-     * entries and may move the vector. The lists are stepped like Type, the others plain
-     * like Drive (VAP's Mix Env Amt); none has a CC or a rebuild on change. */
-    ((void (*)(struct fw_vector *, uint32_t))FW_PARAMS_APPEND)(pv, WAVE_PARAMS - VAP_PARAMS);
-    if (!pv->begin || vec_count(pv, sizeof *p) != WAVE_PARAMS)
-        return;
-    p = (struct fw_param *)pv->begin;
-    for (uint32_t k = VAP_PARAMS; k < WAVE_PARAMS; k++) {
-        static const char *const names[WAVE_PARAMS - VAP_PARAMS] = {
+/* The own six after VAP's 60, the same in WAVE and PHASE: the LFOs' Polarity, Bipolar (0)
+ * or Unipolar (1), then the effect's (wt_fx.h). First, as the firmware's own append makes
+ * the entries and may move the vector. The lists are stepped like Type, the others plain
+ * like VAP's Mix Env Amt; none has a CC or a rebuild on change. Returns the entries, or 0. */
+static struct fw_param *append_own(uint8_t *c)
+{
+    struct fw_vector *pv = (struct fw_vector *)(c + C_PARAMS);
+    ((void (*)(struct fw_vector *, uint32_t))FW_PARAMS_APPEND)(pv, CUSTOM_PARAMS - VAP_PARAMS);
+    if (!pv->begin || vec_count(pv, sizeof(struct fw_param)) != CUSTOM_PARAMS)
+        return 0;
+    struct fw_param *p = (struct fw_param *)pv->begin;
+    for (uint32_t k = VAP_PARAMS; k < CUSTOM_PARAMS; k++) {
+        static const char *const names[CUSTOM_PARAMS - VAP_PARAMS] = {
             "Polarity", "Polarity", "Effect", "Rate", "Depth", "Mix",
         };
-        static const fmt_fn displays[WAVE_PARAMS - VAP_PARAMS] = {
+        static const fmt_fn displays[CUSTOM_PARAMS - VAP_PARAMS] = {
             fmt_pol, fmt_pol, fmt_effect, fmt_rate, fmt_percent, fmt_percent,
         };
         uint32_t list = k < FX_FIRST + FX_RATE;
@@ -877,6 +970,26 @@ static void wave_rewrite(uint8_t *c)
         p[k].pad = 0;
         set_display(&p[k], (uint32_t)displays[k - VAP_PARAMS]);
     }
+    return p;
+}
+
+/* VAP's patch -> WAVE's. The screen keeps VAP's tabs and cells (Oscillator, Filter,
+ * Modulation, Matrix, FX, Voice), with WAVE's oscillator cells and names. WAVE's filter
+ * envelope is VAP's Envelope 2 (15-18) and its mod envelope VAP's Envelope 1 (23-26); the
+ * pages and tabs show the filter envelope first, as VAP shows its own (23-26: VAP's filter
+ * envelope). */
+static void wave_rewrite(uint8_t *c)
+{
+    if (!vap_layout_ok(c))
+        return;
+    struct fw_group *g = (struct fw_group *)((struct fw_vector *)(c + C_GROUPS))->begin;
+    struct fw_page *q = (struct fw_page *)((struct fw_vector *)(c + C_PAGES))->begin;
+    uint32_t *init = (uint32_t *)(c + C_MACRO_INIT);
+    struct fw_sub *osc = (struct fw_sub *)g[0].subs.begin;
+    struct fw_sub *mod = (struct fw_sub *)g[2].subs.begin;
+    struct fw_param *p = append_own(c);
+    if (!p)
+        return;
 
     /* the parameters */
     uint32_t stepped = p[11].flags;         /* Type's: a stepped list, no CC */
@@ -935,36 +1048,252 @@ static void wave_rewrite(uint8_t *c)
  * and its container): VAP's, rewritten */
 static void wave_builder(void *patch, uint8_t *container)
 {
-    /* A new patch's vector made 62 long first: VAP's builder trims it to its 60 and keeps
-     * the room, so WAVE's two go in without a new allocation. (Growing 60 to 62 would
+    /* A new patch's vector made 66 long first: VAP's builder trims it to its 60 and keeps
+     * the room, so the own six go in without a new allocation. (Growing 60 to 66 would
      * double the capacity: a 6.7 KB allocation, kept for the patch's life.) */
     struct fw_vector *pv = (struct fw_vector *)(container + C_PARAMS);
     if (pv->begin == pv->end)
-        ((void (*)(struct fw_vector *, uint32_t))FW_PARAMS_APPEND)(pv, WAVE_PARAMS);
+        ((void (*)(struct fw_vector *, uint32_t))FW_PARAMS_APPEND)(pv, CUSTOM_PARAMS);
     ((void (*)(void *, void *))FW_VAP_BUILDER)(patch, container);
     wave_rewrite(container);
 }
 
-/* replaces "bl 0x60140150" at 0x60126b30 (the synth manager's constructor; chained):
- * the stock models, then WAVE as model 3 */
-void mt_syn_registry(void *registry)
+/* ---- PHASE: the descriptor and its builder ------------------------------------------- */
+
+static const char *const shape_names[PH_SHAPES] = {
+    "Saw", "Square", "Pulse", "Double Sine", "Saw-Pulse", "Reso I", "Reso II", "Reso III",
+};
+static const char *const pair_names[1 + PH_SHAPES] = {
+    "Off", "Saw", "Square", "Pulse", "Double Sine", "Saw-Pulse", "Reso I", "Reso II", "Reso III",
+};
+static const char *const ph_src_names[PH_SRCS] = {
+    "DCA Env", "DCW Env", "DCO Env", "LFO 1", "LFO 2", "Velocity", "Key",
+};
+static const char *const ph_dest_names[PH_DESTS] = {
+    "Pitch", "Pitch 1", "Pitch 2", "DCW", "DCW 1", "DCW 2", "Mix", "Volume", "Detune",
+};
+static const char *const onoff_names[2] = {"Off", "On"};
+FMT_LIST(fmt_shape, shape_names, PH_SHAPES)
+FMT_LIST(fmt_pair, pair_names, 1 + PH_SHAPES)
+FMT_LIST(fmt_ph_src, ph_src_names, PH_SRCS)
+FMT_LIST(fmt_ph_dest, ph_dest_names, PH_DESTS)
+FMT_LIST(fmt_onoff, onoff_names, 2)
+
+/* invoker for whole semitones ("-12 st") */
+static struct fw_string *fmt_semis(struct fw_string *ret, const void *functor, uint32_t x,
+                                   const float *value)
 {
-    ((void (*)(void *))mt_syn_next_registry)(registry);
+    (void)functor; (void)x;
+    float v = clampf(*value, -48.0f, 48.0f);
+    char buf[8];
+    ((snprintf_fn)FW_SNPRINTF)(buf, sizeof buf, "%d st", (int)(v + (v < 0.0f ? -0.5f : 0.5f)));
+    str_init(ret, buf);
+    return ret;
+}
+
+/* PHASE's names (0: VAP's) and Init values over VAP's entries */
+static const struct wave_param phase_params[] = {
+    {0, "Wave 1+", 0.0f}, {1, "Wave 2+", 0.0f},            /* Off: one shape per DCO */
+    {2, "Wave 1", 0.0f}, {3, "Wave 2", 0.0f},              /* Saw */
+    {4, "Mix", 0.0f}, {5, "Tune 1", 0.0f}, {6, "Tune 2", 0.0f}, {7, "Detune", 8.0f},
+    {8, "Finetune", 0.0f}, {9, "Reset 1", 0.0f}, {10, "Reset 2", 0.0f},
+    {11, "Ring Mod", 0.0f}, {12, "DCW 1", 0.5f}, {13, "DCW 2", 0.5f}, {14, "Env Amt 1", 0.3f},
+    {15, 0, 0.005f}, {16, 0, 0.3f}, {17, 0, 0.0f}, {18, 0, 0.3f},      /* the DCO (pitch) envelope */
+    {19, 0, 0.005f}, {20, 0, 0.5f}, {21, 0, 0.8f}, {22, 0, 0.4f},      /* the DCA envelope */
+    {23, 0, 0.005f}, {24, 0, 0.6f}, {25, 0, 0.3f}, {26, 0, 0.5f},      /* the DCW envelope */
+    {27, 0, 1.0f}, {28, 0, 0.0f}, {29, 0, 2.0f}, {30, 0, 0.0f},        /* LFO 1: 1 Hz triangle, free */
+    {31, 0, 0.25f}, {32, 0, 1.0f}, {33, 0, 2.0f}, {34, 0, 0.0f},       /* LFO 2: 0.25 Hz sine, free */
+    {35, "Glide Mode", 0.0f}, {36, "Glide Time", 0.0f}, {37, "Key Follow", 0.0f}, {38, "Env Amt 2", 0.3f},
+    {40, "Noise Mod", 0.0f}, {41, "DCO Env Amt", 0.0f},
+    {42, 0, (float)PH_SRC_LFO1}, {43, 0, (float)PH_DST_PITCH}, {44, 0, 0.0f},   /* routings to try: */
+    {45, 0, (float)PH_SRC_LFO2}, {46, 0, (float)PH_DST_DCW}, {47, 0, 0.0f},     /* raise the Amt */
+};
+
+/* PHASE's screen (the Synth Parameters tabs) and Edit Patch pages; -1 is an empty cell */
+static const int8_t ph_osc_cells[] = {2, 3, 4, 0, 1, 11, 5, 6, 7, -1};       /* DCO (1/2) */
+static const int8_t ph_osc2_cells[] = {9, 10, 40, -1, -1, 8, -1, -1};        /* DCO (2/2) */
+static const int8_t vap_osc2_cells[] = {9, 10, 41, -1, -1, 8, -1, -1};
+static const int8_t ph_dcw_cells[] = {12, 13, -1, 14, 38, 37, -1, -1, -1};
+static const int8_t ph_lfo1_cells[] = {23, 24, 25, 26, 60, 30, 27, 28, 29};  /* DCW Env/LFO 1 */
+static const int8_t ph_lfo2_cells[] = {15, 16, 17, 18, 41, 61, 34, 31, 32, 33};  /* DCO Env/LFO 2 */
+static const int8_t ph_osc_page[] = {2, 0, 3, 1, 4, 5, 6, 8, 7, 9, 10, 11, 40};
+static const int8_t ph_dcw_page[] = {12, 13, 14, 38, 37};
+static const int8_t ph_penv_page[] = {15, 16, 17, 18, 41};
+
+/* PHASE's Macro defaults: VAP's, then a Attack (the DCA's), b Decay/Release (the DCA's and
+ * the DCW envelope's, as VAP's), c DCW, d DCW Env Amt, e Detune, f Mix; Velocity and
+ * Pressure stay as VAP's */
+static void phase_macros(const void *functor, struct fw_vector *macros)
+{
+    ((void (*)(const void *, void *))FW_VAP_MACROS)(functor, macros);
+    struct fw_macro *mc = (struct fw_macro *)macros->begin;
+    if (vec_count(macros, sizeof *mc) != 8 || vec_count(&mc[0].targets, sizeof(struct fw_target)) != 2
+        || vec_count(&mc[1].targets, sizeof(struct fw_target)) != 4 || mc[2].targets.begin
+        || vec_count(&mc[3].targets, sizeof(struct fw_target)) != 1
+        || vec_count(&mc[4].targets, sizeof(struct fw_target)) != 1
+        || vec_count(&mc[5].targets, sizeof(struct fw_target)) != 1)
+        return;
+    mc[0].targets.end = mc[0].targets.begin + sizeof(struct fw_target);     /* the DCA's Attack (19) only */
+    struct fw_target *n = (struct fw_target *)((malloc_fn)FW_MALLOC)(2 * sizeof(struct fw_target));
+    if (n) {
+        n[0].index = 12; n[0].amount = 1.0f;                                 /* DCW 1 and 2 */
+        n[1].index = 13; n[1].amount = 1.0f;
+        mc[2].targets.begin = (uint8_t *)n;
+        mc[2].targets.end = mc[2].targets.cap = (uint8_t *)(n + 2);
+        str_set(&mc[2].name, "DCW");
+    }
+    n = (struct fw_target *)((malloc_fn)FW_MALLOC)(2 * sizeof(struct fw_target));
+    if (n) {                                                                 /* over VAP's Cutoff (12) */
+        struct fw_vector *d = &mc[3].targets;
+        n[0].index = 14; n[0].amount = ((struct fw_target *)d->begin)->amount;  /* Env Amt 1 and 2 */
+        n[1].index = 38; n[1].amount = n[0].amount;
+        ((delete_fn)FW_DELETE)(d->begin, (uint32_t)(d->cap - d->begin));
+        d->begin = (uint8_t *)n;
+        d->end = d->cap = (uint8_t *)(n + 2);
+        str_set(&mc[3].name, "DCW Env Amt");
+    }
+    ((struct fw_target *)mc[4].targets.begin)->index = 7;                    /* VAP's Resonance (13) */
+    str_set(&mc[4].name, "Detune");
+    ((struct fw_target *)mc[5].targets.begin)->index = 4;                    /* VAP's Filter Env Amount (14) */
+    str_set(&mc[5].name, "Mix");
+}
+
+/* VAP's patch -> PHASE's (docs/PD_SYNTH_PLAN.md section 4). The screen keeps VAP's tabs,
+ * named DCO, DCW, Modulation (DCA, DCW Env/LFO 1, DCO Env/LFO 2), Matrix, FX and Voice.
+ * The DCW envelope is VAP's Envelope 1 (23-26, VAP's filter envelope), the DCO (pitch)
+ * envelope VAP's Envelope 2 (15-18). */
+static void phase_rewrite(uint8_t *c)
+{
+    if (!vap_layout_ok(c))
+        return;
+    struct fw_group *g = (struct fw_group *)((struct fw_vector *)(c + C_GROUPS))->begin;
+    struct fw_page *q = (struct fw_page *)((struct fw_vector *)(c + C_PAGES))->begin;
+    uint32_t *init = (uint32_t *)(c + C_MACRO_INIT);
+    struct fw_sub *osc = (struct fw_sub *)g[0].subs.begin;
+    struct fw_sub *mod = (struct fw_sub *)g[2].subs.begin;
+    if (!cells_are(&osc[1].cells, vap_osc2_cells, sizeof vap_osc2_cells))
+        return;
+    struct fw_param *p = append_own(c);
+    if (!p)
+        return;
+
+    /* the parameters */
+    uint32_t stepped = p[11].flags;         /* Type's: a stepped list, no CC */
+    uint32_t plain = p[41].flags;           /* VAP's Noise: plain, no CC */
+    for (uint32_t k = 0; k < sizeof phase_params / sizeof phase_params[0]; k++) {
+        struct fw_param *e = &p[phase_params[k].index];
+        if (phase_params[k].name)
+            str_set(&e->name, phase_params[k].name);
+        e->value = phase_params[k].value;
+    }
+    for (uint32_t k = 0; k <= 3; k++) {     /* Wave 1+, Wave 2+ (Off and the shapes), Wave 1, Wave 2 */
+        p[k].lo = H_0;
+        p[k].hi = k < 2 ? H_8 : H_7;
+        p[k].flags = stepped;
+        set_display(&p[k], (uint32_t)(k < 2 ? fmt_pair : fmt_shape));
+    }
+    p[11].hi = H_1;                         /* Ring Mod: Off/On (VAP's Type) */
+    set_display(&p[11], (uint32_t)fmt_onoff);
+    for (uint32_t k = 12; k <= 13; k++) {   /* DCW 1, DCW 2: 0-100 %, keeping VAP's CCs 74 and 71 */
+        p[k].lo = H_0;
+        p[k].hi = H_1;
+        p[k].flags = (p[k].flags & 0xFF000000u) | (plain & 0x00FFFFFFu);
+        set_display(&p[k], (uint32_t)fmt_percent);
+    }
+    p[37].lo = p[38].lo = H_M1;             /* Key Follow, Env Amt 2: +-100 % (VAP's +-200 %) */
+    p[37].hi = p[38].hi = H_1;
+    p[38].flags = 0xFF000000u | (p[14].flags & 0x00FFFFFFu);    /* as Env Amt 1, without its CC */
+    p[40].lo = H_0;                         /* Noise Mod: 0-100 % (VAP's Sync, a list) */
+    p[40].hi = H_1;
+    p[40].flags = plain;
+    set_display(&p[40], (uint32_t)fmt_percent);
+    p[41].lo = H_M48;                       /* DCO Env Amt: +-48 semitones, whole ones (VAP's Noise) */
+    p[41].hi = H_48;
+    p[41].flags = stepped;
+    set_display(&p[41], (uint32_t)fmt_semis);
+    for (uint32_t s = 0; s < MOD_SLOTS; s++) {  /* the Mod Matrix's sources and destinations */
+        p[42 + 3 * s].hi = H_6;
+        set_display(&p[42 + 3 * s], (uint32_t)fmt_ph_src);
+        p[43 + 3 * s].hi = H_8;
+        set_display(&p[43 + 3 * s], (uint32_t)fmt_ph_dest);
+    }
+
+    /* the screen */
+    str_set(&g[0].name, "DCO");
+    set_cells(&osc[0].cells, ph_osc_cells, sizeof ph_osc_cells);
+    set_cells(&osc[1].cells, ph_osc2_cells, sizeof ph_osc2_cells);
+    str_set(&g[1].name, "DCW");
+    set_cells(&((struct fw_sub *)g[1].subs.begin)[0].cells, ph_dcw_cells, sizeof ph_dcw_cells);
+    str_set(&mod[0].name, "DCA");
+    str_set(&mod[1].name, "DCW Env/LFO 1");
+    str_set(&mod[2].name, "DCO Env/LFO 2");
+    set_cells(&mod[1].cells, ph_lfo1_cells, sizeof ph_lfo1_cells);
+    set_cells(&mod[2].cells, ph_lfo2_cells, sizeof ph_lfo2_cells);
+    set_cells(&((struct fw_sub *)g[5].subs.begin)[0].cells, voice_page, sizeof voice_page);
+
+    /* the Edit Patch pages (their tiles' labels: mt_syn_tiles) */
+    str_set(&q[0].name, "DCO");
+    str_set(&q[0].shortname, "DCO");
+    set_cells(&q[0].cells, ph_osc_page, sizeof ph_osc_page);
+    str_set(&q[1].name, "DCW");
+    set_cells(&q[1].cells, ph_dcw_page, sizeof ph_dcw_page);
+    str_set(&q[2].name, "DCA");
+    str_set(&q[2].shortname, "DCA");
+    str_set(&q[3].name, "DCW Envelope");    /* 23-26, as VAP's Envelope 1 */
+    str_set(&q[3].shortname, "DCW Env");
+    str_set(&q[4].name, "DCO Envelope");
+    str_set(&q[4].shortname, "DCO Env");
+    set_cells(&q[4].cells, ph_penv_page, sizeof ph_penv_page);  /* one more cell: from the heap */
+    set_cells(&q[5].cells, lfo1_page, sizeof lfo1_page);
+    set_cells(&q[6].cells, lfo2_page, sizeof lfo2_page);       /* one more cell: from the heap */
+    set_cells(&q[8].cells, voice_page, sizeof voice_page);     /* four more cells: from the heap */
+    *(uint32_t *)(c + C_CHANNELS) = 2u;     /* stereo: the effect writes L and R */
+
+    /* the Macros, once the firmware has made them */
+    init[2] = (uint32_t)fmt_manager;
+    init[3] = (uint32_t)phase_macros;
+
+    *(uint32_t *)(c + C_MODEL) = MODEL_PHASE;
+}
+
+/* PHASE's parameter builder: VAP's, rewritten (as WAVE's) */
+static void phase_builder(void *patch, uint8_t *container)
+{
+    struct fw_vector *pv = (struct fw_vector *)(container + C_PARAMS);
+    if (pv->begin == pv->end)
+        ((void (*)(struct fw_vector *, uint32_t))FW_PARAMS_APPEND)(pv, CUSTOM_PARAMS);
+    ((void (*)(void *, void *))FW_VAP_BUILDER)(patch, container);
+    phase_rewrite(container);
+}
+
+/* A model's descriptor into the registry: its name, a parameter builder, VAP's voice
+ * factory */
+static void add_model(void *registry, uint32_t id, const char *name, void (*builder)(void *, uint8_t *))
+{
     uint32_t *d = (uint32_t *)((malloc_fn)FW_MALLOC)(0x38);
     if (!d)
         return;
     for (uint32_t k = 0; k < 0x38 / 4; k++)
         d[k] = 0;
-    str_init((struct fw_string *)d, "WAVE");
-    d[6] = (uint32_t)wave_builder;          /* +0x18: the parameter builder */
+    str_init((struct fw_string *)d, name);
+    d[6] = (uint32_t)builder;               /* +0x18: the parameter builder */
     d[8] = FW_FN_MANAGER;
     d[9] = FW_FN_INVOKER;
     d[12] = FW_VAP_NEW_MANAGER;             /* +0x28: the voice factory, VAP's */
     d[13] = FW_VAP_NEW_INVOKER;
     uint32_t *held = d;
-    ((void (*)(void *, uint32_t, uint32_t **))FW_REGISTRY_INSERT)(registry, MODEL_WAVE, &held);
-    if (held)                               /* not taken: id 3 is someone's already */
+    ((void (*)(void *, uint32_t, uint32_t **))FW_REGISTRY_INSERT)(registry, id, &held);
+    if (held)                               /* not taken: the id is someone's already */
         ((delete_fn)FW_DELETE)(d, 0x38);
+}
+
+/* replaces "bl 0x60140150" at 0x60126b30 (the synth manager's constructor; chained):
+ * the stock models, then WAVE as model 3 and PHASE as model 7 */
+void mt_syn_registry(void *registry)
+{
+    ((void (*)(void *))mt_syn_next_registry)(registry);
+    add_model(registry, MODEL_WAVE, "WAVE", wave_builder);
+    add_model(registry, MODEL_PHASE, "PHASE", phase_builder);
 }
 
 /* ---- the Model list ------------------------------------------------------------------ */
@@ -973,13 +1302,13 @@ void mt_syn_registry(void *registry)
  * list; chained): with a swap, the list gets the patch's image ids */
 void mt_syn_list_data(void *mgr, int id, uint8_t *data)
 {
-    if (SY->magic == SY_MAGIC && SY->applied < MODELS)
+    if (SY->magic == SY_MAGIC && (SY->applied < MODELS || SY->ph_applied < MODELS))
         *(int32_t **)(data + 0x18) = SY->model_ids;
     ((void (*)(void *, int, void *))mt_syn_next_list_data)(mgr, id, data);
 }
 
 /* replaces "bl 0x6010645c" at 0x60106606 (a list control's image items; chained): the
- * stock images, then "WAVE" as text in the row the patch's ids mark */
+ * stock images, then "WAVE" or "PHASE" as text in the rows the patch's ids mark */
 void mt_syn_list_images(uint8_t *ctrl, int x0, int x1, int y, int step)
 {
     ((void (*)(uint8_t *, int, int, int, int))mt_syn_next_list_images)(ctrl, x0, x1, y, step);
@@ -999,15 +1328,17 @@ void mt_syn_list_images(uint8_t *ctrl, int x0, int x1, int y, int step)
             k = 0;
         if (k > (int)count - 1)
             k = (int)count - 1;
-        if (k < (int)MODELS && SY->model_ids[k] == LIST_TEXT_ID && font)
+        const char *name = k >= (int)MODELS ? 0 : SY->model_ids[k] == LIST_TEXT_ID ? "WAVE"
+                           : SY->model_ids[k] == LIST_TEXT_PHASE ? "PHASE" : 0;
+        if (name && font)
             ((void (*)(int, int, int, uint32_t, const char *))FW_EVE_TEXT)(
-                x0 + (w >> 1), (int16_t)y, *(const int16_t *)(font + 0x98), EVE_OPT_CENTER, "WAVE");
+                x0 + (w >> 1), (int16_t)y, *(const int16_t *)(font + 0x98), EVE_OPT_CENTER, name);
     }
 }
 
 /* replaces "bl disp_ctrl_set_text" at 0x6011ea58 (the Edit Patch screen's logo label, its
- * text set to ""; chained): for a WAVE synth, no logo (the label's icon id 0) and "WAVE" as
- * its text. The label's data (its icons, 6 bytes each, the id at +4) was set just before. */
+ * text set to ""; chained): for a WAVE or PHASE synth, no logo (the label's icon id 0) and
+ * the engine's name as its text. The label's data (its icons, 6 bytes each, the id at +4) was set just before. */
 #define FW_SELECTED_INSTR   (*(volatile uint8_t *)0x202046C5u)  /* 64-66: S1-S3 */
 #define MGR_CONTROL(m, id)  (*(uint8_t **)((uint8_t *)(m) + 0x10u + 4u * (uint32_t)(id)))
 #define LABEL_ICONS         0x30u           /* label control: its data (set_data) */
@@ -1015,37 +1346,68 @@ void mt_syn_list_images(uint8_t *ctrl, int x0, int x1, int y, int step)
 void mt_syn_patch_label(void *mgr, int id, const char *text)
 {
     uint32_t slot = (uint32_t)FW_SELECTED_INSTR - 64u;
-    if (slot < SLOTS && slot_word(slot, 0) == MODEL_WAVE && id >= 0 && id <= 0x40) {
+    uint32_t engine = slot < SLOTS ? engine_of_model(slot_word(slot, 0)) : ENGINE_NONE;
+    if (engine != ENGINE_NONE && id >= 0 && id <= 0x40) {
         uint8_t *ctrl = MGR_CONTROL(mgr, id);
         uint8_t *icons = ctrl ? *(uint8_t **)(ctrl + LABEL_ICONS) : 0;
         if (icons)
             icons[4] = 0;                   /* no icon */
-        text = "WAVE";
+        text = engine == ENGINE_PHASE ? "PHASE" : "WAVE";
     }
     ((void (*)(void *, int, const char *))mt_syn_next_patch_label)(mgr, id, text);
 }
 
-/* ---- loading a WAVE patch --------------------------------------------------------------- */
+/* replaces "bl 0x6011d628" at 0x6011e924 (the Edit Patch screen's tiles: each page's
+ * label and icon, from keywords in its name; chained): for a PHASE synth, the first five
+ * tiles' labels and icons by page (docs/PD_SYNTH_PLAN.md section 4.1). The tiles control
+ * reads the buffers each time it draws. */
+#define TILE_LABELS         0x448u          /* screen: a pointer to the labels' pointers (8-byte buffers) */
+#define TILE_COUNT          0x450u          /* the tile count (byte) */
+#define TILE_KINDS          0x42Cu          /* the icon kinds (bytes) */
+#define PHASE_PAGES         9u
+
+void mt_syn_tiles(uint8_t *scr, uint32_t flag)
+{
+    static const char *const labels[] = {"DCO", "DCW", "DCA", "DCW Env", "DCO Env"};
+    static const uint8_t kinds[] = {0x17, 0x12, 0x11, 0x11, 0x11};   /* Osc's, Filter's, the envelopes' */
+    ((void (*)(uint8_t *, uint32_t))mt_syn_next_tiles)(scr, flag);
+    uint32_t slot = (uint32_t)FW_SELECTED_INSTR - 64u;
+    char **label = *(char ***)(scr + TILE_LABELS);
+    if (slot >= SLOTS || slot_word(slot, 0) != MODEL_PHASE || scr[TILE_COUNT] != PHASE_PAGES || !label)
+        return;
+    for (uint32_t i = 0; i < sizeof kinds; i++) {
+        char *d = label[i];
+        if (!d)
+            continue;
+        uint32_t n = 0;
+        for (; labels[i][n] && n < 7; n++)
+            d[n] = labels[i][n];
+        d[n] = 0;
+        scr[TILE_KINDS + i] = kinds[i];
+    }
+}
+
+/* ---- loading a WAVE or PHASE patch --------------------------------------------------------------- */
 
 typedef int (*set_value_fn)(void *patch, uint32_t index, const float *value, uint32_t source);
 #define SET_SOURCE_LOAD     2u              /* what the loader passes */
 
-/* A WAVE patch: the patch class, WAVE's model id, and WAVE's 66 values */
-static float *wave_values(uint8_t *patch)
+/* A WAVE or PHASE patch: the patch class, the engine's model id, and its 66 values */
+static float *custom_values(uint8_t *patch)
 {
     if (!patch || *(const uint32_t *)patch != FW_PATCH_VTABLE
-        || *(const uint32_t *)(patch + PATCH_MODEL) != MODEL_WAVE)
+        || engine_of_model(*(const uint32_t *)(patch + PATCH_MODEL)) == ENGINE_NONE)
         return 0;
     const struct fw_vector *v = (const struct fw_vector *)(patch + PATCH_VALUES);
-    return vec_count(v, sizeof(float)) == WAVE_PARAMS ? (float *)v->begin : 0;
+    return vec_count(v, sizeof(float)) == CUSTOM_PARAMS ? (float *)v->begin : 0;
 }
 
-/* WAVE's own six (the Polarity switches, the effect's) through the patch's own set_value,
+/* The own six (the Polarity switches, the effect's) through the patch's own set_value,
  * as the loader sets values (it also hands them to the voices) */
 static void set_own(uint8_t *patch, const float *own)
 {
     set_value_fn set = (set_value_fn)(*(uint32_t *const *)patch)[PATCH_SET_VALUE / 4u];
-    for (uint32_t k = 0; k < WAVE_PARAMS - VAP_PARAMS; k++)
+    for (uint32_t k = 0; k < CUSTOM_PARAMS - VAP_PARAMS; k++)
         set(patch, VAP_PARAMS + k, &own[k], SET_SOURCE_LOAD);
 }
 
@@ -1058,18 +1420,18 @@ static void set_own(uint8_t *patch, const float *own)
 int mt_syn_patch_load(void *storage, const void *path, uint8_t *patch, uint32_t flag)
 {
     typedef int (*load_fn)(void *, const void *, uint8_t *, uint32_t);
-    const float *v = wave_values(patch);
-    float old[WAVE_PARAMS - VAP_PARAMS];
-    float own[WAVE_PARAMS - VAP_PARAMS] = {0.0f, 0.0f};    /* Bipolar */
+    const float *v = custom_values(patch);
+    float old[CUSTOM_PARAMS - VAP_PARAMS];
+    float own[CUSTOM_PARAMS - VAP_PARAMS] = {0.0f, 0.0f};  /* Bipolar */
     for (uint32_t k = 0; k < FX_PARAMS; k++)
         own[FX_FIRST - VAP_PARAMS + k] = fx_defaults[k];
     if (v) {
-        for (uint32_t k = 0; k < WAVE_PARAMS - VAP_PARAMS; k++)
+        for (uint32_t k = 0; k < CUSTOM_PARAMS - VAP_PARAMS; k++)
             old[k] = v[VAP_PARAMS + k];
         set_own(patch, own);
     }
     int ok = ((load_fn)mt_syn_next_patch_load)(storage, path, patch, flag);
-    if (v && !ok && wave_values(patch))
+    if (v && !ok && custom_values(patch))
         set_own(patch, old);
     return ok;
 }
@@ -1085,16 +1447,129 @@ int mt_syn_patch_load(void *storage, const void *path, uint8_t *patch, uint32_t 
  * checking it for NULL. */
 struct menu_options { volatile uint8_t *value; uint32_t count; const char *const *names; void_fn on_apply; };
 
-static void option_applied(void)            /* the Config screen's update applies it */
+/* Each item lists Off and the models the other item doesn't replace. The menu edits a
+ * position in that list (menu_pos, ph_menu_pos), which the item's callback turns into the
+ * choice (menu, ph_menu). Its descriptor (from the heap, made with the item) names the
+ * list it shows; the editor reads the count and names each time it opens, and the value
+ * text is names[position], so every list has a sixth entry (0: the menu's default text). */
+static const char *const replace_names[1 + MODELS] = {"Off", "ACD", "FAT", "VAP", "WTFM", "PERC"};
+static const char *const replace_without[MODELS][1 + MODELS] = {
+    {"Off", "FAT", "VAP", "WTFM", "PERC", 0},       /* the other item replaces ACD */
+    {"Off", "ACD", "VAP", "WTFM", "PERC", 0},
+    {"Off", "ACD", "FAT", "WTFM", "PERC", 0},
+    {"Off", "ACD", "FAT", "VAP", "PERC", 0},
+    {"Off", "ACD", "FAT", "VAP", "WTFM", 0},
+};
+
+/* the model index a descriptor's list leaves out, or REPLACE_NONE */
+static uint32_t list_without(const struct menu_options *d)
 {
+    for (uint32_t k = 0; k < MODELS; k++)
+        if (d->names == replace_without[k])
+            return k;
+    return REPLACE_NONE;
 }
 
-static const char *const replace_names[1 + MODELS] = {"Off", "ACD", "FAT", "VAP", "WTFM", "PERC"};
-static const struct menu_options replace_desc = {&SY->menu, 1 + MODELS, replace_names, option_applied};
+static uint8_t pos_of(uint32_t menu, uint32_t without)
+{
+    uint32_t k = replace_of(menu);
+    if (k == REPLACE_NONE || k == without)
+        return 0;
+    return (uint8_t)(1u + k - (without < MODELS && k > without));
+}
+
+static uint8_t menu_of(uint32_t pos, uint32_t without)
+{
+    if (pos == 0 || pos > MODELS)
+        return 0;
+    uint32_t k = pos - 1u;
+    if (without < MODELS && k >= without)
+        k++;
+    return (uint8_t)(k < MODELS ? k + 1u : 0u);
+}
+
+static void option_applied(void);
+static void ph_option_applied(void);
+static const struct menu_options replace_desc = {&SY->menu_pos, 1 + MODELS, replace_names, option_applied};
 static const char replace_help[] =
     "Plays WAVE, a wavetable synth, in place of one synth model in this project. The "
     "Instrument screen's Model list then shows WAVE where that model was. Synths set to "
     "that model start from WAVE's Init patch.";
+static const struct menu_options ph_replace_desc = {&SY->ph_menu_pos, 1 + MODELS, replace_names, ph_option_applied};
+static const char ph_replace_help[] =
+    "Plays PHASE, a phase distortion synth, in place of one synth model in this project. The "
+    "Instrument screen's Model list then shows PHASE where that model was. The list leaves "
+    "out the model WAVE replaces.";
+
+static const char synth_engines[] = "Synth Engines";
+
+/* the Synth Engines folder's two option items' descriptors (the stock walk of Project
+ * Settings: kind 1 folders, the label pointer ours), or 0 */
+static struct menu_options *menu_desc(uint32_t item)
+{
+    const uint8_t *ps = (const uint8_t *)FW_PROJECT_SETTINGS;
+    uint32_t n = ps[0x1D], cap = ps[0x08];
+    const uint8_t *const *kids = *(const uint8_t *const *const *)(ps + 0x0C);
+    if (ps[0] != 1 || !kids)
+        return 0;
+    for (uint32_t i = 0; i < n && i < cap; i++) {
+        const uint8_t *f = kids[i];
+        if (!f || f[0] != 1 || *(const char *const *)(f + 0x18) != synth_engines || f[0x1D] != 2 || f[0x08] != 2)
+            continue;
+        const uint8_t *const *items = *(const uint8_t *const *const *)(f + 0x0C);
+        const uint8_t *it = items ? items[item] : 0;
+        if (!it || it[0] != 2 || it[0x0C] != MENU_OPTIONS)
+            return 0;
+        return *(struct menu_options *const *)(it + 0x10);
+    }
+    return 0;
+}
+
+/* Both items' lists and positions from the choices: each item leaves out the other's
+ * model. A const descriptor (the heap had no room) keeps the full list, and the two
+ * choices then meet the conflict rule (menu_conflict). */
+static void menu_refresh(void)
+{
+    volatile uint8_t *pos[2] = {&SY->menu_pos, &SY->ph_menu_pos};
+    uint32_t choice[2] = {SY->menu, SY->ph_menu};
+    for (uint32_t i = 0; i < 2; i++) {
+        struct menu_options *d = menu_desc(i);
+        uint32_t without = replace_of(choice[1 - i]);
+        if (d && d->value == pos[i] && d != &replace_desc && d != &ph_replace_desc) {
+            d->names = without < MODELS ? replace_without[without] : replace_names;
+            d->count = without < MODELS ? MODELS : 1u + MODELS;
+        } else {
+            without = REPLACE_NONE;
+        }
+        *pos[i] = pos_of(choice[i], without);
+    }
+}
+
+/* the menu's apply stored the position (cfg_menu_apply); the choice follows at once, and
+ * the other item's list leaves it out. The Config screen's update applies it. */
+static void option_applied(void)
+{
+    struct menu_options *d = menu_desc(0);
+    SY->menu = menu_of(SY->menu_pos, d && d->value == &SY->menu_pos ? list_without(d) : REPLACE_NONE);
+    menu_refresh();
+}
+
+static void ph_option_applied(void)
+{
+    struct menu_options *d = menu_desc(1);
+    SY->ph_menu = menu_of(SY->ph_menu_pos, d && d->value == &SY->ph_menu_pos ? list_without(d) : REPLACE_NONE);
+    menu_refresh();
+}
+
+/* a descriptor the menu refresh can change (from the heap), or the const one */
+static const struct menu_options *heap_desc(const struct menu_options *proto)
+{
+    struct menu_options *d = (struct menu_options *)((malloc_fn)FW_MALLOC)(sizeof *d);
+    if (!d)
+        return proto;
+    *d = *proto;
+    return d;
+}
 
 /* replaces "bl 0x60118394" at 0x60118b00 (chained): Project Settings gets room for the
  * Synth Engines folder */
@@ -1114,11 +1589,17 @@ void *mt_syn_last_item(void *node, void *parent, const char *label, const char *
     malloc_fn alloc = (malloc_fn)FW_MALLOC;
     void *folder = alloc(MENU_FOLDER_SIZE);
     if (folder) {
-        ((folder_fn)FW_MENU_FOLDER)(folder, (void *)FW_PROJECT_SETTINGS, "Synth Engines", 1);
+        ((folder_fn)FW_MENU_FOLDER)(folder, (void *)FW_PROJECT_SETTINGS, synth_engines, 2);
         void *item = alloc(MENU_ITEM_SIZE);
         if (item)
-            ((item_fn)FW_MENU_ITEM)(item, folder, "WAVE replaces", replace_help, MENU_OPTIONS, &replace_desc);
+            ((item_fn)FW_MENU_ITEM)(item, folder, "WAVE replaces", replace_help, MENU_OPTIONS,
+                                    heap_desc(&replace_desc));
+        item = alloc(MENU_ITEM_SIZE);
+        if (item)
+            ((item_fn)FW_MENU_ITEM)(item, folder, "PHASE replaces", ph_replace_help, MENU_OPTIONS,
+                                    heap_desc(&ph_replace_desc));
     }
+    menu_refresh();                         /* the positions valid before the menu ever draws */
     return r;
 }
 
@@ -1139,7 +1620,8 @@ typedef void (*fs_remove_fn)(void *fs, const char *path);
 #define FS_MODE_WRITE       3u              /* FatFs create-always + RW, as the pattern save */
 
 #define FILE_MAGIC          0x32595348u     /* "HSY2" (sy1's "HSY1" files count as missing) */
-#define FILE_SIZE           12u             /* magic, the menu value, 3 zero bytes, a checksum */
+#define FILE_SIZE           12u             /* magic, WAVE's and PHASE's menu values, 2 zero bytes,
+                                             * a checksum (sy7 and before: PHASE's byte 0) */
 
 static uint32_t fnv1a(uint32_t h, uint32_t byte)
 {
@@ -1184,7 +1666,8 @@ static int settings_path(char *path, uint32_t size)
     return n > 0 && (uint32_t)n < size;
 }
 
-/* 1: the file was read (the menu value and the saved one set from it) */
+/* 1: the file was read (the menu values and the saved ones set from it; PHASE Off if both
+ * name one model) */
 static int settings_load(void)
 {
     char path[256];
@@ -1200,10 +1683,11 @@ static int settings_load(void)
     int ok = ((fs_read_fn)vt[FS_READ / 4])(fs, buf, FILE_SIZE, res.handle) == (int)FILE_SIZE;
     ((fs_close_fn)vt[FS_CLOSE / 4])(fs, res.handle, 1);
     ok = ok && get32(buf) == FILE_MAGIC && get32(buf + 8) == data_sum(buf + 4) && buf[4] <= MODELS
-         && !buf[5] && !buf[6] && !buf[7];
+         && buf[5] <= MODELS && !buf[6] && !buf[7];
     if (!ok)
         return 0;
     SY->menu = SY->saved = buf[4];
+    SY->ph_menu = SY->ph_saved = buf[4] && buf[5] == buf[4] ? 0 : buf[5];
     SY->saved_valid = 1;
     return 1;
 }
@@ -1216,10 +1700,11 @@ static void settings_save(void)
         return;
     void **vt = *(void ***)fs;
     uint8_t buf[FILE_SIZE];
-    uint8_t value = SY->menu;
+    uint8_t value = SY->menu, ph_value = SY->ph_menu;
     put32(buf, FILE_MAGIC);
     buf[4] = value;
-    buf[5] = buf[6] = buf[7] = 0;
+    buf[5] = ph_value;
+    buf[6] = buf[7] = 0;
     put32(buf + 8, data_sum(buf + 4));
     struct fs_open_result res = {0, 0, {0, 0, 0}};
     ((fs_remove_fn)vt[FS_REMOVE / 4])(fs, path);
@@ -1230,6 +1715,7 @@ static void settings_save(void)
     ((fs_close_fn)vt[FS_CLOSE / 4])(fs, res.handle, 1);
     if (ok) {
         SY->saved = value;
+        SY->ph_saved = ph_value;
         SY->saved_valid = 1;
     }
 }
@@ -1246,9 +1732,11 @@ void mt_syn_project_records(void *s, void *records, uint32_t reset)
     SY->wait = SAVE_DELAY;
     if (!settings_load()) {
         SY->menu = SY->saved = 0;           /* no file: Off, and nothing to write */
+        SY->ph_menu = SY->ph_saved = 0;
         SY->saved_valid = 1;
     }
-    swap_table(menu_replace());
+    swap_table(replace_of(SY->menu), replace_of(SY->ph_menu));
+    menu_refresh();
     SY->loads++;
     ((void (*)(void *, void *, uint32_t))mt_syn_next_records)(s, records, reset);
 }
@@ -1266,17 +1754,19 @@ static void settings_tick(void)
     int unnamed = !FW_PROJECT_NAME[0];
     if (SY->menu > MODELS)
         SY->menu = 0;
+    if (SY->ph_menu > MODELS)
+        SY->ph_menu = 0;
     if (session != SY->session) {
         SY->session = session;
         SY->unnamed = (uint8_t)unnamed;
         SY->wait = SAVE_DELAY;
         if (unnamed || !settings_load()) {  /* a file there wins; it is never overwritten unread */
-            SY->saved = 0;                  /* Save As, a new project: the choice goes with it; */
+            SY->saved = SY->ph_saved = 0;   /* Save As, a new project: the choices go with it; */
             SY->saved_valid = 1;            /* Off needs no file */
         }
         return;
     }
-    if (unnamed || (SY->saved_valid && SY->menu == SY->saved)) {
+    if (unnamed || (SY->saved_valid && SY->menu == SY->saved && SY->ph_menu == SY->ph_saved)) {
         SY->wait = SAVE_DELAY;
         return;
     }
@@ -1295,6 +1785,7 @@ void mt_syn_pattern_update(void *screen, void *a1, void *a2, void *a3)
     settings_tick();
     SY->ready = SY_READY;
     apply_menu();
+    menu_refresh();
     sweep();
     ((screen_update_fn)mt_syn_next_pattern_update)(screen, a1, a2, a3);
 }
@@ -1305,6 +1796,7 @@ void mt_syn_config_update(void *screen, void *a1, void *a2, void *a3)
 {
     settings_tick();
     apply_menu();
+    menu_refresh();
     sweep();
     ((screen_update_fn)mt_syn_next_config_update)(screen, a1, a2, a3);
 }
@@ -1337,6 +1829,11 @@ const uint32_t mt_syn_ram_map[] = {
     sizeof(struct wt_fx),
     offsetof(struct wt_fx, p),
     offsetof(struct wt_fx, running),
+    offsetof(struct syn_state, ph_menu),    /* PHASE (sy8) */
+    offsetof(struct syn_state, ph_applied),
+    (uint32_t)phase_builder,
+    offsetof(struct syn_state, menu_pos),   /* the menu's positions in the two lists */
+    offsetof(struct syn_state, ph_menu_pos),
 };
 
 /* ---- version text: Config shows 1.2.0-<SYNTHS_VERSION> -------------------------- */

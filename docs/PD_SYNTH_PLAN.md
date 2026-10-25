@@ -17,8 +17,10 @@ repository's own. They were designed from published descriptions of what the CZ
 shapes do, not from anyone's code. A scratch prototype was built and measured in the
 emulator (outside the repo; section 6 has its numbers).
 
-Status: phase 0 (the checks before code) is done and passed (section 8). Nothing is
-built in the repository. The user's answers are in section 9.
+Status: phases 0 (the checks before code), 1 (the plumbing, PHASE silent) and 2 (the
+engine) are done and passed in the emulator (section 8). Their code is in the working
+tree, not committed; `prebuilt/`, `patch/all` and the web patcher are untouched until
+phase 3. The user's answers are in section 9.
 
 ## 1. Verdict
 
@@ -174,8 +176,15 @@ both per block, keep the corners within the sample rate:
 - **Knee length:** a fast segment lasts at least `KNEE_SAMPLES` = 4 samples
   (`k_min = 4 f / 44,100`). At low notes this changes nothing. At high notes it eases
   the DCW, which is what the CZ's own DCW key follow does musically.
-- **Resonance:** `r f` stays below 0.25–0.3 × 44,100 Hz (11–13 kHz). Phase 2 picks the
-  value.
+- **Resonance:** `r f` stays below 0.25–0.3 × 44,100 Hz (11–13 kHz). Phase 2 picked
+  0.25 (11 kHz).
+- **Double Sine and Saw-Pulse** (found in phase 2; the table below didn't measure them):
+  - The double sine has a corner at the half cycle that grows with `a`. At DCW 1 it
+    aliased at −38 dB at note 96 and −28 at note 108. Its depth is now capped at
+    `a ≤ 0.0085 / k_min²`, which changes nothing in a cycle of 43 samples or more
+    (up to about note 87).
+  - The saw-pulse's saw part `e` is at least three knees long (`e ≥ 3 k_min`), which
+    changes nothing up to about note 92. Without it: −40 dB at note 108.
 
 Worst non-harmonic component at d = 1, in dB below the strongest harmonic:
 
@@ -225,6 +234,13 @@ period is two cycles, as described.
   sets the other's level. Measured: +770 instructions per block.
 - **Noise Mod** (0–100 %). DCO 2's phase step is jittered by noise each sample, which
   turns DCO 2 into the CZ's digital noise at full amount. Measured: +1,540.
+  - Phase 2 found that the prototype's jitter (± the step itself) only roughened the
+    pitch, mostly at high notes, and never became noise.
+  - The jitter is now ± amount × √(step) (in cycles, `PH_NOISE_WIDTH` 1.0). The phase
+    then wanders by the same share of the pitch at every note, growing with the square
+    of the amount: a slight roughness at 10 %, noise (a spread of about twice the
+    pitch) at 100 %.
+  - It costs one square root per block.
 - **DCO Env** (the CZ's pitch envelope). An ADSR with an amount in semitones on both
   DCOs' pitch. It is also a Mod Matrix source, so it can move DCW, Mix or Volume
   instead (section 4.3). Measured: +10 with the amount at 0, about +250 in use.
@@ -248,9 +264,16 @@ period is two cycles, as described.
   The build may instead subtract each shape's mean, worked out analytically per block
   from its segments. That leaves no thump at note start, and phase 2 picks whichever
   measures cleaner.
+  - **Phase 2 chose the mean.** It is worked out per block and ramped across the
+    block. A pair's mean is the average of its two shapes' means. A new note takes its
+    mean at once, with no ramp. The output matches the formula less its mean within
+    7e-6 of full scale, so there is nothing left for a blocker to do.
 - **Level:** as WAVE: velocity → Volume (39), an output gain set so a four-note chord
   of the Init patch stays under the slot's clip, and a ±2 limit (`vmaxnm` / `vminnm`,
   NaN-safe).
+  - The gain is 0.25 (WAVE's is 0.84, before its filter). One Init note is at
+    −20.8 dBFS RMS, and a 4-note chord at full velocity peaks at 0.51 of full scale.
+    Even if all four peaks lined up, the chord would stay under 0.8.
 - **Per-voice state** (`struct ph_voice`, about 110 bytes, under WAVE's 160):
   - owner, slot, volume;
   - two phases, two pair toggles;
@@ -436,11 +459,26 @@ Project Settings → Synth Engines:
 - **WAVE replaces**: Off, ACD, FAT, VAP, WTFM, PERC (unchanged).
 - **PHASE replaces**: Off, ACD, FAT, VAP, WTFM, PERC (new).
 
-Both engines can run in one project, on different models. If the two items name the
-same model, **the item changed last wins and the other goes to Off**. The check
-happens at the next Config screen update, where the choice is applied anyway. The
-menu shows the reset the next time it draws; phase 1 verifies that the option item
-reads its value when it draws.
+Both engines can run in one project, on different models.
+
+**Changed after the user's hardware try (2026-10-25):** each item's list now leaves out
+the model the other item replaces, so the menu can't set both to one model. The stock
+editor reads an item's count and names each time it opens, so each item gets a 16-byte
+descriptor from the heap at menu build, pointed at a list without the other's model; the
+menu stores a position in that list, and the item's callback turns it into the choice.
+The user had seen one of WAVE or PHASE "twice" after setting both to one model. Through
+the stock menu code in the emulator (constructor, editor, apply, value texts, Config
+update) every synth always played the model its record and the table give; the only
+"twice" found was two synths on the replaced model, which both become the replacing
+synth, as designed. The rule below stays as a backstop (files, a heap with no room).
+
+If the two items name the
+same model, **the item changed last wins and the other goes to Off**. If both changed
+since the last apply (no menu does that; only a start could), WAVE wins, as it does for
+a `synths.bin` naming one model in both bytes. The check happens at the next Config
+screen update, where the choice is applied anyway. The menu should show the reset the
+next time it draws. The emulator can't draw the Config menu, so this is checked on
+hardware (section 10).
 
 ## 5. Saving and bundles
 
@@ -657,6 +695,37 @@ Tests (`test_phase.py`, plus all of `test_synths.py` unchanged):
 - **PHASE patch files:** save to `PHASE/<name>.patch` with id 7 and 66 values, and load
   back; a failed load restores; stock rejects them and plays the Init patch.
 
+**Phase 1 results (2026-10-24): built and passed in the emulator.** Version text
+`1.2.0-sy8`; synths' RAM still 2,064 bytes.
+- **Code:** `synths.c` (engine dispatch by model id, the union voice pool, both
+  builders sharing VAP's layout check and the own-six append, the registry, list, label,
+  tiles, menu and `synths.bin`), `ph_engine.h` (new, the silent engine), `wt_engine.h`
+  (the voice head: `slot` is 16 bits, then the engine tag), `patch.json` (the tile hook
+  `0x6011e924`, chained) and `build.sh`.
+- **PHASE's state bytes go last in `struct syn_state`**, so everything else stays
+  where `sy7` had it. WAVE's voices take their oscillators' start phases from their
+  addresses, and a first build with the bytes earlier moved them by 4 bytes, which
+  changed WAVE's output.
+- **`test_phase.py` (new): 0 failures**, on the synths-only build and on `patch/all`.
+  - WAVE against a `sy7` build (prebuilt): model identical (names, values, ranges,
+    flags, displays, screen, pages, Macros, title) and its output identical, sample for
+    sample.
+  - The PHASE model, the parameter copy, the swaps and the conflict rule, the menu,
+    the Model list (scrolled too), the label, the tiles, `synths.bin` byte 5, patch
+    files and the silent engine, as listed above.
+  - A 300-block stress run with both items swapped at random. A one-off 2,000-block run
+    passed too: 44 swaps, 3 restarts, about 1 million of the patch's writes checked.
+- **`test_synths.py`:** the menu check expects the folder's two items; the stress run
+  takes `phase=True`, and its heap-writer list gained the shared append and PHASE's
+  builder. Quick: 0 failures on the synths-only build and on `patch/all`. Full run on
+  the synths-only build: 197 checks, 0 failures (34 minutes, other tests running
+  beside it).
+- **`test_layout.py`:** 0 failures.
+- **Not covered in the emulator:** the Config menu redrawing an item the conflict rule
+  set to Off (section 4.7), and the tiles as drawn on the unit. Both are in the
+  hardware check.
+- **FINDINGS 23** got "Found while building PHASE" (model id 7, the tile labels).
+
 **Phase 2: the engine (`ph_engine.h`).**
 - The 8 shapes; DCW with key follow and per-DCO envelope depth; the knee and resonance
   limits; pairs.
@@ -694,6 +763,90 @@ Tests:
 - **Listening:** WAV files of each shape's DCW sweep, pairs, a resonant sweep, ring and
   noise mod, a DCO Env pluck and chords.
 
+**Phase 2 results (2026-10-24): built and passed in the emulator.** Version text still
+`1.2.0-sy8`; synths' RAM still 2,064 bytes; `struct ph_voice` 96 bytes (the pool's 160).
+- **Code:**
+  - `ph_engine.h`: the engine.
+  - `gen_phase_tables.py` (new): the cosine table, generated by `build.sh`.
+  - `synths.c`: the render hook passes the tempo to PHASE too.
+  - The synths code is 17.2 KB larger than `sy7`'s, phase 1's UI code included.
+- **Changes from the design, found by the tests:**
+  - The Double Sine and the Saw-Pulse are eased at high notes (section 3.3).
+  - Noise Mod's jitter now scales with √(step) (section 3.5).
+  - The output gain is 0.25 (section 3.6).
+  - The resonance cap is 0.25 × the rate, and DC is removed by subtracting the mean.
+- **An engine bug the tests caught:** Noise Mod's loop played a single shape as a pair,
+  so every other cycle used an uninitialized second shape. The output had DC and stray
+  partials even at 1 %. Now both halves are the same shape; a 1 % check guards it.
+- **`test_phase.py`, full run: 98 checks, 0 failures, 13.7 minutes** (the engine's
+  checks alone: `--engine`, 9 minutes). Each check is against the formulas of
+  sections 3.1–3.5, worked out in float64 in the test (`ref_shape`, `dco_sim`):
+  - **Shapes:** every shape, from phase 0, at DCW 0, 50 and 100 % (note 45), and at
+    100 % at notes 84, 96 and 108, where the knee and resonance limits act. All match
+    the formula less its mean, × 0.25, sample for sample, within 6.7e-6.
+  - **DCW 0:** shapes 1–5 are a pure sine (harmonics 2–10 at most −122 dB). Harmonics
+    1–40 at DCW 100 % (and the resonant shapes at 0 and 50 %) match the formula's
+    within 0.011 dB.
+  - **DCW sweep:** shapes 1–5 get brighter at every 10 % step (the saw's centroid goes
+    from 110 to 1,797 Hz). In the resonant shapes the strongest harmonic climbs
+    1 → 24.
+  - **Aliasing at DCW 100 %, notes 60–108:**
+    - shapes 1–5: worst −45.3 dB (the square at note 96);
+    - Reso I: −63 / −47 / −39 / −35 / −32 dB;
+    - Reso II: −90 / −62 / −52 / −41 / −33 dB;
+    - Reso III: −67 / −51 / −43 / −38 / −35 dB.
+
+    Each resonant shape is 3–7 dB better than section 3.3's table at the top notes.
+  - **Continuity:** no step between samples above the formula's steepest slope
+    (× 1.000) for the Double Sine and Reso I–III at all DCW values, notes 45 and 72.
+  - **Pairs:** the shapes alternate cycle by cycle from the note on, sample for sample,
+    and the sub-octave is there. A resonant shape after a resonant one plays as Off.
+    Turning Wave 1+ Off mid-note plays the first shape alone from the next block.
+  - **Ring Mod:** DCO 1 × DCO 2 sample for sample; the sum and difference partials are
+    equal, and the DCOs' own pitches are at −120 dB. Mix 0 gives DCO 1 × (1 + DCO 2) / 2.
+  - **Noise Mod:** the power no longer in the harmonics, 8 cycles at a time, at 0 / 10 /
+    30 / 60 / 100 %:
+    - note 45: 0 / 6 / 39 / 71 / 76 %;
+    - note 81: 0 / 7 / 36 / 76 / 81 %.
+
+    At 0 it is the sine itself, and DCO 1 is untouched by it.
+  - **The DCO envelope:** ±12 semitones, Sustain 50 % (+6), the Mod Matrix's
+    DCO Env → Pitch, and the release back to pitch: each within 0.1 cent.
+  - **Pitch:**
+    - within 0.002 cents from note 24 to 108;
+    - Tune, Finetune, Detune and the Matrix's Detune: each within 0.01 cent;
+    - bend ±2 semitones: within 0.03 cent.
+  - **Envelope times:** the DCA's Attack and Release (to −60 dB), and the DCW and DCO
+    envelopes' Attack (read through the Matrix's Volume): each on its set time to the
+    millisecond (the check allows 5 %).
+  - **DCW controls:** Env Amt 1 and 2 are independent, each DCO's DCW its own amount ×
+    the envelope. Key Follow lowers the DCW by 100 % four octaves above note 60 (also
+    negative amounts), sample for sample.
+  - **Glide:** as WAVE's.
+  - **The Mod Matrix:**
+    - each LFO through each of the 9 destinations moves the output;
+    - the Init routings at Amt 0 change nothing;
+    - all 63 source → destination pairs at ±400 % stay finite and within ±2.
+  - **Level and voices:**
+    - one Init note is −20.8 dBFS RMS, and a 4-note chord at full velocity peaks at
+      0.51;
+    - velocity sets the level (64 gives 64/127);
+    - voice allocation matches stock VAP's, for a pluck and for overlapping 1 s
+      releases (a 120-step sequence; the full 240 steps took 6 minutes per case);
+    - the Chorus works on a PHASE slot;
+    - before boot the output is zeros.
+  - **Cost per block:** idle 527 instructions; one shape per DCO 13,848–15,192; with
+    everything on 18,317–18,334. The budgets are 1,000, 17,000 and 20,000.
+  - **The phase 1 checks** all pass again. WAVE is identical to `sy7`: the same model,
+    and the same output sample for sample. The 300-block stress run with both swaps
+    found 0 problems.
+- **`test_synths.py --quick`:** 96 checks, 0 failures. **`test_layout.py`:** 0 failures.
+  The full `test_synths.py` run and `patch/all` are left for phase 3's release and deep
+  tiers. WAVE's code didn't change, and the sy7 identity check covers WAVE's output.
+- **Listening files:** `test_phase.py --wav <dir>` writes 17 WAV files: each shape's DCW
+  sweep at notes 45 and 69, four pairs, Reso I at three notes, Ring and Noise Mod, a DCO
+  envelope pluck and an Init chord. They are in `build/phase_wav/` (not committed).
+
 **Phase 3: bundles and release tier.**
 - `patch/all` with the new version text.
 - `run_tests.py --tier release`. synths' audio code changes, so `--tier deep` runs
@@ -701,8 +854,45 @@ Tests:
 - `test_web_patcher.py --update`.
 - The README, PATCHING.md, the root README and FINDINGS updated.
 
-**Phase 4: the user's hardware check** (section 10), then the tested hashes into the
-manifest and PATCHING.md.
+**Phase 3 progress (2026-10-24):**
+- **Done:**
+  - the synths build in `prebuilt/`;
+  - `patch/all` at `1.2.0-MS8`. Its RAM placement is unchanged (synths' 2,064 bytes in
+    DTCM, the effect's block in SDRAM), and the image ends at `0x60242585`;
+  - `run_tests.py` runs `test_phase.py` beside `test_synths.py` on every build with
+    synths. On mixes it uses the new `--quick`, which skips the engine's checks: they
+    depend on the engine's code alone. On `patch/all` it runs the full test;
+  - `test_phase.py --quick` on `patch/all`: 0 failures (2 minutes);
+  - the docs: the synths README, the root README, PATCHING.md's table and commands, and
+    the manifest's synths entry ("Emulator-tested (PHASE not yet on hardware)").
+  - FINDINGS needs nothing new: phase 1 added what was found.
+
+**Phase 3 done (2026-10-25)**, on the builds with the menu's filtered lists (4.7):
+`1.2.0-sy8` and `1.2.0-MS8`.
+- **Release tier, with `--update`:** 133 jobs in 55 minutes. All passed but one: the stress
+  run's write watch flagged a Synth Engines descriptor that `mt_syn_last_item` writes into
+  scratch memory, which the test's own malloc hands out during emulated restarts. That was
+  the test's mistake, and the watch now allows it. A 2,000-block rerun on `patch/all`: 0
+  problems.
+- **Deep tier:** 133 jobs in 104 minutes. 5 failed: `test_phase.py`'s full run on five
+  mixes, one check each. None was the engine's fault: PHASE seeds each voice's DCO
+  phases and noise from the voice's address (as WAVE does), so every mix starts from
+  different phases. Three checks read too short a stretch for that.
+  - **The Init level.** Its Detune beats DCO 2 against DCO 1 at 1.2 Hz, and the old
+    0.23-second window read -19.6 to -27.9 dBFS. It now reads two whole beats, and every
+    file reads -22.1.
+  - **Noise Mod's saw at 1 %.** It was read over 200 blocks, where the phase's wander
+    smears harmonic 4 (by 0.1 to 1.2 dB, depending on the seed). It is now the median of
+    8-cycle stretches, and is off by at most 0.09 dB over 40 seeds.
+  - **Noise Mod's share.** It levels off near 80 % from 60 %, and 100 % read under 60 %
+    in 8 of 40 seeds. The check is now "rising to 60 %, over 70 % at 100 %". Over the
+    40 seeds, the two notes' means agree within a point, but one run's gap scatters by
+    about 6 points (sd), so the limit on the gap is now 20 points (it was 15).
+  - **The recheck:** `test_phase.py`'s full run, with these changes, on the deep tier's 10
+    files: 110 PASS and 0 failures on each. A release tier rerun after the change: 133
+    jobs in 45 minutes, 0 failures.
+- **Phase 4:** the user tested `1.2.0-sy8` and `1.2.0-MS8` on hardware (2026-10-25). Their
+  hashes are in the manifest's `tested_builds` and PATCHING.md's table.
 
 ## 9. The user's answers (first round), and what is still open
 

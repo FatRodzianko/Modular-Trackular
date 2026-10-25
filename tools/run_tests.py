@@ -11,7 +11,8 @@ Tiers (times with an empty cache on an 8-core PC; with the cache, only what chan
            byte-identical to patch_ptf.py's, and its layout checks), plus every patch's
            emulator test on a cover set of web patcher mixes and on the bundles
            test_layout.py builds in other orders; masterfx and synths in full mode on
-           patch/all. Before a commit that changes what users get.
+           patch/all. Before a commit that changes what users get. (synths' tests are
+           test_synths.py and test_phase.py, PHASE's: EXTRA_TESTS.)
   deep     (hours) release with masterfx and synths in full mode on every mix. Overnight, and
            only when their audio code changes.
 
@@ -73,13 +74,15 @@ PY = sys.executable
 CACHE = ROOT / "build" / "test_cache.json"
 EDGE = 64                                  # bytes from a region's start or end that count as "at the edge"
 FLASH_SECTOR, FLASH_PAGE = 0x1000, 0x100
-STOCK_ARG = {"masterfx", "swing", "condtrig", "synths", "legato", "slicethru"}   # tests that take the stock .ptf too
-QUICK_MODE = {"masterfx", "synths"}        # tests with a --quick mode
+STOCK_ARG = {"masterfx", "swing", "condtrig", "synths", "phase", "legato", "slicethru"}   # tests that take the stock .ptf too
+QUICK_MODE = {"masterfx", "synths", "phase"}   # tests with a --quick mode
+EXTRA_TESTS = {"synths": ["phase"]}        # a patch's tests besides test_<patch>.py (PHASE: test_phase.py)
 DEFAULT_SECONDS = 60.0                     # estimate for a test not timed yet, unless below
 MEASURED_SECONDS = {                       # alone, on an 8-core PC (the cache keeps its own, measured under load)
     "layout": 45, "web harness": 800, "colorsong": 1, "copypattern": 3, "humanize": 6, "visualizer": 8,
     "swing": 16, "interpolate": 25, "condtrig": 36, "legato": 130, "slicethru": 12, "masterfx (quick)": 15,
-    "masterfx (full)": 385, "synths (quick)": 127, "synths (full)": 1400,
+    "masterfx (full)": 385, "synths (quick)": 127, "synths (full)": 1400, "phase (quick)": 150,
+    "phase (full)": 660,
 }
 
 
@@ -353,7 +356,8 @@ def main() -> int:
         jobs = []
         for ptf, full in targets:
             contained = [p["name"] for p in json.loads(ptf.with_suffix(".map.json").read_text())["patches"]]
-            jobs += [r.emu_job(ptf, p, full) for p in contained if (EMU / f"test_{p}.py").exists()]
+            tests = [t for p in contained for t in [p] + EXTRA_TESTS.get(p, [])]
+            jobs += [r.emu_job(ptf, t, full) for t in tests if (EMU / f"test_{t}.py").exists()]
         return jobs
 
     # 2. each patch alone and patch/all, built here, so their emulator tests (the full

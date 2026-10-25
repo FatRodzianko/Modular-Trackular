@@ -29,6 +29,8 @@ CFLAGS=(-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -O2 -std=c11
 # The wavetables, generated from formulas (gen_wavetables.py needs numpy): 7 banks of
 # 66.5 KB and the super saw's saw.
 "$PYTHON" "$HERE/gen_wavetables.py" "$OUT/wt_tables.h"
+# PHASE's cosine table (4 KB)
+"$PYTHON" "$HERE/gen_phase_tables.py" "$OUT/ph_tables.h"
 "$ARM_GCC_BIN/arm-none-eabi-gcc" "${CFLAGS[@]}" -I"$OUT" -c "$HERE/synths.c" -o "$OUT/synths.o"
 link() {                               # link <linker script> <elf> <map>
     "$ARM_GCC_BIN/arm-none-eabi-gcc" -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 \
@@ -38,7 +40,7 @@ link() {                               # link <linker script> <elf> <map>
         -Wl,--undefined=mt_syn_last_item -Wl,--undefined=mt_syn_pattern_update -Wl,--undefined=mt_syn_config_update \
         -Wl,--undefined=mt_version_fmt -Wl,--undefined=mt_syn_ram_map -Wl,--undefined=mt_syn_registry \
         -Wl,--undefined=mt_syn_project_records -Wl,--undefined=mt_syn_list_data -Wl,--undefined=mt_syn_list_images \
-        -Wl,--undefined=mt_syn_patch_label -Wl,--undefined=mt_syn_patch_load \
+        -Wl,--undefined=mt_syn_patch_label -Wl,--undefined=mt_syn_patch_load -Wl,--undefined=mt_syn_tiles \
         -Wl,-Map="$3" "$OUT/synths.o" -o "$2"
 }
 link "$HERE/link.ld" "$OUT/synths.elf" "$OUT/synths.map"

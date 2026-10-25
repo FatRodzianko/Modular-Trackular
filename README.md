@@ -44,12 +44,16 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   condition on how many times the pattern has played: `1st`, `!1s` (not the first), or
   `1:2` … `8:8` (the A-th pass of every B), counted per track from the start of
   playback or of the pattern. The idea comes from Psygoo's CT6. Tested on hardware. See [patch/condtrig/README.md](patch/condtrig/README.md).
-- **synths**: WAVE, a wavetable synth that takes the place of one of the five synth
-  models per project (Config → Project Settings → Synth Engines → WAVE replaces). The
-  Model list then shows WAVE, with its own controls: two oscillators on 7 wavetable
-  banks, a super saw or a saw, Digital mode, ladder, OB and SVF filters with drive, three
-  envelopes, two LFOs (bipolar or unipolar), a 6-slot Mod Matrix and a stereo chorus.
-  Its patches save and load like any model's. Tested on hardware. See
+- **synths**: two synths, WAVE and PHASE, each taking the place of one of the five
+  synth models per project (Config → Project Settings → Synth Engines → WAVE replaces,
+  PHASE replaces). The Model list then shows them, with their own controls:
+  - WAVE: two oscillators on 7 wavetable banks, a super saw or a saw, Digital mode,
+    ladder, OB and SVF filters with drive, and three envelopes.
+  - PHASE: Casio CZ-style phase distortion: two DCOs on 8 shapes (pairs too), DCW and
+    DCA envelopes, a pitch envelope, ring and noise mod.
+  - Both: two LFOs (bipolar or unipolar), a 6-slot Mod Matrix and a stereo chorus.
+
+  Their patches save and load like any model's. Tested on hardware. See
   [patch/synths/README.md](patch/synths/README.md).
 - **legato**: legato for MIDI instruments and synth slots. A Glide FX (`G`, any value)
   on a MIDI-instrument or synth (S1–S3) note sends its note-on before the previous
@@ -69,7 +73,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   next slice. The instrument stays a Beat Slice instrument, so stock firmware plays it
   as Beat Slice; the choice is saved per project. Tested on hardware. See
   [patch/slicethru/README.md](patch/slicethru/README.md).
-- **all**: all eleven mods above in one firmware (version text `1.2.0-MBT`), from
+- **all**: all eleven mods above in one firmware (version text `1.2.0-MS8`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
@@ -127,7 +131,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/swing/` | Global Swing per project |
 | `patch/visualizer/` | Pad visualizer during playback |
 | `patch/condtrig/` | Conditional trigs: Chance FX values above 100 as conditions on the pass count |
-| `patch/synths/` | WAVE, a wavetable synth in place of one synth model per project; its table generator `gen_wavetables.py` |
+| `patch/synths/` | WAVE (wavetables) and PHASE (phase distortion), synths in place of synth models per project; their table generators `gen_wavetables.py` and `gen_phase_tables.py` |
 | `patch/legato/` | Legato: a Glide FX on a MIDI or synth note sends its note-on before the previous note's note-off |
 | `patch/copypattern/` | Copy to New: copies the current pattern into the next empty one |
 | `patch/slicethru/` | Beat Slice Thru: a play mode whose notes play from their slice to the sample end |
@@ -164,6 +168,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/test_condtrig.py` | condtrig: every condition in both columns, what a skipped step drops, counting and resets, encoder and grid text, Chance 0–100 as stock, cost |
 | `tools/emu/synth_rig.py` | The firmware's synth system (host, slots, voices, the audio graph) driven block by block, for the synth tools |
 | `tools/emu/test_synths.py` | synths: stock output unchanged, the swap, the WAVE model and its pages, Model list and Edit Patch drawing, settings and patch files, oscillators, filters, envelopes, LFOs and Mod Matrix, banks, voices, stress, and WAV renders |
+| `tools/emu/test_phase.py` | synths' PHASE: WAVE unchanged, the PHASE model, tiles, swaps with both engines, settings and patch files; the shapes against their formulas, aliasing, pairs, ring and noise mod, envelopes, pitch, Mod Matrix, level, voices, cost, stress, and WAV renders |
 | `tools/emu/test_slicethru.py` | slicethru: every play mode's note-on as stock without the flag, the slice-to-end span, render cost, `S`, reverse, stereo and re-entry with it; the Play Mode list and every input on the real Sample Playback screen; the settings file |
 | `tools/emu/test_legato.py` | legato: random patterns against stock (identical without `G`, only reordered with it), the legato order and every case that keeps the stock order, other FX, stuck notes, cost; synth slots: the order, envelopes on every model and WAVE, PERC unchanged |
 | `tools/emu/test_itcmtest.py` | itcmtest: the ITCM stubs after the boot copy, Chance FX and count-in playing exactly as stock through the hooks |

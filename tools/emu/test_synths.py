@@ -32,7 +32,8 @@ voices, rendered through the audio graph (or the synth output object alone).
   patch adds no audio interrupt enable inside the stock code's own critical section;
   heap and engine voices unchanged after 200 swaps with notes held.
 - Config menu: Project Settings keeps its 10 stock items and gets "Synth Engines" with
-  "WAVE replaces" (Off, ACD, FAT, VAP, WTFM, PERC); the stock Apply stores each value.
+  "WAVE replaces" (Off, ACD, FAT, VAP, WTFM, PERC) and "PHASE replaces" (checked in
+  tools/emu/test_phase.py); the stock Apply stores each value.
 - The Model list: the synth settings screen gives the list the patch's image ids with
   the replaced position marked; the list draws the four other logos and "WAVE" as
   text centred where the replaced logo was, and the stock list is untouched.
@@ -110,6 +111,7 @@ from patch_ptf import bl_target  # noqa: E402
 
 ACD, FAT, VAP, WTFM, PERC = sr.ACD, sr.FAT, sr.VAP, sr.WTFM, sr.PERC
 WAVE = 3                            # WAVE's model id
+PHASE = 7                           # PHASE's (tools/emu/test_phase.py)
 MODELS = (ACD, FAT, VAP, WTFM, PERC)  # the Model list, index 0-4
 INDEX = {md: k for k, md in enumerate(MODELS)}
 MENU_NAMES = ["Off", "ACD", "FAT", "VAP", "WTFM", "PERC"]
@@ -144,6 +146,7 @@ MAP_MARKER = 0x50414D52             # "RMAP"
 MAP_FIELDS = ("state", "menu", "applied", "ready", "switches", "loads", "model_ids", "param", "voice",
               "voice_size", "params", "size", "tables", "banks", "frames", "stride", "level_off", "level_len",
               "levels", "builder", "fx_ready", "fx_size", "fx_p", "fx_running")
+SY8_FIELDS = MAP_FIELDS + ("ph_menu", "ph_applied", "ph_builder", "menu_pos", "ph_menu_pos")   # sy8's map
 SY_READY = 0x59444552
 CC_CUTOFF, CC_RESONANCE, CC_MACRO = 74, 71, 102     # Macro a-f arrive as CCs 102-107
 ENGINE_READS = set(range(66))                               # the parameters wt_engine.h and wt_fx.h read
@@ -160,13 +163,14 @@ def check(ok: bool, what: str) -> None:
         failures.append(what)
 
 
-def ram_map(m, ptf: Path) -> dict[str, int]:
+def ram_map(m, ptf: Path, fields: tuple[str, ...] | None = None) -> dict[str, int]:
     """Where the patch's state is (mt_syn_ram_map: a marker, the state's address, its layout)."""
+    fields = fields or MAP_FIELDS
     lo, hi = patch_code(ptf, "synths")
     code = bytes(m.uc.mem_read(lo, hi - lo))
-    for i in range(0, len(code) - 4 * (len(MAP_FIELDS) + 1), 4):
+    for i in range(0, len(code) - 4 * (len(fields) + 1), 4):
         if struct.unpack_from("<I", code, i)[0] == MAP_MARKER:
-            return dict(zip(MAP_FIELDS, struct.unpack_from(f"<{len(MAP_FIELDS)}I", code, i + 4)))
+            return dict(zip(fields, struct.unpack_from(f"<{len(fields)}I", code, i + 4)))
     raise SystemExit(f"{ptf}: the synths patch's RAM map not found")
 
 
@@ -784,7 +788,7 @@ def menu_checks(ptf: Path) -> None:
     fcap, fcount = m.r32(folder + 8) & 0xFF, m.r32(folder + 0x1C) >> 8 & 0xFF
     items = [m.r32(m.r32(folder + 0xC) + 4 * i) for i in range(min(fcap, fcount))]
     names = [m.cstr(m.r32(i + 4)) for i in items]
-    check(m.r32(folder) & 0xFF == 1 and fcap == fcount == 1 and names == ["WAVE replaces"],
+    check(m.r32(folder) & 0xFF == 1 and fcap == fcount == 2 and names == ["WAVE replaces", "PHASE replaces"],
           f"item {at + 1} is the folder 'Synth Engines' with {names} (patch entries: {labels[10:]})")
     m.stub_function(MENU_REDRAW, lambda mm: 0)
     m.w32(MENU_CURRENT, ps)
@@ -794,21 +798,23 @@ def menu_checks(ptf: Path) -> None:
     closed = []
     m.stub_function(MENU_EDITOR_CLOSE, lambda mm: closed.append(1))
     item = items[0]
+    sy8 = ram_map(m, ptf, SY8_FIELDS)
     addr = WHERE["state"] + WHERE["menu"]
+    pos = sy8["state"] + sy8["menu_pos"]
     desc = m.r32(item + 0x10)
     cb = m.r32(desc + 12)
     opts = [m.cstr(m.r32(m.r32(desc + 8) + 4 * i)) for i in range(m.r32(desc + 4))]
-    check(m.r32(item + 0xC) & 0xFF == 4 and m.r32(desc) == addr and opts == MENU_NAMES
+    check(m.r32(item + 0xC) & 0xFF == 4 and m.r32(desc) == pos and opts == MENU_NAMES
           and CODE[0] <= cb < CODE[1] and cb & 1 and m.cstr(m.r32(item + 8)) != ""
-          and m.uc.mem_read(addr, 1)[0] == 0,
-          f"'WAVE replaces': an option item {opts} on the patch's choice, with help text and an apply callback "
-          "in the patch, starting at Off")
+          and m.uc.mem_read(addr, 1)[0] == 0 and m.uc.mem_read(pos, 1)[0] == 0,
+          f"'WAVE replaces': an option item {opts} on the patch's menu position, with help text and an apply "
+          "callback in the patch, starting at Off")
     for value in (3, 5, 0):
         m.w8(folder + 0x1C, 0)
         n = len(closed)
         m.call(MENU_APPLY, 0, value, max_insns=2_000_000)
-        check(m.uc.mem_read(addr, 1)[0] == value and len(closed) == n + 1,
-              f"Apply {MENU_NAMES[value]}: stored, editor closed")
+        check(m.uc.mem_read(pos, 1)[0] == value and m.uc.mem_read(addr, 1)[0] == value and len(closed) == n + 1,
+              f"Apply {MENU_NAMES[value]} (PHASE Off: the full list): stored, the choice set, editor closed")
 
 
 # ---- 7. the Model list ------------------------------------------------------------------
@@ -2330,8 +2336,10 @@ OUT_BUFS = (0x200278E4, 0x20027AE4)  # the synth output's float buffers (renders
 
 
 def builder_ranges(ptf: Path) -> list[tuple[int, int]]:
-    """The patch's code that may write the heap (WAVE's builder and its helpers, the Macro
-    defaults), from the build's symbol table: (start, end) as placed in `ptf`."""
+    """The patch's code that may write the heap (WAVE's and PHASE's builders and their
+    helpers, the Macro defaults; the Config menu's two descriptors, made by the menu hook and
+    pointed at their lists by menu_refresh), from the build's symbol table: (start, end) as
+    placed in `ptf`."""
     here = Path(__file__).resolve().parent.parent.parent / "patch" / "synths"
     sym = next((p for p in (here / "build" / "synths.sym", here / "prebuilt" / "synths.sym") if p.exists()), None)
     if sym is None:
@@ -2340,7 +2348,8 @@ def builder_ranges(ptf: Path) -> list[tuple[int, int]]:
     base = min(a for a, _ in syms) & ~0xFFF
     link = 0x601C4000 if base <= 0x601C4000 else base
     names = {"wave_builder", "wave_rewrite", "wave_macros", "str_set", "str_init", "str_free", "set_display",
-             "set_cells", "sub_free", "page_free", "vec_free"}
+             "set_cells", "sub_free", "page_free", "vec_free", "append_own", "phase_builder", "phase_rewrite",
+             "phase_macros", "menu_refresh", "mt_syn_last_item"}
     out = []
     for k, (a, n) in enumerate(syms):
         if n.split(".")[0] in names:        # GCC's clones keep the name before a dot (set_cells.isra.0)
@@ -2349,9 +2358,10 @@ def builder_ranges(ptf: Path) -> list[tuple[int, int]]:
     return out or [CODE]
 
 
-def stress_checks(ptf: Path, blocks: int = 2000, seed: int = 11) -> None:
-    print(f"stress: {blocks} blocks of random notes, parameters (garbage too), swaps, Model list picks, "
-          "polyphony changes, restarts")
+def stress_checks(ptf: Path, blocks: int = 2000, seed: int = 11, phase: bool = False) -> None:
+    """With `phase` (tools/emu/test_phase.py), the swaps set "PHASE replaces" too."""
+    print(f"stress: {blocks} blocks of random notes, parameters (garbage too), swaps{' (WAVE and PHASE)' if phase else ''}, "
+          "Model list picks, polyphony changes, restarts")
     rnd = np.random.default_rng(seed)
     r = Rig(ptf)
     m = r.m
@@ -2369,10 +2379,14 @@ def stress_checks(ptf: Path, blocks: int = 2000, seed: int = 11) -> None:
     # menu hook again, so their menu nodes come from scratch memory, not the heap (they
     # would leak it full, and stock VAP writes past a failed allocation)
     restarting = [False]
+    menu_blocks: list[tuple[int, int]] = []     # the scratch stand-ins for the heap (the menu hook may write them)
 
     def menu_malloc(uc, a, size_, user):
         if restarting[0]:
-            uc.reg_write(UC_ARM_REG_R0, m.alloc(max(8, m.arg(0))))
+            n = max(8, m.arg(0))
+            p = m.alloc(n)
+            menu_blocks.append((p, p + n))
+            uc.reg_write(UC_ARM_REG_R0, p)
             uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
     m.uc.hook_add(UC_HOOK_CODE, menu_malloc, begin=FW_MALLOC, end=FW_MALLOC)
     lo, hi = CODE
@@ -2389,7 +2403,8 @@ def stress_checks(ptf: Path, blocks: int = 2000, seed: int = 11) -> None:
             return True
         if any(b <= a < b + 512 for b in OUT_BUFS):
             return True
-        if HEAP[0] <= a < HEAP[1] and any(s_ <= pc < e_ for s_, e_ in writers):
+        if (HEAP[0] <= a < HEAP[1] or any(b <= a < e for b, e in menu_blocks)) \
+                and any(s_ <= pc < e_ for s_, e_ in writers):
             return True
         for i in range(3):
             s = r.slot(i)
@@ -2464,7 +2479,7 @@ def stress_checks(ptf: Path, blocks: int = 2000, seed: int = 11) -> None:
             want = r.table()[m.r32(RECORD_MODEL + 0x40 * i)]
             if r.model(i) != want:
                 r.set_model(i, want)
-            elif r.model(i) in (VAP, WAVE):
+            elif r.model(i) in (VAP, WAVE, PHASE):
                 r.stock_rebuild(i)
     update = m.r32(m.r32(sr.SYNTH_OUT))
     held = {0: [], 1: [], 2: []}
@@ -2479,6 +2494,9 @@ def stress_checks(ptf: Path, blocks: int = 2000, seed: int = 11) -> None:
     floats = {"volume": 8, "pos0": 20, "pos1": 24, "note": 28, "pitch": 32, "glide": 36, "bend": 40,
               "amp level": 48, "filter level": 56, "ic0": 60, "ic1": 64, "ic2": 68, "ic3": 72}
     stages = {"amp stage": 44, "filter stage": 52}
+    # struct ph_voice (ph_engine.h): owner, slot (16 bits), engine (1), pad, volume, note, bend,
+    # aenv {stage, level}, gate
+    ph_floats = {"volume": 8, "note": 12, "bend": 16, "amp level": 24}
 
     def bad_state() -> str | None:
         vs = WHERE["voice_size"]
@@ -2486,9 +2504,18 @@ def stress_checks(ptf: Path, blocks: int = 2000, seed: int = 11) -> None:
             return f"struct wt_voice is {vs} bytes: the test's layout is out of date"
         for k in range(8):
             raw = bytes(m.uc.mem_read(WHERE["state"] + WHERE["voice"] + k * vs, vs))
-            owner, slot = struct.unpack_from("<II", raw, 0)
+            owner, slot, engine = struct.unpack_from("<IHB", raw, 0)
             if not owner:
                 continue
+            if engine == 1:
+                f = {n: struct.unpack_from("<f", raw, o)[0] for n, o in ph_floats.items()}
+                stage = struct.unpack_from("<I", raw, 20)[0]
+                if slot > 2 or not all(np.isfinite(x) for x in f.values()) or stage > 4 \
+                        or not 0 <= f["amp level"] <= 1.0001 or raw[28] > 1:
+                    return f"entry {k} (PHASE): slot {slot}, {f}, stage {stage}, gate {raw[28]}"
+                continue
+            if engine != 0:
+                return f"entry {k}: engine {engine}"
             f = {n: struct.unpack_from("<f", raw, o)[0] for n, o in floats.items()}
             st = {n: struct.unpack_from("<I", raw, o)[0] for n, o in stages.items()}
             levels_ok = 0 <= f["amp level"] <= 1.0001 and 0 <= f["filter level"] <= 1.0001
@@ -2530,10 +2557,10 @@ def stress_checks(ptf: Path, blocks: int = 2000, seed: int = 11) -> None:
         elif x < 0.5:
             r.bend(slot, int(rnd.choice([-32768, -8192, 0, 8191, 32767, int(rnd.integers(-32768, 32768))])))
             note("bend")
-        elif x < 0.62 and r.model(slot) in (VAP, WAVE):
-            idx = int(rnd.integers(0, 66 if r.model(slot) == WAVE else 60))
-            if r.model(slot) == WAVE and rnd.random() < 0.5:
-                # garbage reaches the WAVE voices only: stock VAP's own render hangs on some (NaN LFO
+        elif x < 0.62 and r.model(slot) in (VAP, WAVE, PHASE):
+            idx = int(rnd.integers(0, 60 if r.model(slot) == VAP else 66))
+            if r.model(slot) != VAP and rnd.random() < 0.5:
+                # garbage reaches the WAVE and PHASE voices only: stock VAP's own render hangs on some (NaN LFO
                 # settings, stock firmware too), and the UI keeps the patch in range
                 v = float(rnd.choice(GARBAGE)) if rnd.random() < 0.6 else float(rnd.uniform(-1e4, 1e4))
                 r.set_param(slot, idx, v, patch=False)
@@ -2547,6 +2574,8 @@ def stress_checks(ptf: Path, blocks: int = 2000, seed: int = 11) -> None:
             note("CC")
         elif x < 0.66:
             m.w8(r.st("menu"), int(rnd.integers(0, 8)))     # 6, 7: out of range (counts as Off)
+            if phase:
+                m.w8(r.st("ph_menu"), int(rnd.integers(0, 8)))
             watched(r.config)
             held[slot].clear()
             note("swap")

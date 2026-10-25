@@ -2175,6 +2175,44 @@ same after every build of a patch.
   array (1.0 when set; `0x16f14`). `+0x22` is "stepped" and `+0x23` the MIDI CC.
   `+0x24` is "rebuild on change".
 
+### Found while building PHASE (`patch/synths` sy8, emulator)
+
+- **Model id 7 is free and works like 3.** WAVE built with id 7 passed every
+  `test_synths.py --quick` check. A trace of stock reads of the id found the same 10
+  sites with either id, each one comparing, copying or hashing it:
+  - in ITCM: the patch file's parse (`0x187d6`) and write (`0x1c006`), and the slot's
+    voice setup (`0x1e4a4`–`0x1e4ec`);
+  - in flash: `set_model` (`0x600b1450`), the title (`0x600b16de`), load by name
+    (`0x60124cb8`) and the registry's find (`0x6012fd42`).
+- **The Edit Patch tiles' labels come from keywords in the page names** (this corrects
+  the note above). `0x6011d628` (one caller, `bl` at `0x6011e924` in the Edit Patch
+  setup, `r0` = the screen, `r1` = 1) walks the selected synth's pages. For each one it
+  copies the full name (24-byte buffers at screen `+0x444`) and makes a label of at most
+  7 characters (8-byte buffers, their pointers in an array at `[screen + 0x448]`) and an
+  icon kind (bytes at `+0x42c`), with the tile count at byte `+0x450`. The keywords,
+  tried in this order:
+
+  | Page name contains | Label | Kind |
+  |---|---|---|
+  | "Amp Envelope" | Amp Env | 0x11 |
+  | "Amplifier" | Amp | 0x11 |
+  | "Envelope" | Env 1, Env 2, … (counted) | 0x11 |
+  | "Filter" | Filter | 0x12 |
+  | "Voice" | Voice | 0x13 |
+  | "LFO" | LFO 1, LFO 2, … (counted) | 0x14 |
+  | "Modulation" | Mod | 0x16 |
+  | "Oscillator" | Osc | 0x17 |
+  | Kick, Tom, Snare, Hihat, Cymbal, "Percussion" (Perc), Mixer, FX | the same | 0x1f, 0x23, 0x22, 0x1e, 0x1d, 0x21, 0x20, 0x1c |
+  | anything else | (empty) | 0xff (no icon) |
+
+  So WAVE's "Filter Envelope" reads Env 1: "Envelope" is tried before "Filter". Right
+  after the call the setup stores the label pointer array and the kinds into the tiles
+  control's data (`+0x130`, `+0x134`). The control (constructor `0x60104828`, vtable
+  `0x60046914`) holds a pointer to that data and reads the buffers each time it draws, so
+  labels and kinds rewritten after the call are what it shows.
+- **A Unicorn memory-write hook over all of RAM** makes the synth rig's boot fault (at
+  `0x601665d2`). Narrower write hooks, or read hooks, work.
+
 ## 24. MIDI note-off order and legato hook points (emulator)
 
 Found while investigating legato (`docs/LEGATO_ANALYSIS.md`).

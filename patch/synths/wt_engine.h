@@ -104,7 +104,9 @@ struct wt_env { uint32_t stage; float level; };
 /* One engine voice, tied to one VAP voice object (owner). */
 struct wt_voice {
     uint32_t owner;                         /* the VAP voice object, 0 = free */
-    uint32_t slot;
+    uint16_t slot;
+    uint8_t engine;                         /* ENGINE_WAVE (synths.c's, 0) */
+    uint8_t pad0;
     float volume;                           /* Volume (39): velocity / 127 */
     uint32_t phase[2];
     float pos[2];                           /* frame positions, 0..WT_FRAMES - 1 */
@@ -159,7 +161,7 @@ static inline float note_hz(float note)
 
 static void wt_voice_init(struct wt_voice *e, uint32_t slot)
 {
-    e->slot = slot;
+    e->slot = (uint16_t)slot;
     e->volume = 1.0f;
     /* the oscillators start anywhere, each voice elsewhere (from its address): a chord on
      * fresh voices would otherwise start every saw in step, and its first peak clip */
