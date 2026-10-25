@@ -9,8 +9,9 @@ slice starts. Installed on its own, Config shows the firmware version as `1.2.0-
 [docs/BEAT_SLICE_THROUGH_PLAN.md](../../docs/BEAT_SLICE_THROUGH_PLAN.md) has the
 investigation and the plan.
 
-**Status:** emulator-tested, on its own and in a test bundle with patch/all's mods.
-Not yet tested on hardware.
+**Status:** tested on hardware, on its own (`1.2.0-bt3`) and in `patch/all`
+(`1.2.0-MBT`). A project saved with Beat Slice Thru instruments plays them as Beat
+Slice in stock firmware, and as Beat Slice Thru again back on this firmware.
 
 ## Using it
 

@@ -9,9 +9,8 @@ All addresses are firmware 1.2.0. `ins(i)` = instrument `i` (0..47) at
 `0x20200000 + 0x174·i`; `voice` = a sample voice object (section 2.3); `scr` = the
 Sample Playback screen object `0x200254b4`. The facts are in FINDINGS section 27.
 
-Status: phases 1 to 5 done (section 8): `patch/slicethru` (`1.2.0-bt3`) with its
-voice hooks, Play Mode list entry and settings file, emulator-tested, documented and
-in the layout test. Next: the hardware check (section 10), then phase 6.
+Status: done. `patch/slicethru` (`1.2.0-bt3`) is tested on hardware, on its own and in
+`patch/all` (`1.2.0-MBT`), and is in the web patcher (section 8, phase 6).
 
 ## 1. Verdict
 
@@ -448,9 +447,23 @@ starts.
      manifest, so slicethru's own test isn't in it until phase 6 adds it there. Until
      then it runs on its own.
    - **Next:** the user's hardware check (section 10).
-6. **Bundle, after the hardware check and the user's go-ahead.** `patch/all`, the web
-   patcher manifest, `run_tests.py --tier release` (ask first, section 7 #8), the
-   hardware bundle check.
+6. **Bundle. Done.**
+   - **Hardware check (the user):** `bt3` on its own and the patch/all + slicethru
+     bundle `1.2.0-MBT` both load and work as expected.
+   - **Stock and back:** a project saved with a Beat Slice Thru instrument on MBT,
+     opened after reinstalling stock 1.2.0, played the instrument as a normal Beat
+     Slice instrument. Back on MBT, it played as Beat Slice Thru again.
+   - **Save As (step 7 of section 10):** not reported. The README still lists it as
+     not checked.
+   - **patch/all:** now lists slicethru last, version `MBT`. Its output is
+     byte-identical to the hardware-tested MBT build (SHA-256 `f610374f…a4c33c`).
+   - **Web patcher:** slicethru is bit 10 in `web/manifest.json`, with bt3 and MBT among
+     the tested builds. Mixes with it get version letters `Q` to `T`, with no change to
+     the page's code.
+   - **Tests:** `run_tests.py` passes the stock firmware to slicethru's test.
+     `tools/test_layout.py` covers patch/all with slicethru and slicethru first with
+     the others reversed. Then `tools/test_web_patcher.py --update` and the release
+     tier.
 
 ## 9. Emulator test plan (`tools/emu/test_slicethru.py <patched.ptf> <stock.ptf>`)
 

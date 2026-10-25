@@ -38,12 +38,13 @@ Python command below does, without installing anything:
    one in step 1) and the image's, and refuses anything else, including a file that's
    already patched.
 2. Tick the mods you want. One mod gives its own build, "Select all" gives the
-   `patch/all` bundle (all ten, `1.2.0-MS7`), and any other mix gets a version text
+   `patch/all` bundle (all eleven, `1.2.0-MBT`), and any other mix gets a version text
    that says which mods are in it: `M` plus two hex digits for colorsong 01, humanize 02,
    interpolate 04, masterfx 08, swing 10, visualizer 20, condtrig 40 and synths 80
    (colorsong + swing is `1.2.0-M11`); `N` instead of `M` when legato is in it
    (colorsong + legato is `1.2.0-N01`), `O` when copypattern is (colorsong + copypattern
-   is `1.2.0-O01`), and `P` when both are.
+   is `1.2.0-O01`), `P` when both are, and four letters further on (`Q` to `T`) when
+   slicethru is in it too (colorsong + slicethru is `1.2.0-Q01`).
 3. Patch and download. The page only offers the file when its SHA-256 is the one
    `tools/patch_ptf.py` makes for that selection (`web/expected.json`), and says when
    it's also one of the hardware-tested builds in the table below. A mix that isn't in
@@ -66,7 +67,7 @@ python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/colorsong/patch.js
 ```
 
 Use `patch/humanize/patch.json` for Humanize alone, `patch/interpolate/patch.json` for
-interpolate alone, or `patch/all/patch.json` for all ten in one firmware (see "Choosing patches" below for your own
+interpolate alone, or `patch/all/patch.json` for all eleven in one firmware (see "Choosing patches" below for your own
 mix).
 
 The patcher checks the stock image, checks the original bytes at every patched
@@ -90,7 +91,8 @@ must be byte-identical to these builds:
 | legato (MIDI and synth slots) | `TrackerPlus_lg2.ptf` | `1.2.0-lg2` | tested | `a7bab99688e6036e58b66bd8e60806170a045b10c57a218d6607ab9261f81a75` |
 | the previous legato (MIDI only) | `TrackerPlus_lg1.ptf` | `1.2.0-lg1` | tested | `f266ed1f131fc15edf12b224e081f16d9109938b004d8410e2cb0cdb380a68e6` |
 | copypattern | `TrackerPlus_cp4.ptf` | `1.2.0-cp4` | tested (also with humanize) | `7bfbc3eb09a7eb9d9dd4ccf3a8a52b1221743be7061397048f72bbc32908db01` |
-| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern) | `TrackerPlus_MS7.ptf` | `1.2.0-MS7` | tested | `5ed2e44bed5432a84e4787d10b0222072f1a9d72776a1d3de357582679cafefd` |
+| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru) | `TrackerPlus_MBT.ptf` | `1.2.0-MBT` | tested | `f610374f5bbf29a100272dc5fa4af545ecd778932d57b9a913d54f1a30a4c33c` |
+| the previous all (without slicethru) | `TrackerPlus_MS7.ptf` | `1.2.0-MS7` | tested | `5ed2e44bed5432a84e4787d10b0222072f1a9d72776a1d3de357582679cafefd` |
 | the previous all (the same with synths sy6) | `TrackerPlus_MS6.ptf` | `1.2.0-MS6` | tested | `764994f1711bddafa691d44567239442cc1729fd5da776ab1510ae1e0b416457` |
 | the previous all (the same with synths sy5) | `TrackerPlus_MS5.ptf` | `1.2.0-MS5` | tested | `05d5d8153c41a81d2b40a50f9c300befd76a850608f4b8d0cb40f9b151b363d7` |
 | the previous all (the same with synths sy4) | `TrackerPlus_ML2.ptf` | `1.2.0-ML2` | tested | `8fd81d702351f30b57b1da47c297248e184043a363b10e9a3b75027e6e84aa5e` |
@@ -99,7 +101,7 @@ must be byte-identical to these builds:
 | the one before that (without legato and copypattern) | `TrackerPlus_MSY.ptf` | `1.2.0-MSY` | tested (made with the web patcher) | `f3fee2dd07e88d3b8810cd1d9b371e0636f7ad4920c777f021b28da2afd2fd99` |
 | the one before that (without synths, legato and copypattern) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | tested | `6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437` |
 | the one before that (without condtrig, synths, legato and copypattern) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
-| slicethru (Beat Slice Thru) | `TrackerPlus_bt3.ptf` | `1.2.0-bt3` | not yet (emulator-tested) | `76e0a004302bb9e57d214cb04cf0053e906f1b6de3141a4ad4809f440de2cb2e` |
+| slicethru (Beat Slice Thru) | `TrackerPlus_bt3.ptf` | `1.2.0-bt3` | tested | `76e0a004302bb9e57d214cb04cf0053e906f1b6de3141a4ad4809f440de2cb2e` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 | itcmtest (ITCM hooks test, on its own) | `TrackerPlus_it1.ptf` | `1.2.0-it1` | tested | `701b35dfadb4626ebe19e94ccb3af47aff9e4d604684d59b2e8b9cbf5da18d7c` |
@@ -120,18 +122,18 @@ Each patch can be installed on its own, or several can go into one firmware:
   conditional trigs, `patch/synths/patch.json` the WAVE synth, `patch/legato/patch.json`
   MIDI legato,
   `patch/copypattern/patch.json` the Copy to New button,
-  `patch/slicethru/patch.json` the Beat Slice Thru play mode (not yet tested on
-  hardware).
+  `patch/slicethru/patch.json` the Beat Slice Thru play mode.
 - **Several patches:** use a bundle spec, which lists the patches to combine.
-  `patch/all/patch.json` is the bundle that ships (all ten: colorsong, Humanize,
-  interpolate, masterfx, swing, the visualizer, condtrig, synths, legato and copypattern):
+  `patch/all/patch.json` is the bundle that ships (all eleven: colorsong, Humanize,
+  interpolate, masterfx, swing, the visualizer, condtrig, synths, legato, copypattern and
+  slicethru):
 
   ```json
   "include": ["../colorsong/patch.json", "../humanize/patch.json", "../interpolate/patch.json",
               "../masterfx/patch.json", "../swing/patch.json", "../visualizer/patch.json",
               "../condtrig/patch.json", "../synths/patch.json", "../legato/patch.json",
-              "../copypattern/patch.json"],
-  "version": "MS7",
+              "../copypattern/patch.json", "../slicethru/patch.json"],
+  "version": "MBT",
   ```
 
 To make your own mix, copy `patch/all/` to a new folder (for example `patch/mymix/`)
@@ -267,8 +269,6 @@ python tools/emu/test_copypattern.py build/TrackerPlus_cp4.ptf
 python tools/emu/test_slicethru.py build/TrackerPlus_bt3.ptf path/to/TrackerPlus_1.2.0.ptf
 ```
 
-`tools/run_tests.py` runs the tests of the mods the web patcher offers. slicethru isn't
-offered yet, so run its test on its own, as above.
 
 Each test works on any firmware that contains its patch, so for a bundle run every
 contained patch's tests on the bundle's `.ptf`. The tests read where the patch's RAM
@@ -276,10 +276,10 @@ went from the `.map.json` the patcher wrote next to the `.ptf`, so keep the two
 together.
 
 `tools/test_layout.py` checks the patcher's placement without the emulator. It builds
-each patch alone, `patch/all` (all ten) and its reverse, colorsong, humanize and interpolate in the
+each patch alone, `patch/all` (all eleven) and its reverse, colorsong, humanize and interpolate in the
 other order, those three with masterfx in both orders, the six before condtrig in the other order, the six with synths in both orders,
 copypattern alone, with humanize in both orders and with all nine in both orders,
-slicethru alone and with all ten in both orders, and two
+slicethru alone and first with the others after it in reverse order, and two
 patches on the same chained sites, and
 checks that each patch's code and RAM sit where they
 should (RAM in a region the patch may use, no two blocks overlapping), that exactly the

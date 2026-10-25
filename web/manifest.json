@@ -87,6 +87,14 @@
       "title": "Copy Pattern to New",
       "summary": "A Pattern screen button (record mode, More twice) that copies the current pattern, unsaved edits and track lengths included, into the next empty pattern, playing or stopped, and stays on the current pattern.",
       "status": "Tested on hardware"
+    },
+    {
+      "id": "slicethru",
+      "bit": 10,
+      "spec": "patch/slicethru/patch.json",
+      "title": "Beat Slice Thru",
+      "summary": "A play mode after Beat Slice in the Sample Playback screen's Play Mode list: slice a sample as in Beat Slice, and each note plays from its slice to the end of the sample instead of stopping at the next slice. Saved per project; stock firmware plays such an instrument as Beat Slice.",
+      "status": "Tested on hardware"
     }
   ],
   "tested_builds": {
@@ -113,6 +121,8 @@
     "6f56aa00881797f55bec494b359d1248badd0fa11a66e4b3b15cd1adb878dc52": "synths (1.2.0-sy6)",
     "764994f1711bddafa691d44567239442cc1729fd5da776ab1510ae1e0b416457": "all ten mods with synths sy6 (1.2.0-MS6)",
     "dddf733b197e59d8a6dc7f3e1ee253ec450518238ca991d651f03ce4e0dc940f": "synths (1.2.0-sy7)",
-    "5ed2e44bed5432a84e4787d10b0222072f1a9d72776a1d3de357582679cafefd": "all ten mods (1.2.0-MS7)"
+    "5ed2e44bed5432a84e4787d10b0222072f1a9d72776a1d3de357582679cafefd": "all ten mods before slicethru (1.2.0-MS7)",
+    "76e0a004302bb9e57d214cb04cf0053e906f1b6de3141a4ad4809f440de2cb2e": "slicethru (1.2.0-bt3)",
+    "f610374f5bbf29a100272dc5fa4af545ecd778932d57b9a913d54f1a30a4c33c": "all eleven mods (1.2.0-MBT)"
   }
 }

@@ -80,7 +80,7 @@ Use `tools/run_tests.py`; don't hand-roll test loops over many firmware files.
 - `--tier quick` while working on a patch: layout test, every patch's test on each patch alone and on `patch/all`.
 - `--tier release` before any commit that changes what users get (a patch's prebuilt, `patch/all`, `patch_ptf.py`, `web/`): adds the web patcher harness (all selections byte-identical) and every patch's test on the cover set of web mixes and the reordered bundles; full masterfx and synths on `patch/all`.
 - `--tier deep` only when masterfx's or synths' audio code changes.
-- The cover set replaces "test every mix": each new patch doubles the web patcher's mixes (1023 for ten), so never run the emulator tests on all of them. Byte identity and layout checks do cover all of them.
+- The cover set replaces "test every mix": each new patch doubles the web patcher's mixes (2047 for eleven), so never run the emulator tests on all of them. Byte identity and layout checks do cover all of them.
 - masterfx and synths take `--quick` (mix-dependent checks only); their full runs take ~6 and ~22 minutes.
 - Its cache (`build/test_cache.json`) skips tests already passed on byte-identical files with the same test code. A change to `tools/emu/` invalidates everything, as it should.
 

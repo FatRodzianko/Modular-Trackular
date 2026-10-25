@@ -7,7 +7,7 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
     visualizer alone, ramdiag alone,
   - versiontest alone (pinned base; byte-identical to MT0),
   - patch/all (colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig,
-    synths, legato, copypattern),
+    synths, legato, copypattern, slicethru),
   - colorsong, humanize and interpolate the other way round (interpolate, humanize,
     colorsong),
   - colorsong, humanize, interpolate and masterfx, both ways round, and with swing and
@@ -23,8 +23,9 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
     and after and before patch/all's patches,
   - legato alone, and patch/all in reverse order (legato first; with condtrig,
     both with ITCM hooks),
-  - slicethru alone, and after and before patch/all's patches (it chains the Pattern
-    screen's update slot with most of them),
+  - slicethru alone, and first with patch/all's other patches after it in reverse order
+    (it chains the Pattern screen's update slot with most of them; patch/all has it
+    last),
 and checks that a bundle with ramdiag (standalone) is refused, and so is one where a
 shared site isn't chained by both patches, one where two patches pass different
 registers at one ITCM site, and a "late_ram" word that holds no size.
@@ -319,9 +320,6 @@ def main() -> int:
     all_lg_rev_spec.write_text(json.dumps(all_lg_rev, indent=2))
     bt = ROOT / "patch" / "slicethru" / "patch.json"
     all_bt_list = all_cp_list + [bt]
-    all_bt = dict(rev, name="all-slicethru", include=[str(x) for x in all_bt_list], version="BTA")
-    all_bt_spec = outdir / "all-slicethru.json"
-    all_bt_spec.write_text(json.dumps(all_bt, indent=2))
     all_bt_rev = dict(rev, name="all-slicethru-reversed", include=[str(x) for x in all_bt_list[::-1]],
                       version="BTR")
     all_bt_rev_spec = outdir / "all-slicethru-reversed.json"
@@ -338,8 +336,8 @@ def main() -> int:
             ("visualizer alone", vz, [vz], None, None),
             ("synths alone", sy, [sy], None, None),
             ("ramdiag alone", rd, [rd], None, None),
-            ("patch/all: colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig, synths, legato, copypattern",
-             all_spec, [cs, hz, ip, mx, sw, vz, ct, sy, lg, cp],
+            ("patch/all: colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig, synths, legato, "
+             "copypattern, slicethru", all_spec, [cs, hz, ip, mx, sw, vz, ct, sy, lg, cp, bt],
              json.loads(all_spec.read_text())["version"], None),
             ("reversed: interpolate, humanize, colorsong", rev_spec, [ip, hz, cs], "MTR", None),
             ("colorsong, humanize, interpolate, masterfx", with_mx_spec, [cs, hz, ip, mx], "MTX", None),
@@ -374,7 +372,6 @@ def main() -> int:
             ("legato alone", lg, [lg], None, None),
             ("patch/all reversed (legato first)", all_lg_rev_spec, all_lg_list[::-1], "LGR", None),
             ("slicethru alone", bt, [bt], None, None),
-            ("patch/all's patches, then slicethru", all_bt_spec, all_bt_list, "BTA", None),
             ("slicethru, then patch/all's patches reversed", all_bt_rev_spec, all_bt_list[::-1], "BTR", None)):
         out = outdir / f"{spec.stem if spec.parent == outdir else spec.parent.name}.ptf"
         if not build(stock, spec, out):
