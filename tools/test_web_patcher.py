@@ -1,6 +1,6 @@
 """Check that the web patcher (web/patcher.js) makes exactly what tools/patch_ptf.py makes.
 
-  python tools/test_web_patcher.py <stock TrackerPlus_1.2.0.ptf> [out dir] [--update]
+  python tools/test_web_patcher.py <stock TrackerPlus_1.2.0.ptf> [out dir] [--update] [--no-cache]
 
 Needs Node (runs web/patcher.js through tools/web_patcher_node.mjs). It:
   - stages the site with web/stage.py, as the deployment does, and runs both patchers
@@ -31,12 +31,21 @@ Outputs: <out dir>/py, the .ptf and .map.json files the emulator tests need, and
 Both patchers run in parallel: the web patcher in one Node process per core, patch_ptf.py
 in a pool of worker processes that parse the stock firmware once (patch_ptf.py's own
 code, called in the worker instead of in a new interpreter per selection).
+
+The selections' cache (<out dir>/selections.json): a selection's key is a digest of the
+patcher code (both patchers, test_layout.py and this file), the stock firmware, the spec
+the page plans for it and every patch file that spec uses. A selection whose key passed
+before (byte-identical, layout checks passed), and whose outputs in <out dir>/py are
+still as written, isn't patched or checked again: a change to one patch reruns only the
+selections that contain it. --no-cache runs them all. The bundles in other orders and
+the refusals always run.
 """
 from __future__ import annotations
 
 import contextlib
 import dataclasses
 import functools
+import hashlib
 import io
 import itertools
 import json
@@ -61,6 +70,9 @@ from ptf import read_ptf  # noqa: E402
 
 failures: list[str] = []
 PROCS = os.cpu_count() or 8
+CODE = [ROOT / "tools" / f for f in ("patch_ptf.py", "ptf.py", "test_layout.py", "test_web_patcher.py",
+                                     "web_patcher_node.mjs")] + [ROOT / "web" / "patcher.js"]
+KEEP = ("py", "selections.json")              # what a run keeps from the one before
 
 
 def check(ok: bool, what: str) -> None:
@@ -157,6 +169,32 @@ def _py_job(site: Path, name: str, spec: str | None, stock: Path, outdir: Path, 
     return r
 
 
+@functools.lru_cache(None)
+def file_sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else "-"
+
+
+def selection_key(base: str, site: Path, plan: dict) -> str:
+    """The selections' cache key: `base` (the code and the stock), the planned spec, and
+    each spec it includes with the patch files it names."""
+    h = hashlib.sha256(f"{base}|{plan['key']}|{plan['kind']}".encode())
+    top = site / plan["spec"]
+    specs = [top] + [top.parent / inc for inc in json.loads(top.read_text()).get("include", [])]
+    for sp in specs:
+        h.update(f"|{sp.relative_to(site).as_posix()}:{file_sha(sp)}".encode())
+        spec = json.loads(sp.read_text())
+        for k in ("bin", "sym", "rel", "prebuilt_bin", "prebuilt_sym", "prebuilt_rel"):
+            if spec.get(k):
+                h.update(f"|{k}:{file_sha(sp.parent / spec[k])}".encode())
+    return h.hexdigest()
+
+
+def outputs_as_written(py: Path, name: str, entry: dict) -> bool:
+    f = py / f"{name}.ptf"
+    return f.is_file() and f.with_suffix(".map.json").is_file() and \
+        [f.stat().st_size, f.stat().st_mtime_ns] == entry["ptf"]
+
+
 def tested_hashes() -> dict[str, tuple[str, bool]]:
     """version text -> (SHA-256, tested on hardware), from the table in docs/PATCHING.md."""
     rows = re.findall(r"^\|[^|]*\| `TrackerPlus_(\w+)\.ptf` \|[^|]*\| ([^|]*) \| `([0-9a-f]{64})` \|$",
@@ -167,11 +205,25 @@ def tested_hashes() -> dict[str, tuple[str, bool]]:
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     update = "--update" in sys.argv
+    use_cache = "--no-cache" not in sys.argv
     stock = Path(args[0]).resolve()
     outdir = Path(args[1]).resolve() if len(args) > 1 else Path(tempfile.mkdtemp())
+    cache_path = outdir / "selections.json"
+    cache = {}
+    if use_cache and cache_path.is_file():
+        with contextlib.suppress(ValueError):
+            cache = json.loads(cache_path.read_text())
     if outdir.exists():
-        shutil.rmtree(outdir)
-    outdir.mkdir(parents=True)
+        for child in outdir.iterdir():
+            if use_cache and child.name in KEEP:
+                continue
+            shutil.rmtree(child) if child.is_dir() else child.unlink()
+    outdir.mkdir(parents=True, exist_ok=True)
+    py_dir = outdir / "py"
+    py_dir.mkdir(exist_ok=True)
+    for f in py_dir.iterdir():                    # only selections' outputs are kept
+        if not f.name.startswith("sel-"):
+            f.unlink()
     site = outdir / "site"
     r = subprocess.run([sys.executable, "-I", str(ROOT / "web" / "stage.py"), str(site), "--no-check"],
                        capture_output=True, text=True)
@@ -255,7 +307,20 @@ def main() -> int:
 
     selections = [list(c) for n in range(1, len(ids) + 1) for c in itertools.combinations(ids, n)]
     sel_jobs = [{"name": "sel-" + "+".join(c), "ids": c} for c in selections]
-    _, js_sel = run_js(site, stock, sel_jobs, outdir / "js", PROCS)
+    names = {j["name"] for j in sel_jobs}
+    for f in py_dir.iterdir():                    # selections the page no longer offers
+        if f.name.split(".")[0] not in names:
+            f.unlink()
+
+    # the selections that passed before with the same inputs, from the page's own plans
+    _, plans = run_js(site, stock, [dict(j, plan=True) for j in sel_jobs], outdir / "js")
+    base = hashlib.sha256("|".join([*(file_sha(f) for f in CODE), file_sha(stock)]).encode()).hexdigest()
+    keys = {n: selection_key(base, site, pl) if pl["ok"] else None for n, pl in plans.items()}
+    cached = {n for n, k in keys.items() if k in cache and outputs_as_written(py_dir, n, cache[k])}
+    todo = [j for j in sel_jobs if j["name"] not in cached]
+    _, js_new = run_js(site, stock, todo, outdir / "js", PROCS)
+    js_sel = {j["name"]: cache[keys[j["name"]]]["js"] if j["name"] in cached else js_new[j["name"]]
+              for j in sel_jobs}
     extra_jobs = [{"name": n, "spec": s} for n, s in other_orders.items()]
     extra_jobs += [{"name": n, "spec": s} for n, (s, st, _) in refusals.items() if st == stock]
     extra_jobs += [{"name": "unported", "spec": "patch/swing-future/patch.json"}]
@@ -273,13 +338,15 @@ def main() -> int:
         version = None if js["kind"] == "single" else json.loads((site / js["spec"]).read_text())["version"]
         return (js["key"], specs, version)
 
-    (outdir / "py").mkdir()
     py_jobs = [(site, sel["name"], js_sel[sel["name"]].get("spec"), stock, outdir, js_sel[sel["name"]]["ok"],
-                layout_args(sel)) for sel in sel_jobs]
+                layout_args(sel)) for sel in todo]
     py_jobs += [(extra, n, s, stock, outdir, js_extra[n]["ok"], None) for n, s in other_orders.items()]
     py_jobs += [(extra, n, s, st, outdir, False, None) for n, (s, st, _) in refusals.items()]
     with ProcessPoolExecutor(PROCS, initializer=_init_worker, initargs=(str(stock),)) as pool:
         py = dict(zip([j[1] for j in py_jobs], pool.map(_py_job, *zip(*py_jobs), chunksize=4)))
+    for n in cached:                              # as they were when they passed
+        py[n] = SimpleNamespace(returncode=0, stdout="", stderr="", same=True, same_map=True,
+                                layout_checked=True, layout_failed=0, layout_log="")
 
     def same(name: str, label: str) -> bool:
         js, pr = js_extra.get(name) or js_sel[name], py[name]
@@ -290,7 +357,8 @@ def main() -> int:
               f"({js['sha256'][:12]}…)")
         return pr.same
 
-    print(f"every selection the page offers ({len(selections)})")
+    print(f"every selection the page offers ({len(selections)}; {len(cached)} unchanged since they passed, "
+          f"from the cache)")
     expected = {}
     for sel in sel_jobs:
         js = js_sel[sel["name"]]
@@ -319,6 +387,18 @@ def main() -> int:
     checked = sum(1 for sel in sel_jobs if py[sel["name"]] is not None and py[sel["name"]].layout_checked)
     check(bad == 0 and checked == len(sel_jobs),
           f"placement, RAM, relocation, chain words, hooked sites and version text for all {len(sel_jobs)}")
+
+    # the selections' cache: every current selection that passed, the new ones as written
+    passed = {}
+    for sel in sel_jobs:
+        n, js, pr = sel["name"], js_sel[sel["name"]], py[sel["name"]]
+        if n in cached:
+            passed[keys[n]] = cache[keys[n]]
+        elif keys[n] and js["ok"] and pr is not None and not pr.returncode and pr.same and pr.same_map \
+                and pr.layout_checked and not pr.layout_failed:
+            f = py_dir / f"{n}.ptf"
+            passed[keys[n]] = {"js": js, "ptf": [f.stat().st_size, f.stat().st_mtime_ns]}
+    cache_path.write_text(json.dumps(passed, indent=0) + "\n")
 
     print("hardware-tested builds")
     table = tested_hashes()

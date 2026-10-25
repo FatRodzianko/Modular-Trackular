@@ -434,10 +434,12 @@ function symbol(p, name) {
 
 // Patch `stockBytes` (the .ptf file's bytes) with `spec` (a parsed patch.json; relative
 // paths in it resolve against `specUrl`). Returns the new .ptf's bytes, its .map.json
-// text and the log. Throws PatchError where patch_ptf.py refuses.
-export async function patchFirmware({ stockBytes, spec, specUrl, io, outName, sha256, onLog }) {
+// text and the log. Throws PatchError where patch_ptf.py refuses. `stock`, if given, is
+// readPtf(stockBytes) already done (the test harness patches one stock many times); it
+// isn't changed.
+export async function patchFirmware({ stockBytes, stock: parsed, spec, specUrl, io, outName, sha256, onLog }) {
   const log = onLog ?? (() => {});
-  const ptf = readPtf(stockBytes, "stock firmware");
+  const ptf = parsed ?? readPtf(stockBytes, "stock firmware");
 
   const digest = await sha256(ptf.image);
   if (digest !== spec.stock_image_sha256) fail(`stock image hash ${digest} does not match ${spec.firmware}`);

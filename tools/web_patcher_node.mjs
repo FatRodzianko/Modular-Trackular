@@ -7,7 +7,8 @@
 // or {"name", "spec"} (a spec file, used as is). For each job it writes
 // <out dir>/<name>.ptf and .map.json, and, for a mix, the spec it made to
 // <site dir>/patch/<spec name>/patch.json, where tools/patch_ptf.py can read it.
-// Prints one JSON line per job.
+// A selection job with "plan": true is only planned (its spec written, nothing patched).
+// The stock firmware is parsed once, for all the jobs. Prints one JSON line per job.
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -21,6 +22,7 @@ const site = pathToFileURL(siteDir + "/").href;
 const io = { fetch: async (url) => new Uint8Array(readFileSync(fileURLToPath(url))) };
 const sha256 = async (bytes) => createHash("sha256").update(bytes).digest("hex");
 const stockBytes = new Uint8Array(readFileSync(stockPath));
+let stock = null;                                    // parsed on the first job that patches
 const manifest = JSON.parse(readFileSync(join(siteDir, "manifest.json"), "utf8"));
 const allSpec = JSON.parse(readFileSync(join(siteDir, manifest.all), "utf8"));
 mkdirSync(outDir, { recursive: true });
@@ -49,6 +51,10 @@ for (const job of JSON.parse(readFileSync(jobsPath, "utf8"))) {
         specUrl = new URL(plan.specPath, site).href;
         result.spec = plan.specPath;
       }
+      if (job.plan) {
+        console.log(JSON.stringify(Object.assign(result, { ok: true, planned: true })));
+        continue;
+      }
     } else {
       const path = resolve(siteDir, job.spec);
       spec = JSON.parse(readFileSync(path, "utf8"));
@@ -56,7 +62,8 @@ for (const job of JSON.parse(readFileSync(jobsPath, "utf8"))) {
       result.spec = job.spec;
     }
     const outName = `${job.name}.ptf`;
-    const out = await P.patchFirmware({ stockBytes, spec, specUrl, io, outName, sha256 });
+    stock ??= P.readPtf(stockBytes, "stock firmware");
+    const out = await P.patchFirmware({ stockBytes, stock, spec, specUrl, io, outName, sha256 });
     writeFileSync(join(outDir, outName), out.ptf);
     writeFileSync(join(outDir, `${job.name}.map.json`), out.map);
     const at = P.versionWordAt(spec);

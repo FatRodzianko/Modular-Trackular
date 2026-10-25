@@ -7,7 +7,7 @@ Tiers (times with an empty cache on an 8-core PC; with the cache, only what chan
   quick    (about 2 min) tools/test_layout.py, plus every patch's emulator test on each patch alone
            and on patch/all (masterfx and synths in their --quick mode). For a change
            to one patch, while working on it.
-  release  (about 32 min) quick, plus tools/test_web_patcher.py (every web patcher selection
+  release  (about 40 min) quick, plus tools/test_web_patcher.py (every web patcher selection
            byte-identical to patch_ptf.py's, and its layout checks), plus every patch's
            emulator test on a cover set of web patcher mixes and on the bundles
            test_layout.py builds in other orders; masterfx and synths in full mode on
@@ -31,6 +31,14 @@ firmware file it tests, the test and its mode, and a digest of every file under
 tools/emu/ and of the stock firmware. A key that passed before is not run again, so a
 rerun after a change only runs what the change touched. --no-cache runs everything.
 The cache also keeps each test's measured duration, for the time estimate.
+
+Full masterfx and synths on patch/all (release): their full mode adds checks that depend
+on the patch's own code alone, so a full pass is also recorded against that patch's own
+files (patch.json, prebuilt/, build/) and the test code. While those are unchanged,
+patch/all gets the --quick run (the checks that depend on the mix) instead; the deep tier
+always runs full mode. The harness keeps its own cache, per selection (see
+test_web_patcher.py), so after a change to one patch it redoes only the selections that
+contain it.
 
 --update (release and deep): the harness rewrites web/expected.json (the hashes the
 page accepts) when everything else in it passes, as test_web_patcher.py --update does.
@@ -175,9 +183,19 @@ def cover_set(outputs: list[Path], sites: dict[str, set[int]], tested: list[Path
 
 # ---- running ------------------------------------------------------------------------
 
+def own_files(patch: str) -> list[Path] | None:
+    """The files a patch's code comes from (None for a test without its own patch folder)."""
+    d = ROOT / "patch" / patch
+    if not (d / "patch.json").is_file():
+        return None
+    return [d / "patch.json", *d.glob("prebuilt/*"), *d.glob("build/*.*")]
+
+
 class Runner:
-    def __init__(self, stock: Path, out: Path, workers: int, use_cache: bool):
+    def __init__(self, stock: Path, out: Path, workers: int, use_cache: bool, full_by_own: bool = False):
         self.stock, self.out, self.workers, self.use_cache = stock, out, workers, use_cache
+        self.full_by_own = full_by_own       # release: full mode only when the patch's own files changed
+        self.full_skipped: list[str] = []
         self.cache = load_cache()
         self.cache.setdefault("passed", {})
         self.cache.setdefault("seconds", {})
@@ -198,7 +216,7 @@ class Runner:
     def key(self, *parts: str) -> str:
         return hashlib.sha256("|".join((*parts, self.emu_digest, self.stock_sha)).encode()).hexdigest()
 
-    def run_command(self, label: str, kind: str, key: str, cmd: list[str], log: Path) -> bool:
+    def run_command(self, label: str, kind: str, key: str, cmd: list[str], log: Path, also: tuple = ()) -> bool:
         if self.use_cache and key in self.cache["passed"]:
             with self.lock:
                 self.results.append((label, kind, True, "cached"))
@@ -216,11 +234,20 @@ class Runner:
             old = self.cache["seconds"].get(kind)
             self.cache["seconds"][kind] = dt if old is None else 0.7 * old + 0.3 * dt
             if ok:
-                self.cache["passed"][key] = {"what": label, "test": kind, "when": time.strftime("%Y-%m-%d %H:%M")}
+                for k in (key, *also):
+                    self.cache["passed"][k] = {"what": label, "test": kind, "when": time.strftime("%Y-%m-%d %H:%M")}
         self.save()
         return ok
 
     def emu_job(self, ptf: Path, patch: str, full: bool) -> tuple:
+        also = ()
+        if full and patch in QUICK_MODE and self.full_by_own and (own := own_files(patch)):
+            own_key = self.key("own", digest_files(own), patch, "full")
+            if not (self.use_cache and own_key in self.cache["passed"]):
+                also = (own_key,)                    # a full pass holds for these files
+            elif not (self.use_cache and self.key(sha256_file(ptf), patch, "full") in self.cache["passed"]):
+                full = False
+                self.full_skipped.append(f"{ptf.stem}: {patch}")
         mode = "full" if (full or patch not in QUICK_MODE) else "quick"
         kind = f"{patch}" + (f" ({mode})" if patch in QUICK_MODE else "")
         cmd = [PY, "-I", str(EMU / f"test_{patch}.py"), str(ptf)]
@@ -230,7 +257,7 @@ class Runner:
             cmd.append("--quick")
         key = self.key(sha256_file(ptf), patch, mode)
         log = self.out / "logs" / f"{ptf.stem}.{patch}.{mode}.txt"
-        return (f"{ptf.stem}", kind, key, cmd, log)
+        return (f"{ptf.stem}", kind, key, cmd, log, also)
 
     def run_all(self, jobs: list[tuple]) -> int:
         """Run jobs (label, kind, key, cmd, log) in parallel, longest first; print progress."""
@@ -239,6 +266,9 @@ class Runner:
         for j in jobs:
             if j not in todo:
                 self.results.append((j[0], j[1], True, "cached"))
+                for k in j[5] if len(j) > 5 else ():
+                    self.cache["passed"].setdefault(k, self.cache["passed"][j[2]])
+        self.save()
         todo.sort(key=lambda j: -self.estimate(j[1]))
         total = sum(self.estimate(j[1]) for j in todo)
         longest = max((self.estimate(j[1]) for j in todo), default=0)
@@ -293,7 +323,7 @@ def main() -> int:
     workers = int(opt("--jobs", max(1, (os.cpu_count() or 2) - 1)))
     out = Path(opt("--out", ROOT / "build" / "testrun")).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    r = Runner(stock, out, workers, "--no-cache" not in opts)
+    r = Runner(stock, out, workers, "--no-cache" not in opts, full_by_own=tier == "release")
     t0 = time.time()
     patches = mods()
     sites = {name: hook_sites(spec) for name, spec in patches}
@@ -302,7 +332,8 @@ def main() -> int:
     # 1. tools that check placement and bytes (no emulator)
     # web/expected.json only matters to the harness, which checks it (and --update rewrites it)
     expected = ROOT / "web" / "expected.json"
-    tool_digest = digest_files([TOOLS / "patch_ptf.py", TOOLS / "test_layout.py", TOOLS / "test_web_patcher.py",
+    tool_digest = digest_files([TOOLS / "patch_ptf.py", TOOLS / "ptf.py", TOOLS / "test_layout.py",
+                                TOOLS / "test_web_patcher.py", TOOLS / "web_patcher_node.mjs",
                                 *(f for f in (ROOT / "web").glob("*") if f != expected),
                                 *(ROOT / "patch").rglob("prebuilt/*"),
                                 *(ROOT / "patch").rglob("patch.json"), *(ROOT / "patch").rglob("build/*.*")])
@@ -314,7 +345,8 @@ def main() -> int:
         if not (harness / "py").is_dir():           # the cover set needs its outputs even when cached
             r.cache["passed"].pop(hkey, None)
         pre.append(("test_web_patcher", "web harness", hkey,
-                    [PY, "-I", str(TOOLS / "test_web_patcher.py"), str(stock), str(harness)] + (["--update"] if update else []),
+                    [PY, "-I", str(TOOLS / "test_web_patcher.py"), str(stock), str(harness)] + (["--update"] if update else [])
+                    + (["--no-cache"] if "--no-cache" in opts else []),
                     out / "logs" / "harness.txt"))
     def emu_jobs(targets: list[tuple[Path, bool]]) -> list[tuple]:
         """Every contained patch's emulator test on each (file, masterfx/synths in full mode)."""
@@ -337,6 +369,9 @@ def main() -> int:
         return 0
     print(f"tier {tier}: layout{' and web patcher' if tier != 'quick' else ''} checks, and the emulator tests "
           f"on each patch alone and patch/all", flush=True)
+    if r.full_skipped:
+        print(f"  --quick instead of full mode (the patch's own files unchanged since a full pass): "
+              f"{', '.join(r.full_skipped)}", flush=True)
     failed = r.run_all(jobs)
     if update and hkey in r.cache["passed"]:
         # a pass with --update leaves expected.json holding what the harness checked: the

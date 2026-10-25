@@ -224,7 +224,7 @@ skips anything that already passed on the same files:
 
 ```bash
 python tools/run_tests.py path/to/TrackerPlus_1.2.0.ptf --tier quick      # while working on a patch (~2 min)
-python tools/run_tests.py path/to/TrackerPlus_1.2.0.ptf --tier release    # before a commit users get (~32 min)
+python tools/run_tests.py path/to/TrackerPlus_1.2.0.ptf --tier release    # before a commit users get (~40 min with an empty cache)
 ```
 
 - **quick:** `test_layout.py`, then every patch's emulator test on each patch alone and
@@ -235,19 +235,22 @@ python tools/run_tests.py path/to/TrackerPlus_1.2.0.ptf --tier release    # befo
   - The cover set is the fewest mixes that between them contain every case that differs
     from mix to mix: each patch's RAM at the start, middle and last 64 bytes of each
     region it can land in, each pair of patches next to each other on a shared hook, and
-    an image the sector padding pads and one it doesn't. For the ten mods that's 12 of
-    the 1013 mixes, besides `patch/all`.
+    an image the sector padding pads and one it doesn't. For the eleven mods that's 18
+    of the 2036 mixes, besides `patch/all`.
   - masterfx and synths run in `--quick` mode, which leaves out their sound, cost and
     long stress checks (these depend only on their own code), except on `patch/all`,
-    where they run in full.
+    where they run in full when their own files (`patch.json`, `prebuilt/`, `build/`)
+    changed since their last full pass.
 - **deep:** release with masterfx and synths in full everywhere; only when their audio
   code changes.
 
 It prints an estimate before it starts and the time left as it goes, keeps a log per
 test in `build/testrun/logs`, and writes `build/testrun/summary.txt`. Its cache
 (`build/test_cache.json`) remembers what passed: a test isn't run again on a firmware
-file it already passed with the same test and emulator code. `--no-cache` runs
-everything; `--jobs N` sets how many run at once.
+file it already passed with the same test and emulator code. The web patcher check
+keeps its own cache per selection, so after a change to one mod it redoes only the
+selections that contain it (all 2047 take about 13 minutes, none about 30 seconds).
+`--no-cache` runs everything; `--jobs N` sets how many run at once.
 
 Each check can also be run on its own:
 
