@@ -19,8 +19,9 @@ after Rec) and 4 (`rs3`, Shift+Rec) are done in the emulator, and phase 5 (on it
 README, `prebuilt/`, docs, layout test) is done (section 8). The user's hardware check
 of `1.2.0-rs3` passed except a plain Rec during a Shift+Rec count-in, fixed in `rs4`
 (section 9.1); the user's recheck of `rs4` passed, and `rs4` on its own is committed.
-Phase 6 (`patch/all` `1.2.0-MR4` and the web patcher) is in progress. The user has
-answered the questions (section 10).
+Phase 6 (`patch/all` `1.2.0-MR4` and the web patcher) is done and committed, with
+`1.2.0-MR4` tested on hardware. Phase 7 (a Resample source) waits for the user. The
+user has answered the questions (section 10).
 
 ## 1. Verdict
 
@@ -529,7 +530,7 @@ starts.
      last beat and the record start (section 4.2). The hardware check judges it.
 5. **On its own.** README, `prebuilt/`, the PATCHING entry, `tools/test_layout.py`, and
    `run_tests.py --tier quick`. Then the user's hardware check (section 9).
-   **Done** (uncommitted):
+   **Done** (committed in the rs4 commit):
    - `patch/resample` is rs3, with `prebuilt/` and a README. `tools/emu/test_resample.py`
      is the test from phases 2–4.
    - The patcher's output is the same from the local build, from `prebuilt/` and from
@@ -553,7 +554,7 @@ starts.
    - Join `patch/all`, with a new version text.
    - Add it to the web patcher (bit 11), with its tested builds.
    - Run the release tier with `--update`.
-   **In progress** (uncommitted):
+   **Done** (2026-10-25, committed):
    - `patch/all` includes resample last, version `1.2.0-MR4`. Its RAM lands in
      `dtcm_above_heap` there. The layout test's patch/all case has it; the separate
      "patch/all's patches, then resample" case went (it was the same bundle).
