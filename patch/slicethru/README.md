@@ -5,13 +5,15 @@ to the Sample Playback screen's Play Mode list, right after Beat Slice. You slic
 sample exactly as in Beat Slice (Slice, Adjust, Add, Remove, Auto, Evenly), and the
 pads and notes pick slices the same way. The difference is playback: a note starts at
 its slice and plays on to the end of the sample, instead of stopping where the next
-slice starts. Installed on its own, Config shows the firmware version as `1.2.0-bt3`.
+slice starts. Installed on its own, Config shows the firmware version as `1.2.0-bt4`.
 [docs/BEAT_SLICE_THROUGH_PLAN.md](../../docs/BEAT_SLICE_THROUGH_PLAN.md) has the
 investigation and the plan.
 
-**Status:** tested on hardware, on its own (`1.2.0-bt3`) and in `patch/all`
-(`1.2.0-MBT`). A project saved with Beat Slice Thru instruments plays them as Beat
-Slice in stock firmware, and as Beat Slice Thru again back on this firmware.
+**Status:** tested on hardware, on its own (`1.2.0-bt4`) and in `patch/all`
+(`1.2.0-MT4`), including Save As and a new project's first save, which keep Beat Slice
+Thru (`1.2.0-bt3` lost it there). A project saved with Beat Slice Thru instruments
+plays them as Beat Slice in stock firmware, and as Beat Slice Thru again back on this
+firmware.
 
 ## Using it
 
@@ -54,9 +56,10 @@ slices intact.
 - The instrument itself is stored as a Beat Slice instrument. An instrument (`.pti`)
   saved and loaded into another project, or copied to another slot, plays Beat
   Slice there. Choose Beat Slice Thru again.
-- Like the other mods' settings files, `slicethru.bin` belongs to the project folder.
-  Save As under a new name starts without it unless the firmware copies the project's
-  extra files (not checked yet).
+- `slicethru.bin` belongs to the project folder, and the firmware's Save As copies
+  only its own files (checked on hardware). So the patch writes the choice into the new
+  folder itself: after Save As, and after a new project's first save, the project keeps
+  its Beat Slice Thru instruments.
 - If a slot gets another instrument that is also Beat Slice (for example a `.pti`
   loaded over it) while it was Beat Slice Thru, it shows as Beat Slice Thru. The list
   shows which; switch it back if you like. Loading any instrument that isn't Beat
@@ -87,6 +90,7 @@ frames to play, the reverse start, and the copy a stereo sample's right voice ta
 | `mt_bt_button_plus`, `mt_bt_button_minus` | `bl 0x600f5b98` at `0x600f5e80` and `0x600f5e8a` (the 8th and 7th screen buttons' step) | A step of the 9-row list |
 | `mt_bt_playback_update` | Sample Playback screen vtable slot `0x60042698` (update `0x600f6070`) | `slicethru.bin` load and save; the list redrawn after a load |
 | `mt_bt_pattern_update` | Pattern screen vtable slot `0x600403dc` (update `0x600e1f98`) | `slicethru.bin` load and save |
+| `mt_bt_save_name` | `bl strncpy` at `0x60114eaa` in the save request `0x60114e34` (the new name; Save As only) | Marks the Save As, so the flags go with the project to its new name |
 
 All the hooks are chained: each calls whatever the site pointed to before (the stock
 function, or another patch's hook), so other patches can hook the same sites. The
@@ -101,17 +105,20 @@ Pattern screen's update slot is shared with most of the other mods.
   checksum. It is read and written only from the two screens' update methods, where
   the stock code does its own file work, and only while the firmware's file manager
   is idle. On another project the flags are cleared at once, then read from that
-  project's file. A new project without a name keeps its flags for its first save. A
+  project's file. A Save As keeps them for the project's new name and writes them
+  there; the save request's name copy (`0x60114eaa`, Save As only) marks it, from any
+  screen. A new project ("New Project" with no path) has no folder: nothing is
+  written until its first save. A
   flag whose instrument isn't an active Beat Slice instrument any more is cleared,
   only while the file manager is idle (never in the middle of a project load).
 - **The cost:** a Beat Slice note-on runs 54 instructions more than stock; rendering
   (per 128-frame block) is unchanged. Voices play longer, but never more of them than
   stock: one per sample track (two for a stereo sample), as a 1-Shot sample can.
 
-The code is 1,813 bytes. Its state is 32 bytes (the flags, the saved copy, the project
+The code is 1,929 bytes. Its state is 32 bytes (the flags, the saved copy, the project
 it belongs to), which the patcher places in free RAM: the OCRAM tail on its own,
 `sdram_top` with all the other mods. The 9-name table is in flash. The patcher moves
-the code's 15 code-address words and 8 RAM-address words to match
+the code's 17 code-address words and 9 RAM-address words to match
 (`prebuilt/slicethru.rel`). Firmware addresses are in
 [docs/FINDINGS.md](../../docs/FINDINGS.md) section 27.
 
@@ -121,7 +128,7 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/slicethru/patch.json build/TrackerPlus_bt3.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/slicethru/patch.json build/TrackerPlus_bt4.ptf
 ```
 
 To combine it with other mods, list it in a bundle spec (see "Choosing patches" in
@@ -141,7 +148,7 @@ patch/slicethru/build.sh
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_slicethru.py build/TrackerPlus_bt3.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/emu/test_slicethru.py build/TrackerPlus_bt4.ptf path/to/TrackerPlus_1.2.0.ptf
 ```
 
 It runs the stock code with the patch in place, next to stock firmware:
@@ -161,13 +168,16 @@ It runs the stock code with the patch in place, next to stock firmware:
   inputs behave as stock.
 - **File** (a fake SD card): written once after a change, read on a project change,
   damaged files ignored, nothing read or written while the file manager is busy, stale
-  flags cleared, projects without a name.
+  flags cleared; a new project as the firmware makes it writes nothing; Save As through
+  the firmware's own save request (a new project's first save, and from a saved
+  project) keeps the flags and writes them to the new folder; a plain save; a project
+  opened afterwards gets its own file.
 
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-bt3 Build 1504`.
+Config → Firmware → the patched file. Config should show `1.2.0-bt4 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Beat Slice Thru instruments
 play Beat Slice in stock firmware, with their slices intact; `slicethru.bin` files stay

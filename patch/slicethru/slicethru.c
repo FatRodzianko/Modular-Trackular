@@ -34,8 +34,11 @@
  * screens' update methods (chained), one small read or write per call, only while the
  * file manager is idle:
  *  - another project: the flags are cleared at once (nothing of the old project plays
- *    through in the new one), then read from its file once the file manager is idle.
- *    A new project without a name keeps its flags for its first save, as swing does;
+ *    through in the new one), then read from its file once the file manager is idle;
+ *  - Save As (and a new project's first save, which is one): the firmware copies only
+ *    its own files to the new folder, so the flags go with the project to its new name
+ *    and are written there. The Save As request's name copy (0x60114eaa) marks it;
+ *  - a new project ("New Project", no path) has no folder yet: nothing is written;
  *  - a flag whose instrument isn't an active Beat Slice instrument any more (another
  *    sample loaded into the slot, its mode changed elsewhere) is cleared;
  *  - a change is written a moment later.
@@ -47,7 +50,7 @@
 #include <stdint.h>
 
 #ifndef SLICETHRU_VERSION
-#define SLICETHRU_VERSION "bt3"
+#define SLICETHRU_VERSION "bt4"
 #endif
 
 /* ---- firmware 1.2.0 ------------------------------------------------------------------ */
@@ -63,8 +66,10 @@
 #define FW_FM               0x2001E488u     /* file manager object; *FW_FM = FS object */
 #define FM_STATE            0x13Du          /* file manager state; 0 or 0x0c when idle */
 #define FM_SUBSTATE         0x13Fu
-#define FW_PROJECT_PATH     ((const uint8_t *)(FW_FM + 0x241u))
-#define FW_PROJECT_NAME     ((const uint8_t *)(FW_FM + 0x340u))
+#define FW_PROJECT_PATH     ((const uint8_t *)(FW_FM + 0x241u))     /* 254 characters and a 0 */
+#define FW_PROJECT_NAME     ((const uint8_t *)(FW_FM + 0x340u))     /* 32 characters and a 0 */
+#define PATH_MAX_LEN        254u
+#define NAME_MAX_LEN        32u
 #define FW_SNPRINTF         0x6016712Du
 #define FW_SHOW_MODE        0x600F7C55u     /* (screen): the Play Mode list and the mode's controls */
 
@@ -94,6 +99,7 @@ typedef void (*change_fn)(int32_t step);
 typedef void (*update_fn)(void *screen, void *a1, void *a2, void *a3);
 typedef void (*show_fn)(void *screen);
 typedef int (*snprintf_fn)(char *buf, uint32_t size, const char *fmt, ...);
+typedef char *(*strncpy_fn)(char *dst, const char *src, uint32_t n);
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
  * compiler must read them, not assume the 0 they are linked with. */
@@ -108,6 +114,7 @@ CHAIN_WORD(mt_bt_next_button_plus);         /* mode-change handler 0x600f5b99 (8
 CHAIN_WORD(mt_bt_next_button_minus);        /* mode-change handler 0x600f5b99 (7th button) */
 CHAIN_WORD(mt_bt_next_playback_update);     /* Sample Playback screen update 0x600f6071 */
 CHAIN_WORD(mt_bt_next_pattern_update);      /* Pattern screen update 0x600e1f99 */
+CHAIN_WORD(mt_bt_next_save_name);           /* strncpy 0x601673d7 (Save As: the new name) */
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
@@ -115,19 +122,17 @@ CHAIN_WORD(mt_bt_next_pattern_update);      /* Pattern screen update 0x600e1f99 
 #define SAVE_DELAY          25u             /* screen updates between a change and the save */
 #define LOAD_NONE           0u
 #define LOAD                1u              /* read the file; none: no flags */
-#define LOAD_OR_KEEP        2u              /* read the file; none: keep the flags (a first save) */
 
 struct bt_state {
     uint32_t magic;
     uint32_t flags[2];                      /* bit i: instrument i plays through (i < 48) */
     volatile uint8_t cur;                   /* the Beat Slice note-on in progress plays through */
     uint8_t saved_valid;                    /* saved[] is what the file holds */
-    uint8_t unnamed;                        /* the session is a project without a name */
+    uint8_t load;                           /* LOAD_*: the project's file is still to be read */
     uint8_t wait;                           /* updates left before saving */
     uint32_t session;                       /* project name + path the flags belong to */
     uint32_t saved[2];
-    uint8_t load;                           /* LOAD_*: the project's file is still to be read */
-    uint8_t pad[3];
+    uint32_t save_as;                       /* the session a Save As moves the flags to; 0: none */
 };
 static struct bt_state bt_state_ram __attribute__((section(".mt_ram")));    /* the start of the patch's RAM */
 #define BT (&bt_state_ram)
@@ -139,10 +144,10 @@ static void bt_init_if_needed(void)         /* RAM outside .bss holds garbage at
     BT->flags[0] = BT->flags[1] = 0;
     BT->cur = 0;
     BT->saved_valid = 0;
-    BT->unnamed = 0;
     BT->wait = 0;
     BT->session = 0;
     BT->load = 0;
+    BT->save_as = 0;
     BT->magic = BT_MAGIC;
 }
 
@@ -333,15 +338,32 @@ static uint32_t fnv1a(uint32_t h, uint32_t byte)
     return (h ^ byte) * 16777619u;
 }
 
+/* At most the lengths the firmware keeps: the Save As request copies the name before it
+ * writes its terminating 0. */
 static uint32_t project_session(void)
 {
     uint32_t h = 2166136261u;
-    for (uint32_t i = 0; i < 64 && FW_PROJECT_NAME[i]; i++)
+    for (uint32_t i = 0; i < NAME_MAX_LEN && FW_PROJECT_NAME[i]; i++)
         h = fnv1a(h, FW_PROJECT_NAME[i]);
     h = fnv1a(h, 0);
-    for (uint32_t i = 0; i < 255 && FW_PROJECT_PATH[i]; i++)
+    for (uint32_t i = 0; i < PATH_MAX_LEN && FW_PROJECT_PATH[i]; i++)
         h = fnv1a(h, FW_PROJECT_PATH[i]);
     return fnv1a(h, 0) | 1;                 /* never 0 */
+}
+
+/* A project with no folder yet: no name (while Workspace loads), or the new project
+ * 0x60117c8c makes, "New Project" with no path. */
+static int project_unsaved(void)
+{
+    static const char fresh[] = "New Project";
+    if (!FW_PROJECT_NAME[0])
+        return 1;
+    if (FW_PROJECT_PATH[0])
+        return 0;
+    for (uint32_t i = 0; i < sizeof fresh; i++)
+        if (FW_PROJECT_NAME[i] != (uint8_t)fresh[i])
+            return 0;
+    return 1;
 }
 
 static uint32_t data_sum(const uint8_t *v)
@@ -364,7 +386,7 @@ static uint32_t get32(const uint8_t *b)
 
 static int settings_path(char *path, uint32_t size)
 {
-    if (!FW_PROJECT_NAME[0])
+    if (project_unsaved())
         return 0;
     int n = ((snprintf_fn)FW_SNPRINTF)(path, size, "%s/%s/slicethru.bin",
                                        (const char *)FW_PROJECT_PATH, (const char *)FW_PROJECT_NAME);
@@ -448,31 +470,29 @@ static int settings_tick(void)
     if (!*(void **)FW_FM)
         return 0;
     uint32_t session = project_session();
-    int unnamed = !FW_PROJECT_NAME[0];
+    int unsaved = project_unsaved();
     if (session != BT->session) {
-        int keep = BT->unnamed && !unnamed; /* maybe a new project being saved for the first time */
+        int save_as = session == BT->save_as;   /* the same project under its new name */
+        BT->save_as = 0;
         BT->session = session;
-        BT->unnamed = (uint8_t)unnamed;
-        BT->saved_valid = 0;
+        BT->saved_valid = 0;                /* after a Save As: written to the new folder */
         BT->wait = SAVE_DELAY;
-        BT->load = unnamed ? LOAD_NONE : keep ? LOAD_OR_KEEP : LOAD;
-        if (!keep)
+        BT->load = unsaved || save_as ? LOAD_NONE : LOAD;
+        if (!save_as)
             BT->flags[0] = BT->flags[1] = 0;     /* nothing of the old project plays through */
     }
     if (!file_manager_idle())
         return 0;
     if (BT->load != LOAD_NONE) {
-        uint8_t how = BT->load;
         BT->load = LOAD_NONE;
-        if (settings_load() || how == LOAD) {
-            BT->saved[0] = BT->flags[0];    /* nothing to write until a flag changes */
-            BT->saved[1] = BT->flags[1];
-            BT->saved_valid = 1;
-        }                                   /* else: the new project's first save keeps its flags */
+        settings_load();                    /* none or a bad one: no flags */
+        BT->saved[0] = BT->flags[0];        /* nothing to write until a flag changes */
+        BT->saved[1] = BT->flags[1];
+        BT->saved_valid = 1;
         return 1;
     }
     clear_stale();
-    if (unnamed || (BT->saved_valid && BT->flags[0] == BT->saved[0]
+    if (unsaved || (BT->saved_valid && BT->flags[0] == BT->saved[0]
                     && (BT->flags[1] & MASK_HIGH) == BT->saved[1])) {
         BT->wait = SAVE_DELAY;
         return 0;
@@ -502,6 +522,18 @@ void mt_bt_pattern_update(void *screen, void *a1, void *a2, void *a3)
 {
     settings_tick();
     ((update_fn)mt_bt_next_pattern_update)(screen, a1, a2, a3);
+}
+
+/* 0x60114eaa in the save request 0x60114e34: "bl strncpy(fm + 0x340, name, 0x21)",
+ * run only for Save As, after the new path is copied. The next tick sees the new
+ * session and keeps the flags for it. (Any screen: the request comes from the project
+ * screen, whose update isn't hooked.) */
+char *mt_bt_save_name(char *dst, const char *src, uint32_t n)
+{
+    char *r = ((strncpy_fn)mt_bt_next_save_name)(dst, src, n);
+    bt_init_if_needed();
+    BT->save_as = project_session();
+    return r;
 }
 
 /* ---- version text: Config shows 1.2.0-<SLICETHRU_VERSION> ------------------------- */

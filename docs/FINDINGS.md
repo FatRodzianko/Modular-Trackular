@@ -2328,6 +2328,40 @@ Details and the full design: [COPY_PATTERN_PLAN.md](COPY_PATTERN_PLAN.md).
   `fm+0x46a`, `fm+0x49a`).
 - File manager busy: `fm+0x13d` (state) and `+0x13f`. The stock check `0x600bc990`
   allows a new operation when the state is 0 or 0x0c and `(+0x13f & 0xfd) == 0`.
+- The main loop's file manager step `0x600bca88` runs the operation in `+0x13f` (1 to
+  0x16, a jump table) one state at a time. Operation 3 (`0x60114a04`) copies a project
+  into Workspace; operation 4 (`0x60114ff8`) saves Workspace to the project folder;
+  operation 1 (`0x601166d4`) loads Workspace into RAM.
+- **A new project is named "New Project" with an empty path** (`0x60117c8c`, called
+  from the project screen and at boot when Workspace can't be loaded; run in the
+  emulator). So "no name yet" is the empty path, not an empty name. The mods that keep
+  a per-project file test the name, so on a real new project their "keep the settings
+  for the first save" path never runs, and the first Save As counts as another
+  project. Shown for slicethru bt3 in the emulator: two Thru flags set on "New
+  Project", 0 after Save As, no file written. Its test 4.3 had modelled the new project
+  with an empty name. synths is the exception: it keeps its choices for any project
+  without its file, so they survive.
+- **Open** (`0x6011483c`, through `0x600bc780`): writes the new name and path at once,
+  then state 9, operation 3. When the copy ends (`0x601147a8`), `0x60116430` starts
+  operation 1, which clears the name and path and later restores them from
+  `project.mt` (`0x60116400`), all while busy. **Save** (`0x60114e34`, through
+  `0x600bc8c8` from the project screen's Save As `0x600e9a78`, Save `0x600ea6bc` and
+  overwrite `0x600eaa58`): with a path and name it is Save As (the path, then the name
+  copied by `bl strncpy` at `0x60114eaa`, which only Save As runs; slicethru bt4 hooks
+  it); with neither it needs a current name. Then state 0x0d with operation 4, or
+  operation 2 (`0x60116820`, the synths' Workspace data first) when `0x600bc758` starts
+  one; run in the emulator, Save As on a new project returned 1 with state 0x0d,
+  operation 2. It creates the project's `patterns`, `instruments` and `samples`
+  folders and copies files into them; no sign of it deleting the folder's other files.
+- **Save As doesn't carry the mods' files** (hardware, 2026-10-25): the new folder had
+  only the firmware's files and `synths.bin`. The folder saved from also had
+  `colorsong.bin`, `humanize.bin`, `interpolate.bin`, `masterfx.bin`, `swing.bin` and
+  `slicethru.bin`. The new project had no Beat Slice Thru instruments (bt3); a plain
+  Save and a reopen keep them. In the emulator the same happens: Save As writes the new
+  name and path at once, slicethru takes it for another project, clears the flags and
+  finds no file. bt4 marks the Save As at its name copy and keeps the flags for the new
+  name; on hardware (bt4 and MT4), Save As and a new project's first save keep Beat
+  Slice Thru.
   The buffer swap (`0x600acc68`) sets the current pattern from `fm+0x130` (the last
   pattern `pattern_load_now` loaded, `0x600c2510`).
 - Song screen file operations work on pattern files, not RAM: `0x600c3a8c` and

@@ -35,8 +35,12 @@ system's app objects (tools/emu/synth_rig.py).
     after a change; read on a project change and the list redrawn; a damaged or short
     file, or bits above instrument 48: none; nothing read while the file manager is
     busy, and the old project's flags cleared at once; stale flags (an instrument no
-    longer an active Beat Slice instrument) cleared only while it is idle; projects
-    without a name; stock firmware plays the instrument as Beat Slice.
+    longer an active Beat Slice instrument) cleared only while it is idle; a new project
+    as the firmware makes it ("New Project", no path: nothing written); Save As through
+    the firmware's save request 0x60114e34, as a new project's first save and from a
+    saved project: the flags kept and written to the new folder, the old file left; a
+    plain save; a project opened afterwards and the name cleared while Workspace loads:
+    the project's own file; stock firmware plays the instrument as Beat Slice.
 """
 from __future__ import annotations
 
@@ -55,7 +59,7 @@ from layout import patch_code, patch_ram  # noqa: E402
 import seq_timing as st  # noqa: E402
 import synth_rig as sr  # noqa: E402
 from machine import FAKE_DISPLAY_VT  # noqa: E402
-from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
+from fakefs import FILEMAN, PROJECT_NAME, FakeFS  # noqa: E402
 
 INS = 0x20200000                    # 48 instruments, 0x174 bytes each
 INS_SIZE = 0x174
@@ -81,6 +85,9 @@ SCR_INSTRUMENT = 0xF4
 CUR_INS = INS + 0x46C5
 PLAYBACK_UPDATE_WORD, PATTERN_UPDATE_WORD, PATTERN_UPDATE = 0x60042698, 0x600403DC, 0x600E1F98
 FM_STATE = 0x2001E488 + 0x13D
+FM_OP = 0x2001E488 + 0x13F
+SAVE_REQUEST = 0x60114E34           # (fm + 0x8c, path, name): Save As; (.., 0, 0): Save
+SAVE_NAME_SITE = 0x60114EAA         # bl strncpy(fm + 0x340, name, 0x21) in it, Save As only
 FILE_MAGIC = 0x31535442             # "BTS1"
 SAVE_DELAY = 25
 STOCK_NAMES = ["1-Shot", "Forward Loop", "Backward Loop", "Pingpong Loop", "Slice", "Beat Slice",
@@ -199,7 +206,7 @@ def site_checks(p: Rig) -> None:
     lo, hi = p.code
     for at, name in ((BS_SITE, "the dispatcher's Beat Slice call"), (END_SITE, "the Beat Slice end point"),
                      (LIST_DATA_SITE, "the Play Mode list's data"), (BUTTON_PLUS_SITE, "the 8th button's step"),
-                     (BUTTON_MINUS_SITE, "the 7th button's step")):
+                     (BUTTON_MINUS_SITE, "the 7th button's step"), (SAVE_NAME_SITE, "Save As's name copy")):
         t = bl_target(img, 0x60030000, at)
         check(lo <= t < hi, f"{name} ({at:#x}) branches into the patch ({t:#x})")
     for at, name in ((ENCODER_WORD, "encoder"), (PLUS_WORD, "+1"), (MINUS_WORD, "-1")):
@@ -751,23 +758,52 @@ def file_checks(ptf: Path, stock: Path) -> None:
     tick()
     check(mask() == 1, "a flag on a deleted instrument is cleared")
 
-    print("projects without a name")
-    m.write(PROJECT_NAME, b"\0")
+    print("a new project and Save As")
+
+    def save(name: str | None, where: str = "Projects/User") -> int:
+        """The firmware's save request: Save As with a path and a name, Save with neither;
+        then the save running (file manager busy) and done."""
+        p = n = 0
+        if name is not None:
+            p, n = m.alloc(256), m.alloc(64)
+            m.write(p, where.encode() + b"\0")
+            m.write(n, name.encode() + b"\0")
+        m.w8(FM_STATE, 0)
+        m.w8(FM_OP, 0)
+        ok = m.call(SAVE_REQUEST, FILEMAN + 0x8C, p, n, max_insns=50_000_000)
+        tick(3)
+        m.w8(FM_STATE, 0)
+        m.w8(FM_OP, 0)
+        tick(SAVE_DELAY + 5)
+        return ok
+
+    fs.set_project(Path("."), "New Project", "")    # as the firmware's new project 0x60117c8c
     tick()
-    check(mask() == 0, "a new project without a name: none")
+    check(mask() == 0, "a new project (\"New Project\", no path): none")
     m.w32(q.ram + 4, 1 << 1)
     n = writes()
     tick(SAVE_DELAY * 2)
-    check(writes() == n, "while it has no name: nothing written")
-    fs.set_project(Path("."), "C", "Projects/User")
-    tick(SAVE_DELAY + 5)
-    check(mask() == 1 << 1 and fs.overlay.get(path("C")) == bts1(1 << 1),
-          "its first save (a name, no file yet): the flags kept and written")
-    m.write(PROJECT_NAME, b"\0")
-    tick()
+    check(writes() == n and not any("New Project" in x for x in fs.log),
+          "while it has no folder: nothing written or read")
+    ok = save("C")
+    check(ok and m.cstr(PROJECT_NAME) == "C" and mask() == 1 << 1 and fs.overlay.get(path("C")) == bts1(1 << 1),
+          "its first save (Save As through the firmware's save request): the flags kept and written to its folder")
+    ok = save("D")
+    check(ok and mask() == 1 << 1 and fs.overlay.get(path("D")) == bts1(1 << 1)
+          and fs.overlay.get(path("C")) == bts1(1 << 1),
+          "Save As from a saved project: the flags kept, written to the new folder, the old file left")
+    n = writes()
+    ok = save(None)
+    check(ok and m.cstr(PROJECT_NAME) == "D" and mask() == 1 << 1 and writes() == n,
+          "a plain save: the same project, the flags kept, nothing written")
     fs.set_project(Path("."), "A", "Projects/User")
     tick()
-    check(mask() == 1, "a project with a file, opened after an unnamed one: the file's flags")
+    check(mask() == 1, "a project opened after a Save As: its own file's flags")
+    m.write(PROJECT_NAME, b"\0")                # the name cleared while Workspace loads
+    tick()
+    fs.set_project(Path("."), "D", "Projects/User")
+    tick()
+    check(mask() == 1 << 1, "a project reopened, its name cleared and restored on the way: its own file's flags")
 
     print("stock firmware with the same project")
     s = Rig(stock, False)

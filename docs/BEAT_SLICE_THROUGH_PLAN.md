@@ -453,8 +453,12 @@ starts.
    - **Stock and back:** a project saved with a Beat Slice Thru instrument on MBT,
      opened after reinstalling stock 1.2.0, played the instrument as a normal Beat
      Slice instrument. Back on MBT, it played as Beat Slice Thru again.
-   - **Save As (step 7 of section 10):** not reported. The README still lists it as
-     not checked.
+   - **Save As (step 7 of section 10):** checked on hardware 2026-10-25: the firmware
+     doesn't copy `slicethru.bin`, so bt3 loses the choice on Save As (and on a new
+     project's first save). Fixed in bt4 (`patch/all` `1.2.0-MT4`): the patch marks the
+     Save As at the save request's name copy and writes the flags to the new folder.
+     bt4 and MT4 tested on hardware the same day: Save As and a new project's first save
+     keep Beat Slice Thru. FINDINGS section 25 has the details.
    - **patch/all:** now lists slicethru last, version `MBT`. Its output is
      byte-identical to the hardware-tested MBT build (SHA-256 `f610374f…a4c33c`).
    - **Web patcher:** slicethru is bit 10 in `web/manifest.json`, with bt3 and MBT among

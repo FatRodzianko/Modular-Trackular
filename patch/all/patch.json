@@ -7,7 +7,7 @@
               "../masterfx/patch.json", "../swing/patch.json", "../visualizer/patch.json",
               "../condtrig/patch.json", "../synths/patch.json", "../legato/patch.json",
               "../copypattern/patch.json", "../slicethru/patch.json", "../resample/patch.json"],
-  "version": "MR4",
+  "version": "MT4",
   "version_word": {
     "at": "0x600CBF9C",
     "old": "34b80360",

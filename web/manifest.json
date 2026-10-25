@@ -135,6 +135,8 @@
     "75087646e0902daa7867fe5fdf91de98874348a2140f1becbd5d0ba29bee06e2": "synths (1.2.0-sy8)",
     "ee0c901bd8cc7c7786e68c19d7c9e97fc93847fb10adbaa48a80b138638fbd4d": "all eleven mods before resample (1.2.0-MS8)",
     "5cf21721e8c1f9339304b24adfcc355a07f37dcaff9697a5b97ab41d50352925": "resample (1.2.0-rs4)",
-    "b2376c91b9382658c39018a78daf78c9b22a083bfb1b4c739e147bffea84748f": "all twelve mods (1.2.0-MR4)"
+    "b2376c91b9382658c39018a78daf78c9b22a083bfb1b4c739e147bffea84748f": "all twelve mods (1.2.0-MR4)",
+    "8aed6732660f5c8e8ab231b20fbfa58bfaf3b875896ce790b5b9ae2bd6552232": "slicethru (1.2.0-bt4)",
+    "eec53343f9fc18ed981863af0808761974ee23024158705df4c362a87442fee8": "all twelve mods (1.2.0-MT4)"
   }
 }
