@@ -29,9 +29,14 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
   - resample alone, and first with patch/all's other patches after it in reverse order
     (its RAM moves to another region with all of them; an ITCM-image word, as swing's;
     patch/all has it last),
+  - a copy of slicethru with a non-BL site ("replaces": "insns", the two instructions
+    at 0x60035522), alone and in patch/all's place for slicethru; the site's 4 bytes
+    are a BL to the hook and the bytes around it are stock,
 and checks that a bundle with ramdiag (standalone) is refused, and so is one where a
 shared site isn't chained by both patches, one where two patches pass different
-registers at one ITCM site, and a "late_ram" word that holds no size.
+registers at one ITCM site, a "late_ram" word that holds no size, a non-BL site with
+"next" or with a "replaces" other than "insns", a second patch on a non-BL site (with
+"replaces", or chaining it with "next"), and a site overlapping another.
 For each output it reads the image back and its .map.json, and checks:
   - the patches sit in the listed order, each right after the one before (16-byte
     aligned), or at its fixed base; the gaps are 0xFF;
@@ -66,10 +71,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-from patch_ptf import RAM_DEFAULT_ORDER, RAM_REGIONS, bl_target, load_rel, load_symbols  # noqa: E402
+from patch_ptf import RAM_DEFAULT_ORDER, RAM_REGIONS, bl_target, load_rel, load_symbols, thumb_bl  # noqa: E402
 from ptf import read_ptf  # noqa: E402
 
 MT0_SHA = "f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff"
+# A non-BL site: the 1-shot render's two instructions at the end of a voice (FINDINGS
+# section 27), and the next two, which overlap it by 2 bytes.
+INSNS_SITE = {"at": "0x60035522", "old": "e369e367", "to": "mt_bt_bs_note_on", "replaces": "insns",
+              "note": "layout test: a non-BL site"}
+INSNS_OVERLAP = dict(INSNS_SITE, at="0x60035524", old="e3670232")
 STOCK_END = 0x601BAB78
 ALIGN = 16
 ITCM_SRC = 0x6018D6E4               # flash address of ITCM address 0 in the ITCM image
@@ -333,6 +343,23 @@ def main() -> int:
                       version="RSR")
     all_rs_rev_spec = outdir / "all-resample-reversed.json"
     all_rs_rev_spec.write_text(json.dumps(all_rs_rev, indent=2))
+    bt_spec = json.loads(bt.read_text())
+    bt_files = {k: str((bt.parent / bt_spec[k]).resolve())
+                for k in ("bin", "sym", "rel", "prebuilt_bin", "prebuilt_sym", "prebuilt_rel")}
+
+    def bt_copy(name: str, branches: list[dict], own: bool = True) -> Path:
+        """slicethru with `branches` added (own: its own hooks too; else only those)."""
+        spec = dict(bt_spec, name=name, branches=(bt_spec["branches"] if own else []) + branches,
+                    words=bt_spec["words"] if own else [], **bt_files)
+        path = outdir / f"{name}.json"
+        path.write_text(json.dumps(spec, indent=2))
+        return path.resolve()
+
+    bt_ins = bt_copy("slicethru-insns", [INSNS_SITE])
+    all_ins_list = [bt_ins if x == bt else x for x in all_rs_list]
+    all_ins = dict(rev, name="all-insns", include=[str(x) for x in all_ins_list], version="INS")
+    all_ins_spec = outdir / "all-insns.json"
+    all_ins_spec.write_text(json.dumps(all_ins, indent=2))
     stock_img = bytes(read_ptf(stock).image)
 
     for label, spec, specs, version, sha in (
@@ -383,7 +410,10 @@ def main() -> int:
             ("slicethru alone", bt, [bt], None, None),
             ("slicethru, then patch/all's patches reversed", all_bt_rev_spec, all_bt_list[::-1], "BTR", None),
             ("resample alone", rs, [rs], None, None),
-            ("resample, then patch/all's patches reversed", all_rs_rev_spec, all_rs_list[::-1], "RSR", None)):
+            ("resample, then patch/all's patches reversed", all_rs_rev_spec, all_rs_list[::-1], "RSR", None),
+            ("a non-BL site: slicethru with the two instructions at 0x60035522", bt_ins, [bt_ins], None, None),
+            ("a non-BL site in patch/all: the slicethru copy in slicethru's place", all_ins_spec, all_ins_list,
+             "INS", None)):
         out = outdir / f"{spec.stem if spec.parent == outdir else spec.parent.name}.ptf"
         if not build(stock, spec, out):
             check(False, f"{label}: patch_ptf failed")
@@ -392,6 +422,18 @@ def main() -> int:
         if sha:
             got = hashlib.sha256(out.read_bytes()).hexdigest()
             check(got == sha, f"{label}: byte-identical to the hardware-tested build")
+        if bt_ins in specs:
+            ptf = read_ptf(out)
+            at = int(INSNS_SITE["at"], 16)
+            placed = next(q for q in json.loads(out.with_suffix(".map.json").read_text())["patches"]
+                          if q["name"] == "slicethru-insns")
+            p = patch_files(bt_ins)
+            hook = int(placed["code"][0], 16) + p["syms"][INSNS_SITE["to"]] - p["rel"]["link"]
+            lo, hi = at - 0x20 - ptf.base, at + 0x20 - ptf.base
+            want = bytearray(stock_img[lo:hi])
+            want[at - ptf.base - lo:at - ptf.base - lo + 4] = thumb_bl(at, hook)
+            check(bytes(ptf.image[lo:hi]) == bytes(want),
+                  f"{at:#x}: its 4 bytes are a BL to {INSNS_SITE['to']}, the 32 bytes either side are stock")
     print("a bundle with a standalone patch")
     bad = dict(rev, name="with-ramdiag", include=[str(cs), str(rd)], version="BAD")
     bad_spec = outdir / "with-ramdiag.json"
@@ -435,6 +477,28 @@ def main() -> int:
     r = subprocess.run([sys.executable, "-I", str(ROOT / "tools" / "patch_ptf.py"), str(stock), str(bad_spec),
                         str(outdir / "synths-no-size.ptf")], capture_output=True, text=True)
     check(r.returncode != 0 and "not a late RAM size" in (r.stdout + r.stderr), "refused: a late RAM word holding 0")
+    no_replaces = {k: v for k, v in INSNS_SITE.items() if k != "replaces"}
+    for what, specs, refusal in (
+            ("a non-BL site with \"next\"", [bt_copy("insns-next", [dict(INSNS_SITE, next="mt_bt_bs_note_on")])],
+             "nothing to chain"),
+            ("a \"replaces\" other than \"insns\"", [bt_copy("insns-bad", [dict(INSNS_SITE, replaces="bl")])],
+             "\"replaces\" takes \"insns\""),
+            ("a second patch on a non-BL site", [bt_ins, bt_copy("insns-second", [INSNS_SITE], own=False)],
+             "not chained by both"),
+            ("a second patch chaining a non-BL site (\"next\")",
+             [bt_ins, bt_copy("insns-chained", [dict(no_replaces, next="mt_bt_bs_note_on")], own=False)],
+             "not chained by both"),
+            ("a site overlapping a non-BL site by 2 bytes", [bt_ins, bt_copy("insns-overlap", [INSNS_OVERLAP], own=False)],
+             "overlaps 0x60035522")):
+        print(what)
+        bad_spec = specs[0]
+        if len(specs) > 1:
+            bad_spec = outdir / "insns-bundle.json"
+            bad_spec.write_text(json.dumps(dict(rev, name="insns-bundle", include=[str(x) for x in specs], version="BAD"),
+                                           indent=2))
+        r = subprocess.run([sys.executable, "-I", str(ROOT / "tools" / "patch_ptf.py"), str(stock), str(bad_spec),
+                            str(outdir / "insns-bad.ptf")], capture_output=True, text=True)
+        check(r.returncode != 0 and refusal in (r.stdout + r.stderr), f"refused: {what}")
     print(f"outputs in {outdir}")
     print(f"{len(failures)} failure(s)")
     return 1 if failures else 0

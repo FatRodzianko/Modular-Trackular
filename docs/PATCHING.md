@@ -393,6 +393,12 @@ details. A patch is:
   patch, linked as 0, that the patch calls through instead of the original
   (`const volatile uint32_t` in C, so the compiler reads it; see Humanize's
   `CHAIN_WORD`).
+  A hook can also replace 4 bytes that aren't a `BL` (two 16-bit instructions, or one
+  32-bit one): a `branches` entry with `"replaces": "insns"`. The patcher writes a `BL`
+  to the hook there, and the hook does the replaced instructions' work itself and
+  returns to the next one. With no original call to chain to, such a site takes no
+  `next`, and no second patch may hook it. The patcher refuses any two sites that
+  overlap.
   Calls inside the sequencer's ITCM code go in `itcm_branches` instead: `at` is the
   ITCM address of the `BL`, with its original bytes as in `branches`, and `args` names
   up to two registers (r4–r12, sp) that the call site holds and the hook should get

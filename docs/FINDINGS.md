@@ -2561,6 +2561,70 @@ Found while planning Beat Slice (Play Through), `docs/BEAT_SLICE_THROUGH_PLAN.md
 
   The voice's copy `voice+0x21` is tested at 7 more places.
 
+### A 1-shot voice's end, and looping it (emulator and static)
+
+Found while planning the Beat Slice Thru Loop, `docs/SLICETHRU_LOOP_PLAN.md`.
+
+- **The end in the forward 1-shot render** (`0x600353fc`):
+  - Per frame, the render advances the position `voice+0x7c`, counted from the start
+    frame `+0x34`.
+  - When the position reaches the frames to play (`+0x50`, in `r1`), the 4 bytes at
+    `0x60035522` (`ldr r3, [r4, #0x1c]; str r3, [r4, #0x7c]`, `e369e367`) set it to
+    `+0x1c`, so the next frame is silent and `+0x20` is cleared.
+  - Those bytes run only then: 0 times in 60 blocks of a voice short of its end. No
+    branch lands on them (`0x60034000`..`0x60037000`), and `lr` is free there.
+- **Forcing a wrap there** (emulator, a Unicorn hook on a bt3 Beat Slice Thru voice):
+  setting `r3` and `+0x7c` to position − (`+0x50` + `+0x34`), then going on at
+  `0x60035526`, loops the whole sample from frame 0.
+  - Sample-exact for three passes from slices 1, 2 and 4 of 4.
+  - Also at pitch 2× and 3×, where the overshoot carries over.
+  - Stereo partners stay in step.
+  - The indexed read is signed, so a position below the start frame is fine.
+- **The block buffer:** the render returns its block from `0x60030478` (samples at
+  `+4`); `0x60030524` releases it. The voice update `0x600327e4` doesn't return the
+  block.
+- **What ends a looping voice** (emulator, the real voice note-off ITCM `0x5678`
+  on player 0's voice `0x2001a258`):
+  - Every case ends it: OFF (`0x54b4`), CUT (−3, ITCM `0x5420`) and FADE (−2), with
+    the amp envelope on and off (`voice+0xee`).
+  - With the envelope on, OFF and FADE release, and the voice stops when the release
+    ends.
+  - CUT runs, for each of the player's voices, `0x60030f9c` (release), `0x60031040`
+    (envelope reset), the five objects at `player+0x77c` (`0x6010d530`, `0x6010d59c`),
+    then `0x601000b0`, which clears `+0x20`.
+  - Stop sends each track's note-off down the same path as OFF (above).
+- **The instrument is in the voice:** every play mode's note-on writes the
+  instrument index to `voice+0x6f` (the Beat Slice note-on at `0x60032b90`; emulator,
+  modes 0–7, instruments 3, 17 and 47). `0x60100b48` sets it, and `0x60100b0c` reads
+  `ins(+0x6f)+0x168`.
+- **The playhead:** `0x60100ab0(voice)` returns (`+0x34` + `+0x7c`) / `+0x68` × 65535
+  (caller `0x600b4036`). After a wrap, that is the true frame from 0 (emulator: 50776
+  just before the wrap, 2018 after).
+- **Page 2 of the slice buttons** (`0x600f7c54` with `scr+0xf0` ≠ 0, Slice and Beat
+  Slice; emulator): Slice/Auto, Slice/Evenly, No of Slices (`8`), blank, blank, More.
+  - The 4th and 5th labels are set to "" (`0x60038660`) by `disp_ctrl_set_text` at
+    `0x600f820a` and `0x600f8216`. The second lines are set by `disp_ctrl_set_ptr38`
+    (`0x60101d74`).
+  - This page also moves the focus `scr+0xd6` to 2 (No of Slices), so the Play Mode
+    list isn't focused there.
+- **The screen buttons' callbacks** (registered by `0x600f5018`, words in its pool):
+
+  | Button | Callback | Pool word |
+  |---|---|---|
+  | 1st | `0x600f5761` | `0x600f514c` |
+  | 2nd | `0x600f5751` | `0x600f5150` |
+  | 3rd | `0x600f4c89` | `0x600f5154` |
+  | 4th | `0x600f4b55` | `0x600f5158` |
+  | 5th | `0x600f4e15` | `0x600f515c` |
+  | 6th | `0x600f3dd5` | `0x600f5160` |
+  | 7th, 8th | `0x600f5e1d` | `0x600f5164` |
+
+  - Each callback takes the button state (1 press, 0 release).
+  - On page 2 of Slice and Beat Slice, the 4th and 5th callbacks change no RAM but
+    the stack (emulator, press and release).
+- **A mode step reruns `0x600f7c54` and returns to page 1** (`scr+0xf0` = 0), from
+  either page, in stock and in bt3 (emulator: +1, −1, buttons 7 and 8, the encoder).
+
 ### The slice editor (a slicer object; the instrument is the second argument)
 
 | Function | Address | What |

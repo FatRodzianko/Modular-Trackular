@@ -15,10 +15,14 @@ Needs Node (runs web/patcher.js through tools/web_patcher_node.mjs). It:
     (reversed, masterfx first, every mod reversed, humanize with a chained copy);
   - does the same for ITCM hooks: condtrig placed first, and condtrig with a copy of
     itself on its ITCM sites;
+  - does the same for a non-BL site ("replaces": "insns"): test_layout.py's slicethru
+    copy, alone and in slicethru's place in patch/all;
   - checks both refuse the same things: another firmware version, a bundle with
     ramdiag, a shared site not chained by both, two patches passing different
-    registers at one ITCM site; and that the port refuses a spec using a key it
-    doesn't know (a patch_ptf.py feature it doesn't have yet);
+    registers at one ITCM site, a non-BL site with "next" or a bad "replaces", a
+    second patch on a non-BL site (plain or chained), a site overlapping another; and
+    that the port refuses a spec using a key it doesn't know (a patch_ptf.py feature
+    it doesn't have yet);
   - runs tools/test_layout.py's checks (placement, RAM, relocation, chains, version
     text) on every selection's output;
   - checks the single-mod and patch/all outputs against the hardware-tested SHA-256s
@@ -272,6 +276,19 @@ def main() -> int:
     ct_args = dict(ct_copy, name="condtrig-args", itcm_branches=[dict(b, args=["r4"]) for b in ct_copy["itcm_branches"]])
     (extra / "patch/condtrig-args").mkdir()
     (extra / "patch/condtrig-args/patch.json").write_text(json.dumps(ct_args, indent=2))
+    bt_spec = json.loads((extra / "patch/slicethru/patch.json").read_text())
+    bt_files = {k: "../slicethru/" + bt_spec[k] for k in ("bin", "sym", "rel", "prebuilt_bin", "prebuilt_sym", "prebuilt_rel")}
+    no_replaces = {k: v for k, v in test_layout.INSNS_SITE.items() if k != "replaces"}
+    for name, sites, own in (("slicethru-insns", [test_layout.INSNS_SITE], True),
+                             ("insns-next", [dict(test_layout.INSNS_SITE, next="mt_bt_bs_note_on")], True),
+                             ("insns-bad", [dict(test_layout.INSNS_SITE, replaces="bl")], True),
+                             ("insns-second", [test_layout.INSNS_SITE], False),
+                             ("insns-chained", [dict(no_replaces, next="mt_bt_bs_note_on")], False),
+                             ("insns-overlap", [test_layout.INSNS_OVERLAP], False)):
+        spec = dict(bt_spec, name=name, branches=(bt_spec["branches"] if own else []) + sites,
+                    words=bt_spec["words"] if own else [], **bt_files)
+        (extra / "patch" / name).mkdir()
+        (extra / "patch" / name / "patch.json").write_text(json.dumps(spec, indent=2))
 
     other_orders = {
         "reversed": bundle("reversed", ["interpolate", "humanize", "colorsong"], "MTR"),
@@ -280,11 +297,21 @@ def main() -> int:
         "chain": bundle("chain", ["humanize", "humanize-copy"], "CHN"),
         "condtrig-first": bundle("condtrig-first", ["condtrig", "swing", "visualizer", "interpolate"], "MCF"),
         "itcm-chain": bundle("itcm-chain", ["condtrig", "condtrig-copy"], "CHI"),
+        "slicethru-insns": "patch/slicethru-insns/patch.json",
+        "all-insns": bundle("all-insns", [i if i != "slicethru" else "slicethru-insns" for i in ids], "INS"),
     }
     refusals = {
         "with-ramdiag": (bundle("with-ramdiag", ["colorsong", "ramdiag"], "BAD"), stock, "standalone"),
         "unchained": (bundle("unchained", ["humanize", "humanize-unchained"], "BAD"), stock, "not chained by both"),
         "itcm-args": (bundle("itcm-args", ["condtrig", "condtrig-args"], "BAD"), stock, 'different "args"'),
+        "insns-next": ("patch/insns-next/patch.json", stock, "nothing to chain"),
+        "insns-bad": ("patch/insns-bad/patch.json", stock, '"replaces" takes "insns"'),
+        "insns-second": (bundle("insns-second-bundle", ["slicethru-insns", "insns-second"], "BAD"), stock,
+                         "not chained by both"),
+        "insns-chained": (bundle("insns-chained-bundle", ["slicethru-insns", "insns-chained"], "BAD"), stock,
+                          "not chained by both"),
+        "insns-overlap": (bundle("insns-overlap-bundle", ["slicethru-insns", "insns-overlap"], "BAD"), stock,
+                          "overlaps 0x60035522"),
     }
     sw_spec = json.loads((extra / "patch/swing/patch.json").read_text())
     unported = dict(sw_spec, name="swing-future", future_hooks=[],

@@ -330,6 +330,11 @@ async function loadPatch(spec, specUrl, inBundle, io, log) {
     if (!has(RAM_REGIONS, r)) fail(`${spec.name}: unknown RAM region ${JSON.stringify(r)} (known: ${Object.keys(RAM_REGIONS).join(", ")})`);
   }
   const words = (spec.words ?? []).filter((wd) => !(inBundle && wd.version));
+  for (const br of spec.branches) {
+    if (!has(br, "replaces")) continue;
+    if (br.replaces !== "insns") fail(`${spec.name}: site ${br.at}: "replaces" takes "insns", not ${JSON.stringify(br.replaces)}`);
+    if (has(br, "next")) fail(`${spec.name}: site ${br.at} replaces instructions, not a BL: nothing to chain ("next")`);
+  }
   for (const br of spec.itcm_branches ?? []) {
     const args = br.args ?? [];
     if (args.length > 2 || args.some((r) => !has(ITCM_ARG_REGS, r))) {
@@ -493,6 +498,9 @@ export async function patchFirmware({ stockBytes, stock: parsed, spec, specUrl, 
   const sites = new Map();
 
   const claim = (at, who, chained) => {
+    for (const d of [-3, -2, -1, 1, 2, 3]) {
+      if (sites.has(at + d)) fail(`${hx(at)} (${who}) overlaps ${hx(at + d)} (${sites.get(at + d)[0]})`);
+    }
     if (sites.has(at)) {
       const [first, firstChained] = sites.get(at);
       if (!(firstChained && chained)) fail(`${hx(at)}: patched by both ${first} and ${who}, and not chained by both ("next")`);
@@ -508,15 +516,15 @@ export async function patchFirmware({ stockBytes, stock: parsed, spec, specUrl, 
       const old = fromHex(br.old);
       const found = stock.slice(off, off + 4);
       if (!bytesEqual(found, old)) fail(`${hx(at)}: expected ${toHex(old)}, found ${toHex(found)}`);
-      const before = blTarget(image, ptf.base, at);
       const to = symbol(p, br.to);
       const neu = thumbBl(at, to);
-      image.set(neu, off);
-      let chain = "";
+      let chain = has(br, "replaces") ? ", replaces instructions" : "";
       if (has(br, "next")) {
+        const before = blTarget(image, ptf.base, at);
         setNext(p, br.next, (before | 1) >>> 0);
         chain = `, ${br.next} -> ${hx(before)}`;
       }
+      image.set(neu, off);
       log(`${hx(at)}: bl -> ${br.to} @ ${hx(to)}  (${toHex(old)} -> ${toHex(neu)}${chain})  ${br.note ?? ""}`);
     }
   }

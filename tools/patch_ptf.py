@@ -44,6 +44,12 @@ calls through that word instead of calling the stock function itself. Several pa
 can hook the same site this way; the last one listed runs first. A site hooked by more
 than one patch must be chained by all of them, otherwise the patcher refuses.
 
+Non-BL sites: a branch with "replaces": "insns" overwrites 4 bytes that aren't a BL
+(two 16-bit instructions, or one 32-bit one) with a BL to the hook, which must do their
+work itself. There is no old target to chain to, so "next" is refused there, and so is
+a second patch on the site. No two sites may overlap: one starting 1 to 3 bytes into
+another is refused.
+
 ITCM hooks: "itcm_branches" lists BL sites in the sequencer's ITCM code ("at" is the
 ITCM address; the bytes live in the ITCM image in flash, which the startup copy table
 copies to ITCM at boot). ITCM code can't BL to flash, so the patcher makes a stub per
@@ -230,6 +236,13 @@ def load_patch(spec: dict, pdir: Path, in_bundle: bool) -> dict:
         if r not in RAM_REGIONS:
             sys.exit(f"{spec['name']}: unknown RAM region {r!r} (known: {', '.join(RAM_REGIONS)})")
     words = [wd for wd in spec.get("words", []) if not (in_bundle and wd.get("version"))]
+    for br in spec["branches"]:
+        if "replaces" not in br:
+            continue
+        if br["replaces"] != "insns":
+            sys.exit(f"{spec['name']}: site {br['at']}: \"replaces\" takes \"insns\", not {br['replaces']!r}")
+        if "next" in br:
+            sys.exit(f"{spec['name']}: site {br['at']} replaces instructions, not a BL: nothing to chain (\"next\")")
     for br in spec.get("itcm_branches", []):
         args = br.get("args", [])
         if len(args) > 2 or any(r not in ITCM_ARG_REGS for r in args):
@@ -381,6 +394,9 @@ def main() -> int:
     sites: dict[int, tuple[str, bool]] = {}
 
     def claim(at: int, who: str, chained: bool) -> int:
+        for d in (-3, -2, -1, 1, 2, 3):
+            if at + d in sites:
+                sys.exit(f"{at:#x} ({who}) overlaps {at + d:#x} ({sites[at + d][0]})")
         if at in sites:
             first, first_chained = sites[at]
             if not (first_chained and chained):
@@ -395,13 +411,13 @@ def main() -> int:
             old = bytes.fromhex(br["old"])
             if stock[off:off + 4] != old:
                 sys.exit(f"{at:#x}: expected {old.hex()}, found {stock[off:off + 4].hex()}")
-            before = bl_target(image, ptf.base, at)
             new = thumb_bl(at, p["syms"][br["to"]])
-            image[off:off + 4] = new
-            chain = ""
+            chain = ", replaces instructions" if "replaces" in br else ""
             if "next" in br:
+                before = bl_target(image, ptf.base, at)
                 set_next(p, br["next"], before | 1)
                 chain = f", {br['next']} -> {before:#x}"
+            image[off:off + 4] = new
             print(f"{at:#x}: bl -> {br['to']} @ {p['syms'][br['to']]:#x}  ({old.hex()} -> {new.hex()}{chain})  {br.get('note', '')}")
 
     # ITCM sites: chain words get the stock target or the hook before; the BL goes to
