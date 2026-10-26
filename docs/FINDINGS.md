@@ -2369,9 +2369,10 @@ Details and the full design: [COPY_PATTERN_PLAN.md](COPY_PATTERN_PLAN.md).
   and write only while the file manager is idle. On hardware (2026-10-26), Save As and a
   new project's first save left every mod's file in the new folder, and reopening the
   projects loaded the settings. colorsong is still not carried (cosmetic: its colors
-  are worked out again). synths keeps its choices, but Save As over an existing project
-  leaves that folder's `synths.bin`, which wins when the project is reopened (seen in
-  the emulator, not yet fixed).
+  are worked out again). synths keeps its choices; Save As over an existing project
+  used to leave that folder's `synths.bin` in effect. synths sy9 (2026-10-26) moves its
+  choices to the new name at the Save As and writes them over that file, so the saved
+  project's choices win (emulator and hardware; SAVE_AS_FIX_PLAN.md section 8).
   The buffer swap (`0x600acc68`) sets the current pattern from `fm+0x130` (the last
   pattern `pattern_load_now` loaded, `0x600c2510`).
 - Song screen file operations work on pattern files, not RAM: `0x600c3a8c` and

@@ -2,7 +2,8 @@
 
 Status: done for swing, humanize, interpolate and masterfx (sw2, hz9, ip6, mf5; all: MTS):
 release tier passed 2026-10-25, hardware-tested 2026-10-26. colorsong left out (section
-3.4).
+3.4). The synths follow-up below (Save As over an existing project) is done too: synths
+sy9, all MTW, hardware-tested 2026-10-26 (section 8).
 
 ## Verdict
 
@@ -13,7 +14,8 @@ release tier passed 2026-10-25, hardware-tested 2026-10-26. colorsong left out (
   rebuilt. They come out the same unless the song was edited after the colours were
   handed out; after such edits, 18 of 176 and 30 of 192 blocks changed colour in two
   stock demo projects. Nothing you chose is lost. Fixing it is optional (section 3.4).
-- **Not affected:** synths (keeps its choice and writes `synths.bin` itself), slicethru
+- **Not affected:** synths (keeps its choice and writes `synths.bin` itself; but see
+  "Found in passing", fixed in sy9), slicethru
   (bt5, already fixed), and condtrig, legato, copypattern, visualizer and resample (no
   per-project file).
 - **The fix:** the slicethru bt4 recipe, copied into each of the four: a chained hook
@@ -87,7 +89,7 @@ and path in one go.
   choice was 2. The firmware doesn't delete the folder's other files (FINDINGS 25), and
   synths' rule "a file there wins" then applies the overwritten project's choice to the
   new content. slicethru, with the same setup, keeps A's flags. A follow-up for synths,
-  not part of this fix.
+  not part of this fix. Fixed later as synths sy9 (section 8).
 - The four don't wait for the file manager to be idle before they read or write;
   slicethru does. That matters right after Save As (section 3.1, point 5).
 
@@ -334,8 +336,8 @@ Recommendation: **plan B**, with colorsong left out unless you ask for it.
    project). Change the settings, first save under a name, then open another project and
    reopen this one: the values are kept.
 7. **Save As over an existing project:** the values are the ones of the project you
-   saved, not the overwritten one's. Exception, known and not fixed here: the synth
-   choice comes from the overwritten project.
+   saved, not the overwritten one's. Exception in MTS, fixed in sy9 / MTW (section 8):
+   the synth choice came from the overwritten project.
 8. (Only if colorsong is in the batch.) Edit a pattern after visiting the Song screen,
    Save As: the Song screen's colours stay as they were.
 9. Quick regression: swing is audible, the reverb works, humanize and interpolate act
@@ -346,3 +348,25 @@ its version, then steps 2–6 for that mod's own setting only. If time is short,
 covers every hook in the chained case. The singles are the case where the next link in
 the chain is stock `strncpy`, so test at least one of them; testing all four is what
 gives each its "tested" row in `PATCHING.md`.
+
+## 8. Follow-up: synths, Save As over an existing project (sy9, all MTW)
+
+- **The bug** (emulator, sy8 and MTS, the firmware's save request): Save As over a folder
+  that already had a `synths.bin` left that file's choices in effect. A Save As with both
+  choices Off left the old file there. A new project ("New Project", no path) also read
+  and wrote `/New Project/synths.bin`.
+- **No RAM for a `save_as` field:** synths' state is exactly its 2,064-byte block, and
+  `dtcm_above_heap` is full in `patch/all`. So the chained hook on `0x60114eaa` sets
+  `session` to the new name itself and marks the choices unsaved. The next tick sees no
+  project change, never reads the folder's old file, and writes the choices (Off too)
+  once the file manager is idle. Also `project_unsaved()` and the 32/254 session limits,
+  as in the other four.
+- **Kept as before:** a project whose name changes without a load or a Save As still
+  reads its folder's file if it has one, at once.
+- **Tests:** `test_synths.py` `save_as_checks()` (quick and full), through the firmware's
+  real save request; 7 of its checks fail on sy8. Release tier: 142 jobs, 0 failed,
+  60.4 min. Hardware: the sy9 and MTW checklist (Save As over a project with other
+  choices and Off over one, reopened; a new name, a first save, a plain Save) passed
+  2026-10-26. All 57 mixes of the six Save As mods (slicethru, swing, humanize,
+  interpolate, masterfx, synths) passed with `run_tests.py --mixes-of` (356 jobs,
+  0 failed, 32.3 min).
