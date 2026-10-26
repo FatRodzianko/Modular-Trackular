@@ -71,6 +71,13 @@
       "to": "mt_syn_tiles",
       "next": "mt_syn_next_tiles",
       "note": "Edit Patch screen setup: the tiles' labels and icons 0x6011d628; for a PHASE synth, then DCO, DCW, DCA, DCW Env and DCO Env on the first five"
+    },
+    {
+      "at": "0x60114EAA",
+      "old": "52f094fa",
+      "to": "mt_syn_save_name",
+      "next": "mt_syn_next_save_name",
+      "note": "save request 0x60114e34, Save As only: bl strncpy(fm+0x340, name, 0x21) -> mt_syn_save_name (the choices go with the project to its new name and are written there, not the folder's old synths.bin read)"
     }
   ],
   "words": [
@@ -151,7 +158,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-sy8"
+      "note": "version text 1.2.0-sy9"
     }
   ]
 }

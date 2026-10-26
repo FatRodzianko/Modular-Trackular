@@ -33,7 +33,7 @@ What WAVE has:
 - **An effect per synth:** None or a stereo **Chorus** after the Roland Juno's, with Rate,
   Depth and Mix.
 
-Installed on its own, Config shows the firmware version as `1.2.0-sy8`.
+Installed on its own, Config shows the firmware version as `1.2.0-sy9`.
 
 **Status:**
 - **WAVE** is tested on hardware, alone and in the all bundle (`sy7`, which had WAVE
@@ -42,6 +42,9 @@ Installed on its own, Config shows the firmware version as `1.2.0-sy8`.
   `sy7`'s, sample for sample, in the emulator. WAVE patches and projects from `sy3` on
   load and play.
 - **PHASE** is new in `sy8`, tested on hardware alone and in the all bundle.
+- **Save As over an existing project** (`sy9`): the saved project's choices now win
+  over the overwritten project's `synths.bin`. Tested on hardware, alone and in the all
+  bundle. Otherwise `sy9` is `sy8`.
 
 The design of PHASE is in [PD_SYNTH_PLAN.md](../../docs/PD_SYNTH_PLAN.md), WAVE's in
 [SYNTH_ENGINES_PLAN.md](../../docs/SYNTH_ENGINES_PLAN.md).
@@ -61,13 +64,15 @@ The two items can't replace the same model: each item's list leaves out the mode
 other one replaces. (A project file naming one model in both loads with PHASE Off.)
 
 The choices are saved per project (in `synths.bin` in the project's folder), a moment
-after you change them, and Save As takes them along:
+after you change them, and Save As takes them along: the project goes on with them under
+its new name, and they are written to its new folder (also on a new project's first save,
+and on Save As over another project, whose old choices they replace):
 - A project without that file plays the stock models.
 - Every project plays the stock models in stock firmware. A synth that was WAVE or PHASE
   plays the replaced model's Init patch there (the project keeps its other settings).
 - `sy7` (WAVE only) should read a file with PHASE set as damaged (from its code; not
   tested): it plays the stock models, WAVE too, and keeps the file unchanged, so going
-  back to `sy8` restores both choices.
+  back to `sy8` or later restores both choices.
 
 WAVE's patches save and load like any model's, in `Patches/WAVE/`, and PHASE's in
 `Patches/PHASE/`. The Edit Patch screen shows "WAVE" or "PHASE" where the model's logo
@@ -403,6 +408,17 @@ The patch works with those pieces:
     project had them.
   - A change in the menu takes effect at the next Config screen update.
   - Records keep stock indices.
+- **`synths.bin` and Save As.** The choices are written a moment after a change, from the
+  Pattern and Config screen updates, and only while the file manager is idle. A project
+  with no folder yet (the new project "New Project", which has no path) writes no file;
+  it gets one when it is first saved. The firmware's Save As copies only its own files
+  and leaves the folder's others, so the patch writes `synths.bin` to the new folder
+  itself. A chained hook on the Save As name copy (`bl strncpy` at `0x60114eaa` in the
+  save request `0x60114e34`, Save As only) moves the choices to the new name at once and
+  marks them unsaved. So the overwritten project's old `synths.bin`, if the folder has
+  one, is never read, and the saved project's choices are written over it. A project
+  that changes name in any other way (not through a load or Save As) reads its folder's
+  file if it has one. The mark uses the existing state: no RAM is added.
 - **The Model list** draws model logos by image id. With a swap, the patch hands the list
   its own id table with the replaced positions marked. The list draws the other logos,
   and the patch draws "WAVE" or "PHASE" as text in the marked rows.
@@ -563,8 +579,9 @@ the right side) and 8,900 with the Chorus, once per synth, not per voice.
 **Shared hooks.** The Project Settings folder, the Config menu constructor's last item, and
 the Pattern and Config screen update methods are chained, as other patches here chain
 them. So are the registry builder, the project's slot records, the Model list's data,
-the list control's image draw, the Edit Patch label's text, the Edit Patch tile builder
-and the patch storage's load. So this patch combines with all of the others.
+the list control's image draw, the Edit Patch label's text, the Edit Patch tile builder,
+the patch storage's load and the Save As name copy. So this patch combines with all of
+the others.
 
 ## Build
 
@@ -572,7 +589,7 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/synths/patch.json build/TrackerPlus_sy8.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/synths/patch.json build/TrackerPlus_sy9.ptf
 ```
 
 To combine it with other patches, list `../synths/patch.json` in a bundle (see "Choosing
@@ -591,11 +608,11 @@ patch/synths/build.sh
 Needs `pip install unicorn capstone numpy`. There are two tests, one per synth:
 
 ```bash
-python tools/emu/test_synths.py build/TrackerPlus_sy8.ptf path/to/TrackerPlus_1.2.0.ptf [wav folder] [--stress 20000]
+python tools/emu/test_synths.py build/TrackerPlus_sy9.ptf path/to/TrackerPlus_1.2.0.ptf [wav folder] [--stress 20000]
 ```
 
 ```bash
-python tools/emu/test_phase.py build/TrackerPlus_sy8.ptf path/to/TrackerPlus_1.2.0.ptf [sy7 .ptf] [--wav folder]
+python tools/emu/test_phase.py build/TrackerPlus_sy9.ptf path/to/TrackerPlus_1.2.0.ptf [sy7 .ptf] [--wav folder]
 ```
 
 Both run the firmware's own synth system: host, slots, VAP voices and the audio graph
@@ -626,7 +643,11 @@ synths.
   - `synths.bin` read at project load, before the slot records apply, and saved a moment
     after a change;
   - damaged and `sy1` files count as Off and are kept;
-  - Save As takes the choice along;
+  - Save As through the firmware's own save request (`tools/emu/project_save.py`):
+    WAVE's and PHASE's choices kept and written to the new folder, on a new project's
+    first save too; over a project that has its own `synths.bin`, the saved project's
+    choices (Off too) written over it; a plain Save writes nothing; the write waits for
+    the file manager; a new project with no folder reads and writes nothing;
   - stock firmware never opens the file.
 - **Patch files:**
   - a WAVE patch saves to `WAVE/<name>.patch` with model id 3 and its 66 values, and
@@ -728,7 +749,7 @@ three notes, Ring and Noise Mod, a DCO envelope pluck and an Init chord.
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched `.ptf` to
 `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then Config →
-Firmware → the patched file. Config should show `1.2.0-sy8 Build 1504`.
+Firmware → the patched file. Config should show `1.2.0-sy9 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`.
 - Synths that were WAVE or PHASE play the replaced model's Init patch.
@@ -737,7 +758,7 @@ To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`.
   (delete them if you like).
 - To go back to `sy7` (WAVE only), install it the same way. PHASE synths then play the
   replaced model's Init patch too, and a project with PHASE set should play the stock
-  models (see "Using it") until it is opened in `sy8` again.
+  models (see "Using it") until it is opened in `sy8` or later again.
 
 If the unit freezes, pull the power, boot, and revert through Config. If it doesn't boot, or
 Config itself doesn't work:

@@ -39,9 +39,15 @@ voices, rendered through the audio graph (or the synth output object alone).
   text centred where the replaced logo was, and the stock list is untouched.
 - Settings file: synths.bin per project (fake SD card): read at project load, before
   the stock code applies the slot records (the table set by then); one write a while
-  after a change; damaged, sy1 and out-of-range files count as Off and are kept; Save
-  As keeps the choice and writes it; a project without a name writes nothing; stock
-  firmware never opens the file.
+  after a change; damaged, sy1 and out-of-range files count as Off and are kept; a new
+  name without a file keeps the choice and writes it; a project without a name writes
+  nothing; stock firmware never opens the file.
+- Save As (the firmware's save request 0x60114e34): a new project ("New Project", no
+  path) reads and writes nothing; its first save, a Save As from a saved project and
+  one to a 40-character name keep WAVE's and PHASE's choices and write them to the new
+  folder, leaving the old file; a Save As over a project that has its own synths.bin
+  writes the saved project's choices over it (Off too), and they stay when it is
+  opened again; a plain Save writes nothing; the write waits for the file manager.
 - Patch files: a WAVE patch saves to WAVE/<name>.patch with model id 3 and its 66
   values, and loads back into a WAVE slot; a file of 60 (saved before the Polarity
   switches) loads with both Bipolar and Effect None, one of 62 (before the effect) with
@@ -108,6 +114,7 @@ from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
 from layout import patch_code, patch_late_ram  # noqa: E402
 from machine import FAKE_DISPLAY_VT, Machine  # noqa: E402
 from patch_ptf import bl_target  # noqa: E402
+import project_save  # noqa: E402
 
 ACD, FAT, VAP, WTFM, PERC = sr.ACD, sr.FAT, sr.VAP, sr.WTFM, sr.PERC
 WAVE = 3                            # WAVE's model id
@@ -976,9 +983,10 @@ def file_checks(ptf: Path, stock: Path) -> None:
     fs.overlay[path("G")] = hsy2(5)
     load("G")
     check(r.menu() == 5 and applied_with[0][3] == [1, 2, 4, 5, WAVE], "a file with PERC replaced")
-    fs.set_project(Path("."), "H", "Projects/User")        # Save As: a new name, no load
+    fs.set_project(Path("."), "H", "Projects/User")        # a new name, no load, no save request
     tick(SAVE_DELAY + 5)
-    check(r.menu() == 5 and fs.overlay.get(path("H")) == hsy2(5), "Save As keeps the choice and writes it to the new folder")
+    check(r.menu() == 5 and fs.overlay.get(path("H")) == hsy2(5),
+          "a new name without a file (no load): the choice kept and written to its folder")
     fs.overlay[path("K")] = hsy2(2)
     fs.set_project(Path("."), "K", "Projects/User")        # a project the patch didn't see load
     n = writes()
@@ -1005,6 +1013,101 @@ def file_checks(ptf: Path, stock: Path) -> None:
     s.m.call(s.m.r32(CONFIG_UPDATE_SLOT), 0x20021770, max_insns=200_000_000)
     check([x for x in sfs.log if "synths.bin" in x] == [] and s.model(0) == VAP,
           "stock firmware: a WAVE project's synths.bin is never opened, and the slot is VAP")
+
+
+def hsy2_both(wave: int, phase: int) -> bytes:
+    data = bytes([wave, phase, 0, 0])
+    return FILE_MAGIC + data + struct.pack("<I", fnv1a(data))
+
+
+def save_as_checks(ptf: Path) -> None:
+    print("Save As (synths.bin, the firmware's save request 0x60114e34)")
+    r = Rig(ptf)
+    m = r.m
+    fs = FakeFS(m, Path("."))
+    r.configure((VAP, ACD, PERC), (1, 1, 1))
+    m.stub_function(APPLY_RECORDS, lambda mm: 0)
+    image = bytes(m.uc.mem_read(0x60000000, 0x800000))
+    project_hook = bl_target(image, 0x60000000, BL_RECORDS)
+    ph_menu = ram_map(m, ptf, SY8_FIELDS)["ph_menu"] + WHERE["state"]
+    settle = SAVE_DELAY * 2 + 5
+
+    def load(name):
+        fs.set_project(Path("."), name, project_save.WHERE)
+        m.call(project_hook | 1, sr.S, RECORDS, 1, max_insns=50_000_000)
+
+    def tick(n=1):
+        for _ in range(n):
+            m.call(m.r32(PATTERN_UPDATE_SLOT), 0x20021770, max_insns=200_000_000)
+
+    def path(name):
+        return f"{project_save.WHERE}/{name}/synths.bin"
+
+    def get():
+        return r.menu(), m.uc.mem_read(ph_menu, 1)[0]
+
+    def put(wave, phase):
+        m.w8(r.st("menu"), wave)
+        m.w8(ph_menu, phase)
+
+    def writes():
+        return len([x for x in fs.log if "synths.bin mode 3" in x])
+
+    def save(name, settle=settle):
+        return project_save.save(m, tick, name, settle=settle)
+
+    a, b = (1, 5), (2, 4)                   # WAVE replaces ACD, PHASE PERC; FAT and WTFM
+    load("A0")
+    put(*a)
+    fs.set_project(Path("."), "New Project", "")    # as the firmware's new project 0x60117c8c
+    log0 = len(fs.log)
+    tick(settle)
+    check(get() == a and not any("synths" in x for x in fs.log[log0:]),
+          "a new project (\"New Project\", no path): the choices kept, nothing read or written")
+    ok = save("SA1")
+    check(ok and m.cstr(PROJECT_NAME) == "SA1" and get() == a and fs.overlay.get(path("SA1")) == hsy2_both(*a),
+          "its first save (a Save As): the choices kept and written to its folder")
+    ok = save("SA2")
+    check(ok and get() == a and fs.overlay.get(path("SA2")) == hsy2_both(*a)
+          and fs.overlay.get(path("SA1")) == hsy2_both(*a),
+          "Save As from a saved project: the choices kept, written to the new folder, the old file left")
+    fs.put(path("SA3"), hsy2_both(*b))
+    ok = save("SA3")
+    check(ok and get() == a and fs.overlay.get(path("SA3")) == hsy2_both(*a),
+          "Save As over a project that has its own synths.bin: the saved project's choices, written over it")
+    n = writes()
+    ok = save(None)
+    check(ok and m.cstr(PROJECT_NAME) == "SA3" and get() == a and writes() == n,
+          "a plain Save: the same project, the choices kept, nothing written")
+    load("SA1")
+    load("SA3")
+    check(get() == a, "the overwritten project opened again: the saved project's choices")
+    put(0, 0)
+    tick(settle)
+    fs.put(path("SA4"), hsy2_both(*b))
+    ok = save("SA4")
+    check(ok and get() == (0, 0) and fs.overlay.get(path("SA4")) == hsy2_both(0, 0),
+          "Save As with both Off over a project that has its own synths.bin: Off written over it")
+    put(*a)
+    tick(settle)
+    long_name = "L" * 40
+    ok = save(long_name)
+    kept = m.cstr(PROJECT_NAME)
+    check(ok and get() == a and fs.overlay.get(path(kept)) == hsy2_both(*a),
+          f"Save As to a {len(long_name)}-character name (the firmware keeps {len(kept)}): the choices kept and written")
+    fs.put(path("SA5"), hsy2_both(*b))
+    n = writes()
+    save("SA5", settle=0)
+    m.w8(project_save.FM_STATE, 0x0D)       # the save still running
+    tick(settle)
+    check(get() == a and writes() == n and fs.overlay.get(path("SA5")) == hsy2_both(*b),
+          "after a Save As, while the file manager is busy: nothing read or written")
+    m.w8(project_save.FM_STATE, 0)
+    tick()
+    check(get() == a and writes() == n + 1 and fs.overlay.get(path("SA5")) == hsy2_both(*a),
+          "once it is idle: the choices written to the new folder")
+    sizes = fs.read_sizes + fs.write_sizes
+    check(max(sizes) <= 256, f"file reads and writes of at most 256 bytes ({sorted(set(sizes))})")
 
 
 # ---- 9. patch files -----------------------------------------------------------------------
@@ -2782,6 +2885,7 @@ def main() -> int:
         model_list_checks(ptf)
         edit_patch_checks(ptf)
         file_checks(ptf, stock)
+        save_as_checks(ptf)
         patch_file_checks(ptf, stock)
         macro_checks(ptf)
         export_checks(ptf)
@@ -2798,6 +2902,7 @@ def main() -> int:
     model_list_checks(ptf)
     edit_patch_checks(ptf)
     file_checks(ptf, stock)
+    save_as_checks(ptf)
     patch_file_checks(ptf, stock)
     osc_checks(ptf)
     filter_checks(ptf)

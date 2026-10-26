@@ -68,7 +68,7 @@
 #include <stdint.h>
 
 #ifndef SYNTHS_VERSION
-#define SYNTHS_VERSION "sy8"
+#define SYNTHS_VERSION "sy9"
 #endif
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
@@ -91,6 +91,7 @@ CHAIN_WORD(mt_syn_next_list_images);        /* the list control's image items 0x
 CHAIN_WORD(mt_syn_next_patch_label);        /* disp_ctrl_set_text 0x60101d5d (Edit Patch's logo label) */
 CHAIN_WORD(mt_syn_next_patch_load);         /* patch storage +0x0c, load into a patch: 0x60124f39 */
 CHAIN_WORD(mt_syn_next_tiles);              /* the Edit Patch tiles' labels 0x6011d629 */
+CHAIN_WORD(mt_syn_next_save_name);          /* strncpy 0x601673d7 (Save As: the new name) */
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */
 #define FW_SYNTHS           0x200170E8u     /* the synth system S (app + 8) */
@@ -118,6 +119,10 @@ CHAIN_WORD(mt_syn_next_tiles);              /* the Edit Patch tiles' labels 0x60
 #define FW_FM               0x2001E488u     /* file manager object; *FW_FM = FS object */
 #define FW_PROJECT_PATH     ((const uint8_t *)(FW_FM + 0x241u))
 #define FW_PROJECT_NAME     ((const uint8_t *)(FW_FM + 0x340u))
+#define FM_STATE            0x13Du          /* file manager state; 0 or 0x0c when idle */
+#define FM_SUBSTATE         0x13Fu
+#define PATH_MAX_LEN        254u
+#define NAME_MAX_LEN        32u
 #define FW_PROJECT_SETTINGS 0x20028714u     /* Config menu folder "Project Settings" */
 #define FW_MENU_FOLDER      0x60118395u     /* (node, parent, label, capacity) */
 #define FW_MENU_ITEM        0x601183E9u     /* (node, parent, label, help, type, descriptor) */
@@ -144,6 +149,7 @@ typedef void *(*malloc_fn)(uint32_t size);
 typedef void (*delete_fn)(void *p, uint32_t size);
 typedef int (*snprintf_fn)(char *buf, uint32_t size, const char *fmt, ...);
 typedef void (*set_model_fn)(void *s, uint32_t slot, uint32_t id);
+typedef char *(*strncpy_fn)(char *dst, const char *src, uint32_t n);
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
@@ -1628,15 +1634,39 @@ static uint32_t fnv1a(uint32_t h, uint32_t byte)
     return (h ^ byte) * 16777619u;
 }
 
+/* At most the lengths the firmware keeps: the Save As request copies the name before it
+ * writes its terminating 0. */
 static uint32_t project_session(void)
 {
     uint32_t h = 2166136261u;
-    for (uint32_t i = 0; i < 64 && FW_PROJECT_NAME[i]; i++)
+    for (uint32_t i = 0; i < NAME_MAX_LEN && FW_PROJECT_NAME[i]; i++)
         h = fnv1a(h, FW_PROJECT_NAME[i]);
     h = fnv1a(h, 0);
-    for (uint32_t i = 0; i < 255 && FW_PROJECT_PATH[i]; i++)
+    for (uint32_t i = 0; i < PATH_MAX_LEN && FW_PROJECT_PATH[i]; i++)
         h = fnv1a(h, FW_PROJECT_PATH[i]);
     return fnv1a(h, 0) | 1;                 /* never 0 */
+}
+
+/* A project with no folder yet: no name (while Workspace loads), or the new project
+ * 0x60117c8c makes, "New Project" with no path. */
+static int project_unsaved(void)
+{
+    static const char fresh[] = "New Project";
+    if (!FW_PROJECT_NAME[0])
+        return 1;
+    if (FW_PROJECT_PATH[0])
+        return 0;
+    for (uint32_t i = 0; i < sizeof fresh; i++)
+        if (FW_PROJECT_NAME[i] != (uint8_t)fresh[i])
+            return 0;
+    return 1;
+}
+
+static int file_manager_idle(void)
+{
+    const volatile uint8_t *fm = (const volatile uint8_t *)FW_FM;
+    uint8_t state = fm[FM_STATE];
+    return (state == 0 || state == 0x0C) && (fm[FM_SUBSTATE] & 0xFD) == 0;
 }
 
 static uint32_t data_sum(const uint8_t *v)
@@ -1659,7 +1689,7 @@ static uint32_t get32(const uint8_t *b)
 
 static int settings_path(char *path, uint32_t size)
 {
-    if (!FW_PROJECT_NAME[0])
+    if (project_unsaved())
         return 0;
     int n = ((snprintf_fn)FW_SNPRINTF)(path, size, "%s/%s/synths.bin",
                                        (const char *)FW_PROJECT_PATH, (const char *)FW_PROJECT_NAME);
@@ -1728,7 +1758,7 @@ void mt_syn_project_records(void *s, void *records, uint32_t reset)
 {
     sy_init_if_needed();
     SY->session = project_session();
-    SY->unnamed = (uint8_t)!FW_PROJECT_NAME[0];
+    SY->unnamed = (uint8_t)project_unsaved();
     SY->wait = SAVE_DELAY;
     if (!settings_load()) {
         SY->menu = SY->saved = 0;           /* no file: Off, and nothing to write */
@@ -1742,16 +1772,16 @@ void mt_syn_project_records(void *s, void *records, uint32_t reset)
 }
 
 /* Called from the Pattern and Config screens' update methods (where the stock code
- * does its own file I/O): the choice saved a moment after it changes. A project that
- * changes without being loaded (Save As, a new name) keeps the choice and gets the file;
- * one that is loaded went through mt_syn_project_records. */
+ * does its own file I/O): the choice saved a moment after it changes, once the file
+ * manager is idle. A Save As keeps the choice and writes it to the new folder
+ * (mt_syn_save_name); a project that is loaded went through mt_syn_project_records. */
 static void settings_tick(void)
 {
     sy_init_if_needed();
     if (!*(void **)FW_FM)
         return;
     uint32_t session = project_session();
-    int unnamed = !FW_PROJECT_NAME[0];
+    int unnamed = project_unsaved();
     if (SY->menu > MODELS)
         SY->menu = 0;
     if (SY->ph_menu > MODELS)
@@ -1761,7 +1791,7 @@ static void settings_tick(void)
         SY->unnamed = (uint8_t)unnamed;
         SY->wait = SAVE_DELAY;
         if (unnamed || !settings_load()) {  /* a file there wins; it is never overwritten unread */
-            SY->saved = SY->ph_saved = 0;   /* Save As, a new project: the choices go with it; */
+            SY->saved = SY->ph_saved = 0;   /* a new project, a name without a file: the choices go with it; */
             SY->saved_valid = 1;            /* Off needs no file */
         }
         return;
@@ -1774,6 +1804,8 @@ static void settings_tick(void)
         SY->wait--;
         return;
     }
+    if (!file_manager_idle())               /* after a Save As: the new folder made first */
+        return;
     SY->wait = SAVE_DELAY;
     settings_save();
 }
@@ -1799,6 +1831,23 @@ void mt_syn_config_update(void *screen, void *a1, void *a2, void *a3)
     menu_refresh();
     sweep();
     ((screen_update_fn)mt_syn_next_config_update)(screen, a1, a2, a3);
+}
+
+/* 0x60114eaa in the save request 0x60114e34: "bl strncpy(fm + 0x340, name, 0x21)",
+ * run only for Save As, after the new path is copied. The choices belong to the new
+ * session at once and are marked unsaved, so the next tick doesn't read the folder's
+ * file (an overwritten project's synths.bin) and writes them there instead. (Any
+ * screen: the request comes from the project screen, whose update isn't hooked.) The
+ * session field takes the mark, as synths' RAM block has no room for another. */
+char *mt_syn_save_name(char *dst, const char *src, uint32_t n)
+{
+    char *r = ((strncpy_fn)mt_syn_next_save_name)(dst, src, n);
+    sy_init_if_needed();
+    SY->session = project_session();
+    SY->unnamed = (uint8_t)project_unsaved();
+    SY->saved_valid = 0;
+    SY->wait = SAVE_DELAY;
+    return r;
 }
 
 /* ---- where the state is, for the emulator tests (tools/emu/test_synths.py): a marker,

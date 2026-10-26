@@ -40,7 +40,7 @@ link() {                               # link <linker script> <elf> <map>
         -Wl,--undefined=mt_syn_last_item -Wl,--undefined=mt_syn_pattern_update -Wl,--undefined=mt_syn_config_update \
         -Wl,--undefined=mt_version_fmt -Wl,--undefined=mt_syn_ram_map -Wl,--undefined=mt_syn_registry \
         -Wl,--undefined=mt_syn_project_records -Wl,--undefined=mt_syn_list_data -Wl,--undefined=mt_syn_list_images \
-        -Wl,--undefined=mt_syn_patch_label -Wl,--undefined=mt_syn_patch_load -Wl,--undefined=mt_syn_tiles \
+        -Wl,--undefined=mt_syn_patch_label -Wl,--undefined=mt_syn_patch_load -Wl,--undefined=mt_syn_tiles -Wl,--undefined=mt_syn_save_name \
         -Wl,-Map="$3" "$OUT/synths.o" -o "$2"
 }
 link "$HERE/link.ld" "$OUT/synths.elf" "$OUT/synths.map"

@@ -144,6 +144,8 @@
     "1b4585815fa0c66b5689135375f2da8e7bfec57cce6f5cf2e62592f4c4765626": "humanize (1.2.0-hz9)",
     "598dc01fb55ec0549c9809d2a14702e591354f29a07c0ad7d7401d405171391e": "interpolate (1.2.0-ip6)",
     "f7ec780456867eac7a8cb469d6bb929949ef7a334ccaeb1c0c645863c8657a5a": "masterfx (1.2.0-mf5)",
-    "ac0edf2f1f2d3077e3c9f95babd136f065ca40ec18080e23d8cab1f496f595c9": "all twelve mods (1.2.0-MTS)"
+    "ac0edf2f1f2d3077e3c9f95babd136f065ca40ec18080e23d8cab1f496f595c9": "all twelve mods with synths sy8 (1.2.0-MTS)",
+    "1c3dc6dad3f0abbe1fda5cc9837a55a28c63a088cd40f238fba1776e0d1e52fc": "synths (1.2.0-sy9)",
+    "b927f87b5584f6576f5d5f09d2481bbeb9203328a690380843d68bca93aef933": "all twelve mods (1.2.0-MTW)"
   }
 }
