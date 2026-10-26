@@ -27,6 +27,9 @@ CFLAGS=(-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -Os -std=c11
         -mno-unaligned-access -ffreestanding -fno-builtin -fno-tree-loop-distribute-patterns -fno-common
         -ffunction-sections -Wall -Wextra -Werror ${PM_DEFS:-})
 "$ARM_GCC_BIN/arm-none-eabi-gcc" "${CFLAGS[@]}" -c "$HERE/polymeter.c" -o "$OUT/polymeter.o"
+REC_HOOKS=()                           # the recording hooks: 8 veneers, 18 note-off calls
+for i in $(seq 1 8); do REC_HOOKS+=(-Wl,--undefined=mt_pm_rec_note$i); done
+for i in $(seq 1 18); do REC_HOOKS+=(-Wl,--undefined=mt_pm_rec_off$i); done
 link() {                               # link <linker script> <elf> <map>
     "$ARM_GCC_BIN/arm-none-eabi-gcc" -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 \
         -nostdlib -nostartfiles -T "$1" -Wl,--gc-sections \
@@ -35,7 +38,7 @@ link() {                               # link <linker script> <elf> <map>
         -Wl,--undefined=mt_pm_colors -Wl,--undefined=mt_pm_data -Wl,--undefined=mt_pm_jog \
         -Wl,--undefined=mt_pm_cell_note -Wl,--undefined=mt_pm_cell_instr3 -Wl,--undefined=mt_pm_cell_instr \
         -Wl,--undefined=mt_pm_cell_fx1 -Wl,--undefined=mt_pm_cell_fx2 \
-        -Wl,--undefined=mt_version_fmt \
+        "${REC_HOOKS[@]}" -Wl,--undefined=mt_version_fmt \
         -Wl,-Map="$3" "$OUT/polymeter.o" -o "$2"
 }
 link "$HERE/link.ld" "$OUT/polymeter.elf" "$OUT/polymeter.map"

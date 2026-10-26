@@ -16,7 +16,8 @@ built unless asked. The web patcher choice (section 8) is still open. Phase 1 (R
 confirmations) is done: its results are in section 9, in FINDINGS section 29, and below.
 Phase 2 (the playback core, `patch/polymeter`, `pm1`) and phase 3 (the Trk Len button
 and the encoder) are built, emulator-tested and committed (section 9). Phase 4 (the
-grid) is built and emulator-tested (section 9). Not tested on hardware.
+grid) and phase 5 (live recording, with the patcher's tail calls) are built and
+emulator-tested (section 9). Not tested on hardware.
 
 ## 1. Verdict
 
@@ -620,6 +621,55 @@ says go.
   - MIDI-in recording from the interrupt path;
   - a track without a length records exactly as stock;
   - the dimmed rows keep their old contents.
+
+**Phase 5 results (2026-10-26).**
+- **The patcher's tail calls.** `"tail": true` on a branch writes a `b.w` (same
+  encoding as a BL with bit 14 clear), chained as a BL is. A site's old bytes must be a
+  BL, or a `b.w` with `"tail"`; `"tail"` with `"replaces"` and a `"tail"` other than
+  true are refused. The same in `web/patcher.js`. `tools/test_layout.py` checks every
+  branch site keeps its form, chains a copy of polymeter on its two `b.w` sites, and
+  checks the four refusals; `tools/test_web_patcher.py` checks the web patcher makes the
+  same bytes (polymeter alone and chained) and refuses the same four.
+- **Hooks.** The 8 veneer words of `seq_record_live_note` (`words`, chained) and the 18
+  calls of `seq_record_note_off_q` (16 `bl`, 2 `"tail"`), one hook and chain word each,
+  all through one wrapper.
+- **The wrapper.** When no track of the pattern has a length it calls straight through.
+  Otherwise, with the audio interrupt masked, each short track's rows position ..
+  position + 3 that lie past E get their step mod E's contents, and their own contents
+  are kept on the stack; then it calls the chain with the interrupt as the caller left
+  it; then, masked again, a row stock changed goes to its step mod E and each dimmed
+  row gets its own contents back.
+  - **Changed from section 4.3, found while testing** (FINDINGS section 29): stock's
+    recorders mask and enable the audio interrupt themselves, so it can't stay masked
+    across the call. The wrapper masks only its own copying. Since the position can then
+    move on by one during the call, it maps 4 rows, not 2.
+  - Stock chooses the track by "no note sounding", not by an empty step, so the map-in
+    matters mainly for note-offs: stock writes one only onto an empty row, and the
+    map-in makes that the row's real step.
+- **Code** 3,561 bytes (1,676 more); RAM unchanged (4,112 bytes); its copies take 832 bytes
+  of stack while recording onto short tracks (the stack has 20 KB, at most 8 KB of it
+  seen in use).
+- **Tests** (`test_polymeter.py` 17), against stock recording the same hits onto the
+  pattern with each short track's first E steps written out to the end:
+  - early and late hits; a late hit on E's last step and on the pattern's last step
+    (both go to step 0); a hit while a note sounds (goes to the next track);
+  - note-offs in the same step and two steps later, and onto a step holding a note
+    (kept);
+  - length 1; 128 steps with length 100; two short tracks; a track without a length and
+    no lengths at all (as stock, the interrupt untouched);
+  - every veneer and note-off site (2 tail calls) gives the same result;
+  - the patch's 54 writes to the pattern all happen with the interrupt masked; stock is
+    entered with the interrupt as the caller left it, enabled or masked.
+
+  A variant built without the map-in fails 11 of the 12 cases, so the oracle catches it.
+- **Not covered by the emulator:** the audio interrupt really arriving during the call
+  (the emulator runs no interrupts), and MIDI-in recording from inside the interrupt;
+  the "masked by the caller" case stands in for that path.
+- **Results:** pm1 0 failures (137 checks); the layout test 0 failures; the web
+  patcher harness 0 failures (every selection rerun, 33 min); the six page-3
+  combinations and patch/all + polymeter in both orders pass every patch's test except
+  legato's known whole-bundle cost check (still 2,416: recording isn't on the
+  sequencer's tick).
 
 **Phase 6: the file.**
 - `fakefs` tests, as slicethru's and swing's:

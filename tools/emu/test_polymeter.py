@@ -1,4 +1,5 @@
-"""Check the polymeter patch (a length per track): playback, the Trk Len button and the grid.
+"""Check the polymeter patch (a length per track): playback, the Trk Len button, the grid and
+live recording.
 
   python tools/emu/test_polymeter.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf>
 
@@ -75,6 +76,25 @@ manager, the stock page-3 bind and label code, and the display calls recorded:
    views (8 tracks of one column), a 3-character instrument text (its own call site),
    and a table without lengths, not set up, or set for another pattern (all stock).
 16. The encoder held on Trk Len also redraws the grid control.
+17. Live recording during play (settings+0xce 2, the Pattern screen current, seq+0x2b
+   set), pads' note-on through seq_record_live_note's veneers and note-off through the
+   hooked calls of seq_record_note_off_q. The oracle: stock firmware with each short
+   track written out to the pattern's end (step s holding step s mod E), recording the
+   same hits at the same ticks. Every row stock changes on a short track must be
+   changed at its step mod E in the patched pattern, the dimmed rows must keep their
+   own contents, every other track must match stock row for row, and the tracks'
+   state and the MIDI sent must be the same. The dimmed rows hold notes where the real
+   steps are empty and the other way round, so stock's choice of track (the first
+   with no note sounding) and the note-off's (only onto an empty step) are checked
+   against the real steps. Covers: early and late hits
+   on dimmed rows, a late hit on E's last step (goes to step 0), the pattern's last
+   step, a hit while a note sounds (the next track), note-offs (same step, steps later,
+   and onto a step holding a note: kept), length 1, 128 steps, two short
+   tracks, a track without a length (as stock), and no lengths at all (the whole
+   pattern as stock). Every one of the 8 veneers and 18 note-off sites gives the same
+   result as the first. The patch's own writes to the pattern happen with the audio
+   interrupt (NVIC bit 0) masked, and stock records with the interrupt as the caller
+   left it (the recorders mask and enable it themselves).
 """
 from __future__ import annotations
 
@@ -83,8 +103,8 @@ import struct
 import sys
 from pathlib import Path
 
-from unicorn import UC_HOOK_CODE
-from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_SP
+from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_WRITE
+from unicorn.arm_const import UC_ARM_REG_PC, UC_ARM_REG_R0, UC_ARM_REG_SP
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import machine as mach  # noqa: E402
@@ -136,6 +156,14 @@ GRID_DATA = PATVIEW + 0x14              # row texts: 0x11d a track, 0x13 a row
 ED_HIGHLIGHT, ED_LAYOUT, ED_GRID_CTRL, ED_FIRST_TRACK = 0x1F4, 0x1FF, 0x29B, 0x1EC
 MUTES = PROJECT + 0x6E0
 
+REC_VENEERS = [0x600AB698, 0x600C73C8, 0x600CD550, 0x600D4B30, 0x600F1920, 0x600F54E8, 0x600FAD80, 0x6011A0F8]
+REC_OFF_SITES = [0x600AB514, 0x600C6AFC, 0x600C6B78, 0x600C6CDE, 0x600C6ECE, 0x600C6F96, 0x600C71EE, 0x600C7348,
+                 0x600CD4A6, 0x600D4792, 0x600D491E, 0x600D4ADC, 0x600F0396, 0x600F1904, 0x600F57AA, 0x6011A0A8,
+                 0x600F5500, 0x600F9418]
+REC_LIVE, REC_OFF = 0x15C8, 0x600AC700  # the stock recorders
+SCREEN_MANAGER = 0x200207C0             # +8: the current screen
+NVIC_ISER, NVIC_ICER = 0xE000E100, 0xE000E180
+PADS = 0x14                             # the recorders' source: the pads
 
 failures: list[str] = []
 
@@ -863,6 +891,208 @@ def grid_checks(ptf: Path, stock: Path) -> None:
     r.button(0)
 
 
+def branch_target(image: bytes, at: int) -> int:
+    """Where a Thumb-2 BL or B.W goes"""
+    hw1, hw2 = struct.unpack_from("<HH", image, at - 0x60030000)
+    s, j1, j2 = hw1 >> 10 & 1, hw2 >> 13 & 1, hw2 >> 11 & 1
+    off = s << 24 | (~(j1 ^ s) & 1) << 23 | (~(j2 ^ s) & 1) << 22 | (hw1 & 0x3FF) << 12 | (hw2 & 0x7FF) << 1
+    return at + 4 + off - (1 << 25 if s else 0)
+
+
+class RecRig(Rig):
+    """Rig, recording during play: notes from the pads through the recorders' sites"""
+
+    def __init__(self, ptf: Path, last: int, table: int | None = None):
+        super().__init__(ptf, last, table)
+        m = self.m
+        m.w8(st.SETTINGS + 0xCE, 2)
+        m.w32(SCREEN_MANAGER + 8, PATVIEW)
+        m.w8(ED + ED_RECORD, 1)
+        self.irq: list[str] = []
+
+        def icer(uc, access, a, size, value, user):
+            if value & 1:
+                m.w32(NVIC_ISER, m.r32(NVIC_ISER) & ~1)
+        m.uc.hook_add(UC_HOOK_MEM_WRITE, icer, begin=NVIC_ICER, end=NVIC_ICER + 3)
+        for at in (REC_LIVE, REC_OFF):
+            m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: self.irq.append("off" if m.r32(NVIC_ISER) & 1 == 0 else "on"),
+                          begin=at, end=at)
+        m.w32(NVIC_ISER, 1)
+
+    def record(self) -> None:
+        self.m.w8(SEQ + 0x2B, 1)
+
+    def press(self, note: int, veneer: int = REC_VENEERS[1]) -> None:
+        self.m.call(veneer, SEQ, PADS, note, 0x7F, 0, max_insns=20_000_000)
+
+    def release(self, note: int, site: int = REC_OFF_SITES[3]) -> None:
+        self.m.call(branch_target(self.m.image, site), SEQ, PADS, note, 0, 0, max_insns=20_000_000)
+
+    def rows(self, t: int) -> list[bytes]:
+        b = bytes(self.m.uc.mem_read(self.cur + 0x1D + 0x301 * t, 6 * (self.last + 1)))
+        return [b[6 * s:6 * s + 6] for s in range(self.last + 1)]
+
+    def tracks(self) -> bytes:
+        return bytes(self.m.uc.mem_read(SEQ + 0x68, 0x68 * 16))
+
+
+def rec_case(ptf: Path, stock: Path, table: int, what: str, last: int, lengths: dict[int, int],
+             real: dict[int, dict[int, int]], actions, lands=None) -> RecRig:
+    """lengths {track: E}; real {track: {step: note}} (a short track's steps below E);
+    actions [(tick, "press" or "release", note)], played from the step before the first;
+    the oracle holds while no later action reads a row an earlier one changed through
+    another row of the same step (so length 1 has no note-off case); lands (track, row, note): where the
+    patched pattern must get the note. The dimmed rows hold notes 100 + s where the real
+    step is empty and nothing where it holds one."""
+    rigs = []
+    for path, patched in ((ptf, True), (stock, False)):
+        r = RecRig(path, last, table if patched else None)
+        for t in range(16):
+            e = lengths.get(t, last + 1)
+            steps = real.get(t, {})
+            for s in range(last + 1):
+                if patched and s >= e:
+                    note = None if (s % e) in steps else 100 + s % 20
+                else:
+                    note = steps.get(s % e)
+                if note is not None:
+                    r.put(t, s, note, bufs=(r.cur,))
+            if patched and t in lengths:
+                r.length(t, e)
+        begin = max(0, min(tick for tick, _, _ in actions) // STEP - 1)
+        r.start(begin)
+        r.record()
+        before = [r.rows(t) for t in range(16)]
+        now = STEP * begin
+        for tick, kind, note in actions:
+            r.run(tick - now)
+            now = tick
+            r.press(note) if kind == "press" else r.release(note)
+        rigs.append((r, before))
+    (p, pb), (s, sb) = rigs
+    ok, why = True, []
+    wrote = 0
+    for t in range(16):
+        pa, sa = p.rows(t), s.rows(t)
+        if t not in lengths:
+            if pa != sa:
+                ok = False
+                why.append(f"track {t + 1} differs from stock")
+            continue
+        e = lengths[t]
+        changed = {x: sa[x] for x in range(last + 1) if sa[x] != sb[t][x]}
+        for r_ in range(e):
+            hits = [x for x in changed if x % e == r_]
+            if len(hits) > 1:
+                why.append(f"track {t + 1}: stock changed rows {hits} (one step of the loop): the case is ambiguous")
+                ok = False
+            want = changed[hits[0]] if hits else pb[t][r_]
+            wrote += bool(hits)
+            if pa[r_] != want:
+                ok = False
+                why.append(f"track {t + 1} step {r_}: {pa[r_].hex()}, stock wrote {want.hex()}")
+        if pa[e:] != pb[t][e:]:
+            ok = False
+            why.append(f"track {t + 1}: a dimmed row changed")
+    same_state = p.tracks() == s.tracks() and p.events() == s.events()
+    landed = lands is None or p.rows(lands[0])[lands[1]][0] == lands[2] & 0xFF
+    check(ok and same_state and landed and (wrote > 0 or lands is None or lands[0] not in lengths),
+          f"{what}: {wrote} row(s) recorded onto short tracks as stock records the written-out track"
+          + ("" if same_state else " (track state or MIDI differs)")
+          + ("" if landed else f" (expected note {lands[2]} at track {lands[0] + 1} step {lands[1]})")
+          + ("" if not why else ": " + "; ".join(why[:3])))
+    return p
+
+
+def record_checks(ptf: Path, stock: Path) -> None:
+    print("Live recording onto a short track's steps")
+    table = patch_ram(ptf, "polymeter")
+    real = {0: {2: 42}}                         # track 1, length 6: a note on step 2 only
+    at = lambda step, micro=8: STEP * step + 12 * micro
+    rec_case(ptf, stock, table, "early hit on step 11 (row 10 -> step 4)", 15, {0: 6}, real,
+             [(at(10), "press", 60)], (0, 4, 60))
+    rec_case(ptf, stock, table, "early hit on step 10 while step 3's note sounds (-> track 2, row 9)", 15, {0: 6}, real,
+             [(at(9), "press", 61)], (1, 9, 61))
+    rec_case(ptf, stock, table, "late hit on step 6, E's last (-> step 0)", 15, {0: 6}, real,
+             [(at(5, 40), "press", 62)], (0, 0, 62))
+    rec_case(ptf, stock, table, "late hit on the pattern's last step (-> step 0)", 15, {0: 6}, {0: {}},
+             [(at(15, 40), "press", 63)], (0, 0, 63))
+    rec_case(ptf, stock, table, "note-off in the same step (row 11 -> step 5)", 15, {0: 6}, real,
+             [(at(10), "press", 60), (at(10, 30), "release", 60)], (0, 5, -4))
+    rec_case(ptf, stock, table, "note-off two steps later (row 12 -> step 0)", 15, {0: 6}, real,
+             [(at(10), "press", 60), (at(12, 10), "release", 60)], (0, 0, -4))
+    rec_case(ptf, stock, table, "note-off onto a step holding a note (row 12 -> step 0, kept)", 15, {0: 6},
+             {0: {0: 40, 2: 42}}, [(at(10), "press", 60), (at(12, 10), "release", 60)], (0, 0, 40))
+    rec_case(ptf, stock, table, "length 1: a hit on step 8", 15, {0: 1}, {0: {}},
+             [(at(7), "press", 64)], (0, 0, 64))
+    rec_case(ptf, stock, table, "128 steps, length 100: a hit on step 111 (-> step 10)", 127, {0: 100}, real,
+             [(at(110), "press", 65)], (0, 10, 65))
+    rec_case(ptf, stock, table, "two short tracks (6, 5): track 1's note sounds, track 2 gets row 9 (-> step 4)",
+             15, {0: 6, 1: 5}, {0: {2: 42}, 1: {}}, [(at(9), "press", 66)], (1, 4, 66))
+    rec_case(ptf, stock, table, "a track without a length: as stock", 15, {1: 6}, {1: {}},
+             [(at(9), "press", 67), (at(10, 5), "release", 67)], (0, 9, 67))
+    p = rec_case(ptf, stock, table, "no lengths: as stock", 15, {}, {},
+                 [(at(9), "press", 68), (at(10, 5), "release", 68)], (0, 9, 68))
+    check(p.irq == ["on", "on"], f"no lengths: the audio interrupt isn't touched ({p.irq})")
+
+    print("Every recording site, and the audio interrupt")
+    r = RecRig(ptf, 15, table)
+    r.put(0, 2, 42, bufs=(r.cur,))
+    r.length(0, 6)
+    r.start(9)
+    r.record()
+    r.run(at(10) - at(9, 0))
+    m = r.m
+    lo, hi = patch_code(ptf, "polymeter")
+    ours: list[int] = []                        # ISER bit 0 at each of the patch's writes to the pattern
+
+    def write(uc, access, a, size, value, user):
+        if lo <= uc.reg_read(UC_ARM_REG_PC) < hi:
+            ours.append(m.r32(NVIC_ISER) & 1)
+    m.uc.hook_add(UC_HOOK_MEM_WRITE, write, begin=r.cur, end=r.cur + 0x3030)
+    regions = [(0x20000000, 0x58000), (0x20200000, 0x8000), (r.cur, 0x3030)]
+    snap = [bytes(m.uc.mem_read(a, n)) for a, n in regions]
+
+    def restore(state):
+        for (a, n), b in zip(regions, state):
+            m.write(a, b)
+    results = []
+    for v in REC_VENEERS:
+        restore(snap)
+        r.irq.clear()
+        ours.clear()
+        r.press(70, v)
+        results.append((r.rows(0)[4], r.irq[:], ours[:], m.r32(NVIC_ISER) & 1))
+    first = results[0]
+    check(all(x == first for x in results) and first[0][0] == 70,
+          "all 8 veneers record the hit on step 5 (row 10)")
+    check(first[1] == ["on"] and first[2] and not any(first[2]) and first[3] == 1,
+          f"the patch's {len(first[2])} writes to the pattern happen with the audio interrupt masked; stock records "
+          f"with it as the caller left it (enabled), and it is enabled after")
+    restore(snap)
+    r.press(70)
+    after_press = [bytes(m.uc.mem_read(a, n)) for a, n in regions]
+    offs = []
+    for site in REC_OFF_SITES:
+        restore(after_press)
+        r.irq.clear()
+        ours.clear()
+        r.release(70, site)
+        offs.append((r.rows(0)[5], r.irq[:], ours[:], m.r32(NVIC_ISER) & 1))
+    first = offs[0]
+    check(all(x == first for x in offs) and first[0][0] == 0xFC and first[1] == ["on"] and first[2]
+          and not any(first[2]) and first[3] == 1,
+          "all 18 note-off sites (2 of them tail calls) put the note-off on step 6 (row 11), the patch's "
+          "writes masked, stock entered with the interrupt enabled")
+    restore(after_press)
+    m.w32(NVIC_ISER, 0)
+    r.irq.clear()
+    ours.clear()
+    r.release(70)
+    check(r.irq == ["off"] and ours and not any(ours),
+          f"with the audio interrupt masked by the caller, stock is entered with it still masked ({r.irq})")
+
+
 def main() -> int:
     ptf, stock = Path(sys.argv[1]), Path(sys.argv[2])
     site_checks(ptf)
@@ -879,6 +1109,7 @@ def main() -> int:
     hold_checks(ptf)
     stock_jog_checks(ptf, stock)
     grid_checks(ptf, stock)
+    record_checks(ptf, stock)
     print(f"{len(failures)} failure(s)")
     for f in failures:
         print("  " + f)

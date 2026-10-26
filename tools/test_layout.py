@@ -31,7 +31,8 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
     patch/all has it last),
   - polymeter (ITCM hooks, 4 KB of RAM) alone, after patch/all's patches, and first with
     them after it in reverse order; and with page 3's other buttons (humanize,
-    copypattern, both) in both orders,
+    copypattern, both) in both orders, and with a copy of it that hooks only its two
+    tail calls (b.w sites, chained by both),
   - a copy of slicethru with a non-BL site ("replaces": "insns", the two instructions
     at 0x60035522), alone and in patch/all's place for slicethru; the site's 4 bytes
     are a BL to the hook and the bytes around it are stock,
@@ -39,7 +40,9 @@ and checks that a bundle with ramdiag (standalone) is refused, and so is one whe
 shared site isn't chained by both patches, one where two patches pass different
 registers at one ITCM site, a "late_ram" word that holds no size, a non-BL site with
 "next" or with a "replaces" other than "insns", a second patch on a non-BL site (with
-"replaces", or chaining it with "next"), and a site overlapping another.
+"replaces", or chaining it with "next"), a site overlapping another, a tail call with
+"replaces" or with "tail" other than true, "tail" on a BL site, and a b.w site without
+"tail".
 For each output it reads the image back and its .map.json, and checks:
   - the patches sit in the listed order, each right after the one before (16-byte
     aligned), or at its fixed base; the gaps are 0xFF;
@@ -52,6 +55,7 @@ For each output it reads the image back and its .map.json, and checks:
   - each chain word ("next") holds what its site pointed to before that patch: the
     stock target or the hook of the patch before it;
   - every hooked site (BL or word) points at the hook of the last patch that hooks it;
+    branch sites are BLs, but tail calls ("tail"), which stay b.w;
   - ITCM hooks: each hooked ITCM BL (in the ITCM image in flash) goes to its stub at
     the start of the ITCM tail, the stub moves the named registers and jumps to the
     last patch's hook, the stubs' bytes follow the last patch (16-byte aligned, 0xFF
@@ -74,7 +78,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-from patch_ptf import RAM_DEFAULT_ORDER, RAM_REGIONS, bl_target, load_rel, load_symbols, thumb_bl  # noqa: E402
+from patch_ptf import (RAM_DEFAULT_ORDER, RAM_REGIONS, bl_target, branch_form, load_rel, load_symbols,  # noqa: E402
+                       thumb_bl)
 from ptf import read_ptf  # noqa: E402
 
 MT0_SHA = "f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff"
@@ -127,6 +132,7 @@ def verify(label: str, out: Path, specs: list[Path], version: str | None, stock:
     end = STOCK_END
     ram_blocks = []
     hooked: dict[int, tuple[str, int, str]] = {}    # site -> (kind, what it points to, patch)
+    forms: dict[int, str] = {}                      # branch site -> "bl", or "b.w" for a tail call
     itcm: dict[int, tuple[int, tuple]] = {}         # ITCM site -> (last hook, registers passed)
     for sp in specs:
         p = patch_files(sp)
@@ -173,6 +179,8 @@ def verify(label: str, out: Path, specs: list[Path], version: str | None, stock:
         for kind, hook in [("bl", br) for br in spec["branches"]] + \
                 [("word", w) for w in spec.get("words", []) if not (version and w.get("version"))]:
             at = int(hook["at"], 16)
+            if kind == "bl":
+                forms[at] = "b.w" if hook.get("tail") else "bl"
             if at in hooked:
                 before = hooked[at][1]
             elif kind == "bl":
@@ -202,6 +210,9 @@ def verify(label: str, out: Path, specs: list[Path], version: str | None, stock:
                                            patch_files(sp)["spec"]["branches"] + patch_files(sp)["spec"].get("words", [])
                                            if int(h["at"], 16) == at) > 1)
     check(sites_ok, f"all {len(hooked)} hooked sites point at the last patch's hook ({shared} shared)")
+    tails = sum(1 for f in forms.values() if f == "b.w")
+    check(all(branch_form(img[at - base0:at - base0 + 4]) == f for at, f in forms.items()),
+          f"the {len(forms)} branch sites keep their form: BL, or b.w for the {tails} tail call(s)")
     ram_blocks.sort()
     check(all(a[1] <= b[0] for a, b in zip(ram_blocks, ram_blocks[1:])), "no two patches' RAM overlaps")
     entry = struct.unpack_from("<3I", img, STUB_ENTRY - base0)
@@ -365,6 +376,23 @@ def main() -> int:
         spec_path.write_text(json.dumps(dict(rev, name=name, include=[str(x) for x in specs], version=version),
                                         indent=2))
         pm_page3[version] = (name, spec_path, specs)
+    pm_spec = json.loads(pm.read_text())
+    pm_files = {k: str((pm.parent / pm_spec[k]).resolve())
+                for k in ("bin", "sym", "rel", "prebuilt_bin", "prebuilt_sym", "prebuilt_rel")}
+    pm_tails = [br for br in pm_spec["branches"] if br.get("tail")]
+    pm_bl = next(br for br in pm_spec["branches"] if "next" in br and not br.get("tail"))
+
+    def pm_copy(name: str, branches: list[dict]) -> Path:
+        """polymeter hooking only `branches`."""
+        path = outdir / f"{name}.json"
+        path.write_text(json.dumps(dict(pm_spec, name=name, branches=branches, words=[], itcm_branches=[],
+                                        **pm_files), indent=2))
+        return path.resolve()
+
+    pm_tail_chain = outdir / "polymeter-tail-chain.json"
+    pm_tail_chain.write_text(json.dumps(dict(rev, name="polymeter-tail-chain",
+                                             include=[str(pm), str(pm_copy("polymeter-tails", pm_tails))],
+                                             version="PTC"), indent=2))
     bt_spec = json.loads(bt.read_text())
     bt_files = {k: str((bt.parent / bt_spec[k]).resolve())
                 for k in ("bin", "sym", "rel", "prebuilt_bin", "prebuilt_sym", "prebuilt_rel")}
@@ -441,6 +469,8 @@ def main() -> int:
             ("polymeter, then patch/all's patches reversed", all_pm_rev_spec, all_pm_list[::-1], "PMR", None),
             *[(f"page 3's buttons: {name}", spec_path, specs, version, None)
               for version, (name, spec_path, specs) in pm_page3.items()],
+            ("chained tail calls: polymeter, then a copy on its two b.w sites", pm_tail_chain,
+             [pm, outdir / "polymeter-tails.json"], "PTC", None),
             ("a non-BL site: slicethru with the two instructions at 0x60035522", bt_ins, [bt_ins], None, None),
             ("a non-BL site in patch/all: the slicethru copy in slicethru's place", all_ins_spec, all_ins_list,
              "INS", None)):
@@ -528,6 +558,19 @@ def main() -> int:
                                            indent=2))
         r = subprocess.run([sys.executable, "-I", str(ROOT / "tools" / "patch_ptf.py"), str(stock), str(bad_spec),
                             str(outdir / "insns-bad.ptf")], capture_output=True, text=True)
+        check(r.returncode != 0 and refusal in (r.stdout + r.stderr), f"refused: {what}")
+    tail = pm_tails[0]
+    for what, branch, refusal in (
+            ("a tail call that replaces instructions",
+             dict({k: v for k, v in tail.items() if k != "next"}, replaces="insns"), "can't be a tail call"),
+            ("\"tail\" other than true", dict(tail, tail="yes"), "\"tail\" takes true"),
+            ("\"tail\" on a BL site", dict(pm_bl, tail=True), "is not a b.w"),
+            ("a b.w site without \"tail\"", {k: v for k, v in tail.items() if k != "tail"},
+             "a b.w site takes \"tail\": true")):
+        print(what)
+        r = subprocess.run([sys.executable, "-I", str(ROOT / "tools" / "patch_ptf.py"), str(stock),
+                            str(pm_copy("polymeter-bad", [branch])), str(outdir / "polymeter-bad.ptf")],
+                           capture_output=True, text=True)
         check(r.returncode != 0 and refusal in (r.stdout + r.stderr), f"refused: {what}")
     print(f"outputs in {outdir}")
     print(f"{len(failures)} failure(s)")

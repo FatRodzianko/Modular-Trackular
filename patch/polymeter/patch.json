@@ -79,6 +79,134 @@
       "to": "mt_pm_cell_fx2",
       "next": "mt_pm_next_cell_fx2",
       "note": "Pattern grid, FX2 column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
+    },
+    {
+      "at": "0x600AB514",
+      "old": "01f0f4f8",
+      "to": "mt_pm_rec_off1",
+      "next": "mt_pm_next_rec_off1",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600C6AFC",
+      "old": "e5f700fe",
+      "to": "mt_pm_rec_off2",
+      "next": "mt_pm_next_rec_off2",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600C6B78",
+      "old": "e5f7c2fd",
+      "to": "mt_pm_rec_off3",
+      "next": "mt_pm_next_rec_off3",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600C6CDE",
+      "old": "e5f70ffd",
+      "to": "mt_pm_rec_off4",
+      "next": "mt_pm_next_rec_off4",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600C6ECE",
+      "old": "e5f717fc",
+      "to": "mt_pm_rec_off5",
+      "next": "mt_pm_next_rec_off5",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600C6F96",
+      "old": "e5f7b3fb",
+      "to": "mt_pm_rec_off6",
+      "next": "mt_pm_next_rec_off6",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600C71EE",
+      "old": "e5f787fa",
+      "to": "mt_pm_rec_off7",
+      "next": "mt_pm_next_rec_off7",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600C7348",
+      "old": "e5f7daf9",
+      "to": "mt_pm_rec_off8",
+      "next": "mt_pm_next_rec_off8",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600CD4A6",
+      "old": "dff72bf9",
+      "to": "mt_pm_rec_off9",
+      "next": "mt_pm_next_rec_off9",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600D4792",
+      "old": "d7f7b5ff",
+      "to": "mt_pm_rec_off10",
+      "next": "mt_pm_next_rec_off10",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600D491E",
+      "old": "d7f7effe",
+      "to": "mt_pm_rec_off11",
+      "next": "mt_pm_next_rec_off11",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600D4ADC",
+      "old": "d7f710fe",
+      "to": "mt_pm_rec_off12",
+      "next": "mt_pm_next_rec_off12",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600F0396",
+      "old": "bcf7b3f9",
+      "to": "mt_pm_rec_off13",
+      "next": "mt_pm_next_rec_off13",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600F1904",
+      "old": "baf7fcfe",
+      "to": "mt_pm_rec_off14",
+      "next": "mt_pm_next_rec_off14",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600F57AA",
+      "old": "b6f7a9ff",
+      "to": "mt_pm_rec_off15",
+      "next": "mt_pm_next_rec_off15",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x6011A0A8",
+      "old": "92f72afb",
+      "to": "mt_pm_rec_off16",
+      "next": "mt_pm_next_rec_off16",
+      "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600F5500",
+      "old": "b7f7feb8",
+      "to": "mt_pm_rec_off17",
+      "next": "mt_pm_next_rec_off17",
+      "tail": true,
+      "note": "b.w seq_record_note_off_q 0x600ac700 (a tail call) -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x600F9418",
+      "old": "b3f772b9",
+      "to": "mt_pm_rec_off18",
+      "next": "mt_pm_next_rec_off18",
+      "tail": true,
+      "note": "b.w seq_record_note_off_q 0x600ac700 (a tail call) -> live note-off recording onto a short track's steps"
     }
   ],
   "itcm_branches": [
@@ -113,6 +241,70 @@
       "next": "mt_pm_next_jog",
       "thumb": true,
       "note": "Pattern screen encoder callback pat_jog 0x600c90a1 -> mt_pm_jog: sets the cursor's track's length while Trk Len is held"
+    },
+    {
+      "at": "0x600AB69C",
+      "old": "c9150000",
+      "to": "mt_pm_rec_note1",
+      "next": "mt_pm_next_rec_note1",
+      "thumb": true,
+      "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
+    },
+    {
+      "at": "0x600C73CC",
+      "old": "c9150000",
+      "to": "mt_pm_rec_note2",
+      "next": "mt_pm_next_rec_note2",
+      "thumb": true,
+      "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
+    },
+    {
+      "at": "0x600CD554",
+      "old": "c9150000",
+      "to": "mt_pm_rec_note3",
+      "next": "mt_pm_next_rec_note3",
+      "thumb": true,
+      "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
+    },
+    {
+      "at": "0x600D4B34",
+      "old": "c9150000",
+      "to": "mt_pm_rec_note4",
+      "next": "mt_pm_next_rec_note4",
+      "thumb": true,
+      "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
+    },
+    {
+      "at": "0x600F1924",
+      "old": "c9150000",
+      "to": "mt_pm_rec_note5",
+      "next": "mt_pm_next_rec_note5",
+      "thumb": true,
+      "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
+    },
+    {
+      "at": "0x600F54EC",
+      "old": "c9150000",
+      "to": "mt_pm_rec_note6",
+      "next": "mt_pm_next_rec_note6",
+      "thumb": true,
+      "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
+    },
+    {
+      "at": "0x600FAD84",
+      "old": "c9150000",
+      "to": "mt_pm_rec_note7",
+      "next": "mt_pm_next_rec_note7",
+      "thumb": true,
+      "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
+    },
+    {
+      "at": "0x6011A0FC",
+      "old": "c9150000",
+      "to": "mt_pm_rec_note8",
+      "next": "mt_pm_next_rec_note8",
+      "thumb": true,
+      "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
     },
     {
       "at": "0x600CBF9C",

@@ -3155,6 +3155,21 @@ Found while planning a per-track length (polymeter) patch (`docs/POLYMETER_PLAN.
     `0x600c6f96`, `0x600c71ee`, `0x600c7348`, `0x600cd4a6`, `0x600d4792`, `0x600d491e`,
     `0x600d4adc`, `0x600f0396`, `0x600f1904`, `0x600f57aa`, `0x6011a0a8`. And 2 are tail
     calls (`b.w`): `0x600f5500` and `0x600f9418`.
+- **What else recording needs** (emulator, phase 5): the sequencer playing (`seq+0x2a`),
+  record mode (`seq+0x2b` = 1), and the Pattern screen in front (`0x600cc30c` checks the
+  screen manager `0x200207c0` `+8` against the Pattern view `0x20021770`).
+- **Which track a hit goes to.** `seq_record_live_note` tries the 16 tracks in turn from
+  the one in byte `seq+1` (ITCM `0x1646`: (`seq[1]` + i) & 15) and takes the first with
+  no note sounding (the `+0x80`/`+0x81` flags (q)). It doesn't look at whether that
+  track's step is empty. So a hit while track 1's note still sounds goes to track 2.
+- **Note-offs.** The note-off is written as `0xfc` only onto an empty row; a row that
+  holds a note keeps it.
+- **The recorders mask the audio interrupt themselves.** Both disable and enable NVIC bit
+  0 (ICER `0xe000e180`, ISER `0xe000e100`) several times while they run, so a wrapper
+  can't keep the interrupt masked across the call: it ends enabled.
+- **The rows they can reach:** the track's position, + 1 for a late hit, + 2 for a note-off
+  on the note's own step. With the interrupt enabled during the call the position can
+  move on by one, so polymeter maps position .. position + 3.
 
 ### Page 3's button 6 and the encoder
 

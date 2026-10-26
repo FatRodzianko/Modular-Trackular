@@ -49,6 +49,21 @@
  * twice, FX1, FX2) and swap the color for the call. Only the column's normal color is
  * swapped, so empty cells, muted tracks, the cursor and a selection look as in stock.
  *
+ * Live recording during play writes a note at the track's position (+0x88), or at the
+ * next step when the hit is late, and a note-off one step further when it would land
+ * on the note's own step: seq_record_live_note (ITCM 0x15c8, reached only through 8
+ * flash veneers) and seq_record_note_off_q (0x600ac700, 16 calls and 2 tail calls).
+ * Both pick the row inline, so mt_pm_rec_note* / mt_pm_rec_off* wrap the whole call:
+ * each short track's rows position .. position + 3 that lie past E get the contents of
+ * their step mod E (what stock's rules then read); after the call, a row stock changed
+ * goes to its step mod E, and the dimmed rows get their own contents back. So a short
+ * track records as stock decides, onto the steps it plays. The copying is done with
+ * the audio interrupt masked; the call itself runs as in stock (the recorders mask and
+ * enable the interrupt themselves). The interrupt can still run during the call:
+ * playback reads a short track's steps below E only, so it never sees the borrowed
+ * rows; the fourth row covers the position moving on meanwhile; and a recording from
+ * the interrupt, nested in this one, puts back exactly what it found.
+ *
  * Shared hooks go through chain words (mt_pm_next_*) that tools/patch_ptf.py fills with
  * what the site pointed to before, so other patches can hook them too.
  */
@@ -127,6 +142,11 @@
 #define FW_SETTINGS         0x2002061Cu
 #define SET_ROW_WRAP        0xD2u           /* 0: rows outside the pattern show it wrapped round */
 
+/* live recording */
+#define REC_ROWS            4u              /* the rows a recorder writes: position + 0..2, + 1 if it moves on */
+#define FW_NVIC_ISER0       ((volatile uint32_t *)0xE000E100u)
+#define FW_NVIC_ICER0       ((volatile uint32_t *)0xE000E180u)
+#define AUDIO_IRQ           1u              /* NVIC bit 0: the audio block (audio_irq_disable 0x600303d4) */
 
 typedef void *(*copy_fn)(void *dst, const void *src, uint32_t size);
 typedef uint32_t (*distance_fn)(void *seq, uint32_t track, uint32_t step);
@@ -141,6 +161,7 @@ typedef void (*jog_fn)(int32_t delta, uint32_t a1, uint32_t a2, uint32_t a3);
 typedef uint32_t (*guard_fn)(uint32_t arg);
 typedef void (*cell_fn)(void *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text,
                         uint32_t n, uint32_t w);
+typedef uint32_t (*rec_fn)(void *seq, uint32_t source, uint32_t note, uint32_t velocity, uint32_t arg);
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
  * compiler must read them, not assume the 0 they are linked with. */
@@ -490,6 +511,111 @@ void mt_pm_cell_fx2(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const 
 {
     pm_cell(mt_pm_next_cell_fx2, ctrl, x, y, font, text, n, w);
 }
+
+/* ---- live recording --------------------------------------------------------------- */
+
+static void copy_step(uint8_t *dst, const uint8_t *src)
+{
+    for (uint32_t i = 0; i < STEP_SIZE; i++)
+        dst[i] = src[i];
+}
+
+static int same_step(const uint8_t *a, const uint8_t *b)
+{
+    for (uint32_t i = 0; i < STEP_SIZE; i++)
+        if (a[i] != b[i])
+            return 0;
+    return 1;
+}
+
+/* Mask the audio interrupt; returns whether it was enabled (it isn't inside the
+ * interrupt, or while a caller has masked it) */
+static uint32_t audio_mask(void)
+{
+    uint32_t was = *FW_NVIC_ISER0 & AUDIO_IRQ;
+    *FW_NVIC_ICER0 = AUDIO_IRQ;
+    __asm__ volatile("dsb\n\tisb" ::: "memory");
+    return was;
+}
+
+static void audio_restore(uint32_t was)
+{
+    if (was)
+        *FW_NVIC_ISER0 = AUDIO_IRQ;
+}
+
+/* seq_record_live_note / seq_record_note_off_q(seq, source, note, velocity, a 16-bit
+ * stack argument), with the rows a short track's recording can reach mapped onto the
+ * steps it plays (see the top of the file) */
+static uint32_t pm_record(uint32_t next, uint8_t *seq, uint32_t source, uint32_t note, uint32_t velocity,
+                          uint32_t arg)
+{
+    if (PM->magic != PM_MAGIC)
+        return ((rec_fn)next)(seq, source, note, velocity, arg);
+    uint8_t *pattern = *(uint8_t *const *)(seq + SEQ_PATTERN);
+    uint32_t len = pattern[PAT_LAST_STEP] + 1u, tracks = 0;
+    for (uint32_t t = 0; t < TRACKS; t++)
+        if (pm_length(t, len) < len)
+            tracks |= 1u << t;
+    if (!tracks)
+        return ((rec_fn)next)(seq, source, note, velocity, arg);
+
+    uint8_t own[TRACKS][REC_ROWS][STEP_SIZE];       /* a dimmed row's own contents */
+    uint8_t lent[TRACKS][REC_ROWS][STEP_SIZE];      /* what it was given: its step mod E */
+    uint8_t row_of[TRACKS][REC_ROWS];
+    uint32_t audio = audio_mask();
+    for (uint32_t t = 0; t < TRACKS; t++) {
+        if (!(tracks >> t & 1))
+            continue;
+        uint32_t e = pm_length(t, len);
+        uint32_t pos = *(const uint16_t *)(seq + SEQ_TRACK(t) + TRK_STEP);
+        uint8_t *steps = pattern + PAT_STEPS(t);
+        for (uint32_t k = 0; k < REC_ROWS; k++) {
+            uint32_t x = (pos + k) % len;
+            row_of[t][k] = (uint8_t)x;
+            if (x < e)
+                continue;
+            copy_step(own[t][k], steps + STEP_SIZE * x);
+            copy_step(lent[t][k], steps + STEP_SIZE * (x % e));
+            copy_step(steps + STEP_SIZE * x, lent[t][k]);
+        }
+    }
+    audio_restore(audio);
+    uint32_t ret = ((rec_fn)next)(seq, source, note, velocity, arg);
+    audio = audio_mask();
+    for (uint32_t t = 0; t < TRACKS; t++) {
+        if (!(tracks >> t & 1))
+            continue;
+        uint32_t e = pm_length(t, len);
+        uint8_t *steps = pattern + PAT_STEPS(t);
+        for (uint32_t k = 0; k < REC_ROWS; k++) {
+            uint32_t x = row_of[t][k];
+            if (x < e)
+                continue;
+            if (!same_step(steps + STEP_SIZE * x, lent[t][k]))
+                copy_step(steps + STEP_SIZE * (x % e), steps + STEP_SIZE * x);
+            copy_step(steps + STEP_SIZE * x, own[t][k]);
+        }
+    }
+    audio_restore(audio);
+    return ret;
+}
+
+/* One hook per site, each with its own chain word: the 8 veneers' literal words for
+ * seq_record_live_note (0x15c9), and the 18 calls of seq_record_note_off_q */
+#define REC_HOOK(name)                                                                      \
+    CHAIN_WORD(mt_pm_next_##name);                                                          \
+    uint32_t mt_pm_##name(uint8_t *seq, uint32_t source, uint32_t note, uint32_t velocity,  \
+                          uint32_t arg)                                                     \
+    {                                                                                       \
+        return pm_record(mt_pm_next_##name, seq, source, note, velocity, arg);              \
+    }
+REC_HOOK(rec_note1) REC_HOOK(rec_note2) REC_HOOK(rec_note3) REC_HOOK(rec_note4)
+REC_HOOK(rec_note5) REC_HOOK(rec_note6) REC_HOOK(rec_note7) REC_HOOK(rec_note8)
+REC_HOOK(rec_off1) REC_HOOK(rec_off2) REC_HOOK(rec_off3) REC_HOOK(rec_off4) REC_HOOK(rec_off5)
+REC_HOOK(rec_off6) REC_HOOK(rec_off7) REC_HOOK(rec_off8) REC_HOOK(rec_off9) REC_HOOK(rec_off10)
+REC_HOOK(rec_off11) REC_HOOK(rec_off12) REC_HOOK(rec_off13) REC_HOOK(rec_off14) REC_HOOK(rec_off15)
+REC_HOOK(rec_off16) REC_HOOK(rec_off17) REC_HOOK(rec_off18)
 
 /* Config's version text: 1.2.0-pm1 */
 const char mt_version_fmt[] = "%d.%d.%d-" POLYMETER_VERSION;

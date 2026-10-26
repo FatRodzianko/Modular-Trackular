@@ -11,9 +11,9 @@ This is a re-implementation from its description; nothing of it was seen or used
 [docs/POLYMETER_PLAN.md](../../docs/POLYMETER_PLAN.md) has the investigation and the plan.
 
 **Status: in development.** This build plays the track lengths, sets them with the
-Trk Len button and dims the steps past them in the grid. It doesn't yet record live
-notes into a short track's loop, or save them: lengths are lost when the unit is
-switched off (the next phases of the plan). Emulator-tested, alone and in bundles with
+Trk Len button, dims the steps past them in the grid and records live notes onto a short
+track's own steps. It doesn't save the lengths yet: they are lost when the unit is
+switched off (the next phase of the plan). Emulator-tested, alone and in bundles with
 patch/all's patches in both orders. Not tested on hardware.
 
 ## Using it
@@ -29,6 +29,10 @@ the encoder works as usual. It works in and out of record mode.
 In the grid, a short track's steps past its length are drawn in the dim color stock uses
 for an empty field: they stay in the pattern, but don't play. Muted tracks, the cursor
 and a selection keep their own colors.
+
+Recording while playing works as usual. On a short track a note (or note-off) lands on
+the step the track is playing, not on a dimmed step: with length 6, a hit during the
+pattern's step 11 goes to step 5.
 
 ## How it works
 
@@ -63,6 +67,17 @@ calls: from the text's address it finds the cell's track and row, and from the r
 step it shows. When that step is at or past the track's length and the cell has its
 column's normal color, it draws the cell in the column's empty color instead.
 
+Live recording has two writers: one for notes (reached through 8 small jumps in flash)
+and one for note-offs (called from 18 places, 2 of them tail calls, which the patcher
+writes as `b.w` with `"tail": true`). Each picks its row itself, so the patch wraps the
+whole call. Before it, each short track's rows the call can reach (the position and the
+3 after it) that lie past the length get the contents of the step they play, so stock's
+rules (a note-off only onto an empty step) see the real step. After it, a row stock
+changed is copied to that step, and the dimmed rows get their own contents back. The
+copying is done with the audio interrupt masked; the call itself runs as in stock
+firmware, which masks and unmasks the interrupt itself. With no lengths set the call goes
+straight through.
+
 ## Building and checking it
 
 ```bash
@@ -87,6 +102,12 @@ For the grid it runs the stock grid code and compares every cell's color with st
 firmware drawing the same pattern with the short tracks' extra steps left empty: in all
 three row settings, scrolled, with an overlay or a side panel open, in the single-column
 views, and with the cursor and a muted track on dimmed steps.
+
+For recording it compares with stock firmware recording the same hits onto a pattern with
+the short tracks' first steps written out to the end: early and late hits (also on the
+last step), note-offs (also onto a step holding a note), length 1, 128 steps, two short
+tracks, a track without a length; every one of the 26 call sites; and that the patch's
+own writes happen with the audio interrupt masked.
 
 ## Reverting
 
