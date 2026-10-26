@@ -13,7 +13,9 @@ facts behind slicethru are in FINDINGS section 27 and
 [BEAT_SLICE_THROUGH_PLAN.md](BEAT_SLICE_THROUGH_PLAN.md). The new facts are in FINDINGS
 section 27, "A 1-shot voice's end, and looping it".
 
-Status: phase 1 (the emulator facts) done on 2026-10-25 (section 8). Nothing is built.
+Status: done on 2026-10-25 (section 8): the emulator facts, the patcher support, the
+render hook, the UI and file, the bundle and web, and the hardware check. bt5 and
+`patch/all` MT5 passed all seven steps of section 10 on hardware.
 
 ## 1. Verdict
 
@@ -130,7 +132,7 @@ Thru note.
 - **Builds on bt4** (2026-10-25, the Save As fix): the flags go with a project through
   Save As (the hook on the save request's name copy, `0x60114eaa`), and a new project
   ("New Project", no path) writes nothing. The Loop mask follows the same rules.
-- **RAM:** a 48-bit Loop mask and its saved copy, 12 bytes more (32 → 44).
+- **RAM:** a 48-bit Loop mask and its saved copy: 32 → 48 bytes, as built.
 - **`slicethru.bin` becomes `BTS2`:** magic, the Thru mask, the Loop mask, checksum
   (24 bytes).
   - A `BTS1` file still loads, with every Loop off.
@@ -165,9 +167,9 @@ the C check.
 
 ## 6. Budget
 
-- **Code:** about 350–450 bytes more than slicethru's 1,813 (estimate, from the
-  hook count).
-- **RAM:** 12 bytes more.
+- **Code:** 2,597 bytes, 668 more than bt4's 1,929 (estimated 350–450 more than
+  1,813 before bt4).
+- **RAM:** 48 bytes, 16 more than bt4 (the Loop mask and its saved copy).
 - **Cost:**
   - the note-on is unchanged (54 instructions over stock);
   - a render block is unchanged except the one block per pass where the voice wraps
@@ -188,7 +190,9 @@ the C check.
 - **Settled in phase 2:** the non-BL site, the first in the repo. Both patchers
   place it and refuse a second patch on it, plain or chained, and the layout test and
   the web harness check both.
-- **Still open:** the pad preview's release (section 2, item 5).
+- **Settled in phase 4:** the pad preview. A held pad loops; the release
+  (`0x600ac700`, sent in every play mode) stops it (emulator, both voices).
+- **Still open:** nothing beyond the hardware check.
 
 ## 8. Build phases
 
@@ -211,15 +215,61 @@ the C check.
      second patch on the site (plain, or chaining it), and a site 2 bytes into it.
    - `test_web_patcher.py` checks the web patcher makes the same bytes for both
      placements and refuses the same five.
-3. **The render hook,** with its emulator test.
-4. **The UI and file:** the label, the button, `BTS2`, the clean-up. Emulator tests
-   on the real screen and the fake SD card.
-5. **Bundle and web** (after pd-synth is committed):
-   - `patch/all` version;
-   - the slicethru description in `web/manifest.json`;
-   - `--tier release --update`;
-   - README, PATCHING.md.
-6. **Hardware check** (you, about 15 minutes, section 10).
+3. **The render hook. Done 2026-10-25** (`patch/slicethru` 2,069 bytes, RAM 40 bytes):
+   - `mt_bt_wrap` (a naked stub at `0x60035522`): it saves r0-r3, ip and lr, calls
+     `mt_bt_wrap_pos(voice, position)`, stores the result to `+0x7c` and in r3, and
+     returns to `0x60035526`. The C check uses only integer registers (no VFP; the
+     loop keeps s12-s15 live) and loops only when all of these hold:
+     - the patch's RAM is valid;
+     - `+0x21` (the voice's play mode) is Beat Slice and `+0x6f` (its instrument) is a
+       Beat Slice instrument with the Thru and Loop flags set;
+     - `+0x38` (the end frame) has reached `+0x68` (the sample's frames). So a Beat
+       Slice note started before the flags were set still stops at its slice end.
+   - The Loop mask is at RAM offset 32 (the file and UI come in phase 4).
+   - `bt_flag` is forced inline. Without it, the compiler stopped inlining it once the
+     hook used it too, and every Beat Slice note-on cost 6 more instructions.
+   - `test_slicethru.py` section 6b, 26 checks: three passes sample-exact from slices
+     1, 2 and 4, at pitch 1×, 2× and 3×; stereo in step; six cases that must not loop;
+     Loop off during a pass; OFF, CUT and FADE with the amp envelope on and off; a
+     block without the end costs stock's 4,916 instructions. All pass on bt5; on bt4,
+     14 fail.
+   - Reverse with Loop on plays exactly as with Loop off. That is stock's reverse,
+     which stops one frame short of the slice start: 7,499 of 7,500 frames for slice 2
+     of a 10,000-frame sample.
+4. **The UI and file. Done 2026-10-25** (`patch/slicethru` 2,597 bytes, RAM 48 bytes):
+   - `mt_bt_page2_label` (chained, the BL at `0x600f820a`): on a Beat Slice Thru
+     instrument, the 4th button reads "Loop" with "On" or "Off" under it.
+     `0x600f7c54` clears every second line before it labels, so neither stays on
+     another page or mode.
+   - `mt_bt_button4` (chained, the word `0x600f5158`): on page 2, with no pop-up and a
+     Beat Slice Thru instrument, a press toggles Loop and relabels. It always passes
+     the call on; stock does nothing with it there.
+   - Clearing an instrument's Thru flag clears its Loop flag: the list step to another
+     mode, the stale-flag clean-up, another project. So Beat Slice Thru → Beat Slice →
+     Beat Slice Thru comes back with Loop off.
+   - `slicethru.bin` is `BTS2` (24 bytes). A `BTS1` file loads with Loop off. A Loop
+     bit without its Thru bit is ignored. Save As carries Loop with Thru. The RAM magic
+     is now "MTB5" (the state's layout changed).
+   - Tests (`test_slicethru.py`, 113 checks, all pass on bt5):
+     - the screen: the label, a press both ways, Beat Slice and Slice as stock, a
+       pop-up, page 1 as stock, the step to Beat Slice;
+     - the file: written, reopened, `BTS1`, damaged files (now also a 16-byte `BTS2`
+       and Loop bits past 48), stale flags, Save As;
+     - the pad preview held and released.
+   - `test_layout.py` and `test_web_patcher.py`: their slicethru copy with the
+     layout-test site now replaces slicethru's own entry at `0x60035522` instead of
+     adding a second one.
+5. **Bundle and web. Done 2026-10-25:**
+   - the bt5 prebuilt in `patch/slicethru/prebuilt/`;
+   - `patch/all` version `MT5`;
+   - the slicethru description in `web/manifest.json` (its tested builds wait for
+     the hardware check);
+   - `--tier release --update`: 141 jobs, 0 failed. `web/expected.json` changed only
+     for the selections with slicethru;
+   - README, PATCHING.md (bt5 `5f50698d…`, MT5 `61446c44…`), the slicethru README.
+6. **Hardware check. Done 2026-10-25:** bt5 and MT5 both passed every step of
+   section 10. Both are marked tested in PATCHING.md and in the manifest's tested
+   builds.
 
 ## 9. Emulator tests (additions to `tools/emu/test_slicethru.py`)
 

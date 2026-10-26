@@ -285,7 +285,9 @@ def main() -> int:
                              ("insns-second", [test_layout.INSNS_SITE], False),
                              ("insns-chained", [dict(no_replaces, next="mt_bt_bs_note_on")], False),
                              ("insns-overlap", [test_layout.INSNS_OVERLAP], False)):
-        spec = dict(bt_spec, name=name, branches=(bt_spec["branches"] if own else []) + sites,
+        ats = {int(br["at"], 16) for br in sites}       # slicethru's own site there gives way
+        kept = [br for br in bt_spec["branches"] if int(br["at"], 16) not in ats] if own else []
+        spec = dict(bt_spec, name=name, branches=kept + sites,
                     words=bt_spec["words"] if own else [], **bt_files)
         (extra / "patch" / name).mkdir()
         (extra / "patch" / name / "patch.json").write_text(json.dumps(spec, indent=2))

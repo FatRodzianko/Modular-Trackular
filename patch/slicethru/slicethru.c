@@ -29,8 +29,15 @@
  *    a step moves V, sets the flag, and calls the stock handler with the mode's step.
  *    A step that neither starts nor ends on row 6 goes to stock unchanged.
  *
- * The flags are saved per project in <project folder>/slicethru.bin (16 bytes: magic,
- * a 48-bit mask, a checksum), read and written from the Sample Playback and Pattern
+ * Loop (Sample Playback, page 2 of the slice buttons, the 4th button on a Beat Slice
+ * Thru instrument): a press toggles it. A Beat Slice Thru note with Loop on plays to the
+ * sample end, then the whole sample from frame 0 until something stops it: the forward
+ * 1-shot render's end (0x60035522, two instructions, not a BL) goes to mt_bt_wrap. With
+ * the r FX the note plays once, as without Loop (the reverse render isn't hooked).
+ *
+ * The flags are saved per project in <project folder>/slicethru.bin (BTS2, 24 bytes:
+ * magic, the Thru and Loop masks, a checksum; a 16-byte BTS1 file from bt4 and older
+ * loads with every Loop off), read and written from the Sample Playback and Pattern
  * screens' update methods (chained), one small read or write per call, only while the
  * file manager is idle:
  *  - another project: the flags are cleared at once (nothing of the old project plays
@@ -50,7 +57,7 @@
 #include <stdint.h>
 
 #ifndef SLICETHRU_VERSION
-#define SLICETHRU_VERSION "bt4"
+#define SLICETHRU_VERSION "bt5"
 #endif
 
 /* ---- firmware 1.2.0 ------------------------------------------------------------------ */
@@ -63,6 +70,15 @@
 #define MODE_BEAT_SLICE     5u
 #define POINT_SAMPLE_END    0xFFFFu         /* points are 0..65535 of the sample */
 
+/* a sample voice (FINDINGS section 27, "A 1-shot voice's end, and looping it") */
+#define VOICE_STOP          0x1Cu           /* position that silences the voice at its end */
+#define VOICE_MODE          0x21u           /* the play mode its note-on used */
+#define VOICE_START         0x34u           /* start frame */
+#define VOICE_END           0x38u           /* end frame */
+#define VOICE_FRAMES        0x50u           /* frames to play */
+#define VOICE_LENGTH        0x68u           /* the sample's frames */
+#define VOICE_INSTRUMENT    0x6Fu           /* the instrument its note-on used */
+
 #define FW_FM               0x2001E488u     /* file manager object; *FW_FM = FS object */
 #define FM_STATE            0x13Du          /* file manager state; 0 or 0x0c when idle */
 #define FM_SUBSTATE         0x13Fu
@@ -72,11 +88,14 @@
 #define NAME_MAX_LEN        32u
 #define FW_SNPRINTF         0x6016712Du
 #define FW_SHOW_MODE        0x600F7C55u     /* (screen): the Play Mode list and the mode's controls */
+#define FW_SET_TEXT2        0x60101D75u     /* (controls, id, text): a button's second line */
 
 #define FW_SCREEN           0x200254B4u     /* the Sample Playback screen object */
 #define SCR_POPUP           0x70u           /* nonzero: the inputs go elsewhere */
 #define SCR_FOCUS           0xD6u           /* the focused control; 6 = the Play Mode list */
 #define SCR_INSTRUMENT      0xF4u           /* the instrument it shows */
+#define SCR_PAGE            0xF0u           /* nonzero: the second page of the slice buttons (More) */
+#define BUTTON_PRESS        1u              /* a button callback's r0 on a press */
 #define FOCUS_PLAY_MODE     6u
 #define FW_CHANGE_MODE      0x600F5B99u     /* (step): mode + step, clamped 0..7, and redraw */
 #define FW_MODE_NAMES       0x60042618u     /* the 8 names, 15-byte slots */
@@ -100,6 +119,7 @@ typedef void (*update_fn)(void *screen, void *a1, void *a2, void *a3);
 typedef void (*show_fn)(void *screen);
 typedef int (*snprintf_fn)(char *buf, uint32_t size, const char *fmt, ...);
 typedef char *(*strncpy_fn)(char *dst, const char *src, uint32_t n);
+typedef void (*set_text_fn)(void *controls, uint32_t id, const char *text);
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
  * compiler must read them, not assume the 0 they are linked with. */
@@ -115,10 +135,12 @@ CHAIN_WORD(mt_bt_next_button_minus);        /* mode-change handler 0x600f5b99 (7
 CHAIN_WORD(mt_bt_next_playback_update);     /* Sample Playback screen update 0x600f6071 */
 CHAIN_WORD(mt_bt_next_pattern_update);      /* Pattern screen update 0x600e1f99 */
 CHAIN_WORD(mt_bt_next_save_name);           /* strncpy 0x601673d7 (Save As: the new name) */
+CHAIN_WORD(mt_bt_next_page2_label);         /* disp_ctrl_set_text 0x60101d5d (4th button, page 2) */
+CHAIN_WORD(mt_bt_next_button4);             /* the 4th button's callback 0x600f4b55 */
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
-#define BT_MAGIC            0x5442544Du     /* "MTBT" */
+#define BT_MAGIC            0x3542544Du     /* "MTB5": the state's layout of bt5 */
 #define SAVE_DELAY          25u             /* screen updates between a change and the save */
 #define LOAD_NONE           0u
 #define LOAD                1u              /* read the file; none: no flags */
@@ -133,6 +155,8 @@ struct bt_state {
     uint32_t session;                       /* project name + path the flags belong to */
     uint32_t saved[2];
     uint32_t save_as;                       /* the session a Save As moves the flags to; 0: none */
+    uint32_t loop[2];                       /* bit i: instrument i loops the sample (i < 48) */
+    uint32_t saved_loop[2];                 /* the Loop mask the file holds */
 };
 static struct bt_state bt_state_ram __attribute__((section(".mt_ram")));    /* the start of the patch's RAM */
 #define BT (&bt_state_ram)
@@ -148,10 +172,12 @@ static void bt_init_if_needed(void)         /* RAM outside .bss holds garbage at
     BT->session = 0;
     BT->load = 0;
     BT->save_as = 0;
+    BT->loop[0] = BT->loop[1] = 0;
+    BT->saved_loop[0] = BT->saved_loop[1] = 0;
     BT->magic = BT_MAGIC;
 }
 
-static uint32_t bt_flag(uint32_t i)
+static inline __attribute__((always_inline)) uint32_t bt_flag(uint32_t i)
 {
     return (BT->flags[i >> 5] >> (i & 31)) & 1u;
 }
@@ -159,10 +185,17 @@ static uint32_t bt_flag(uint32_t i)
 static void bt_set_flag(uint32_t i, uint32_t on)
 {
     uint32_t bit = 1u << (i & 31);
-    if (on)
+    if (on) {
         BT->flags[i >> 5] |= bit;
-    else
+    } else {
         BT->flags[i >> 5] &= ~bit;
+        BT->loop[i >> 5] &= ~bit;           /* Loop belongs to Beat Slice Thru */
+    }
+}
+
+static inline __attribute__((always_inline)) uint32_t bt_loop(uint32_t i)
+{
+    return (BT->loop[i >> 5] >> (i & 31)) & 1u;
 }
 
 /* ---- the voice: once per Beat Slice note-on (audio interrupt or main loop) -------- */
@@ -186,6 +219,44 @@ uint32_t mt_bt_end_frames(uint32_t point, uint32_t length, uint32_t address, uin
     if (BT->magic == BT_MAGIC && BT->cur)
         point = POINT_SAMPLE_END;
     return ((to_frames_fn)mt_bt_next_end_frames)(point, length, address, r3);
+}
+
+/* ---- the render: a looping voice's end (audio interrupt) -------------------------- */
+
+/* The voice's next position at its end: the same frame counted from the sample's frame 0
+ * for a Beat Slice Thru note with Loop on, else the stock stop position. Integer code
+ * only: the render loop keeps live values in s12..s15. */
+uint32_t mt_bt_wrap_pos(const volatile uint8_t *voice, uint32_t pos)
+{
+    const volatile uint32_t *w = (const volatile uint32_t *)voice;
+    if (BT->magic == BT_MAGIC) {
+        uint32_t i = voice[VOICE_INSTRUMENT];
+        const volatile uint8_t *ins = (const volatile uint8_t *)(FW_INSTRUMENTS + INSTR_SIZE * i);
+        if (i < INSTR_COUNT && voice[VOICE_MODE] == MODE_BEAT_SLICE && bt_flag(i) && bt_loop(i)
+            && ins[INSTR_PLAY_MODE] == MODE_BEAT_SLICE
+            && w[VOICE_END / 4] >= w[VOICE_LENGTH / 4])     /* this note plays to the end */
+            return pos - (w[VOICE_FRAMES / 4] + w[VOICE_START / 4]);
+    }
+    return w[VOICE_STOP / 4];
+}
+
+/* 0x60035522 in the forward 1-shot render 0x600353fc, over "ldr r3, [r4, #0x1c];
+ * str r3, [r4, #0x7c]" ("replaces": "insns"), reached only when the position (r3)
+ * reaches the frames to play. r4 = the voice. Sets r3 and the voice's position as those
+ * two instructions do, and keeps every other register: r0-r2 and ip are live in the
+ * loop, and the code after it sets the flags afresh. */
+__attribute__((naked)) void mt_bt_wrap(void)
+{
+    __asm__ volatile(
+        "push {r0, r1, r2, r3, ip, lr}\n\t"
+        "mov r0, r4\n\t"
+        "mov r1, r3\n\t"
+        "bl mt_bt_wrap_pos\n\t"
+        "str r0, [r4, #0x7c]\n\t"
+        "mov r3, r0\n\t"
+        "pop {r0, r1, r2}\n\t"
+        "add sp, sp, #4\n\t"
+        "pop {ip, pc}\n\t");
 }
 
 /* ---- the Play Mode list (Sample Playback screen, main loop) ----------------------- */
@@ -313,6 +384,51 @@ void mt_bt_button_minus(int32_t step)
     list_step(step, mt_bt_next_button_minus);
 }
 
+/* ---- Loop: the 4th button on page 2 of the slice buttons (main loop) ------------- */
+
+static const char loop_name[] = "Loop";
+static const char loop_on[] = "On";
+static const char loop_off[] = "Off";
+
+/* The instrument on the screen, if it is Beat Slice Thru; else -1. */
+static int32_t thru_instrument(void)
+{
+    int32_t i = screen_instrument();
+    if (i < 0 || mode_of((uint32_t)i) != MODE_BEAT_SLICE || !bt_flag((uint32_t)i))
+        return -1;
+    return i;
+}
+
+/* 0x600f820a in 0x600f7c54, page 2 of Slice and Beat Slice: "bl disp_ctrl_set_text(
+ * controls, 4th button, "")". The label function clears every button's second line
+ * before it labels them, so a stale "On" or "Off" never stays on another page or mode. */
+void mt_bt_page2_label(void *controls, uint32_t id, const char *text)
+{
+    bt_init_if_needed();
+    int32_t i = thru_instrument();
+    if (i < 0) {
+        ((set_text_fn)mt_bt_next_page2_label)(controls, id, text);
+        return;
+    }
+    ((set_text_fn)mt_bt_next_page2_label)(controls, id, loop_name);
+    ((set_text_fn)FW_SET_TEXT2)(controls, id, bt_loop((uint32_t)i) ? loop_on : loop_off);
+}
+
+/* Callback word 0x600f5158: the 4th button (0x600f4b55; r0 = 1 on a press). Stock does
+ * nothing with it on page 2 of Beat Slice; it is passed on in every case. */
+void mt_bt_button4(uint32_t r0, uint32_t r1, uint32_t r2, uint32_t r3)
+{
+    bt_init_if_needed();
+    const volatile uint8_t *scr = (const volatile uint8_t *)FW_SCREEN;
+    int32_t i = thru_instrument();
+    if (r0 == BUTTON_PRESS && i >= 0 && scr[SCR_PAGE] && scr[SCR_POPUP] == 0) {
+        uint32_t bit = 1u << (i & 31);
+        BT->loop[i >> 5] ^= bit;            /* written a moment later, as the Thru flag */
+        ((show_fn)FW_SHOW_MODE)((void *)FW_SCREEN);
+    }
+    ((callback_fn)mt_bt_next_button4)(r0, r1, r2, r3);
+}
+
 /* ---- slicethru.bin (main loop: the screens' update methods) ---------------------- */
 
 struct fs_open_result { uint32_t handle; uint8_t ok; uint8_t pad[3]; };
@@ -329,8 +445,11 @@ typedef void (*fs_remove_fn)(void *fs, const char *path);
 #define FS_MODE_READ        0u
 #define FS_MODE_WRITE       3u              /* FatFs create-always + RW, as the pattern save */
 
-#define FILE_MAGIC          0x31535442u     /* "BTS1" */
-#define FILE_SIZE           16u             /* magic, the mask (8 bytes, bits 48..63 zero), checksum */
+#define FILE_MAGIC          0x32535442u     /* "BTS2" */
+#define FILE_SIZE           24u             /* magic, Thru and Loop masks (8 bytes each, bits 48..63
+                                               zero), checksum of the masks */
+#define FILE_MAGIC_V1       0x31535442u     /* "BTS1" (bt4 and older): magic, Thru mask, checksum */
+#define FILE_SIZE_V1        16u
 #define MASK_HIGH           0x0000FFFFu     /* flags[1]: instruments 32..47 */
 
 static uint32_t fnv1a(uint32_t h, uint32_t byte)
@@ -366,10 +485,10 @@ static int project_unsaved(void)
     return 1;
 }
 
-static uint32_t data_sum(const uint8_t *v)
+static uint32_t data_sum(const uint8_t *v, uint32_t n)
 {
     uint32_t h = 2166136261u;
-    for (uint32_t i = 0; i < 8; i++)
+    for (uint32_t i = 0; i < n; i++)
         h = fnv1a(h, v[i]);
     return h;
 }
@@ -400,7 +519,7 @@ static int file_manager_idle(void)
     return (state == 0 || state == 0x0C) && (fm[FM_SUBSTATE] & 0xFD) == 0;
 }
 
-/* The project's flags into BT->flags. 1: the file was read and applied. */
+/* The project's flags into BT->flags and BT->loop. 1: the file was read and applied. */
 static int settings_load(void)
 {
     char path[256];
@@ -413,14 +532,17 @@ static int settings_load(void)
     ((fs_open_fn)vt[FS_OPEN / 4])(&res, fs, path, FS_MODE_READ, 0);
     if (!res.ok)
         return 0;
-    int ok = ((fs_read_fn)vt[FS_READ / 4])(fs, buf, FILE_SIZE, res.handle) == (int)FILE_SIZE;
+    int n = ((fs_read_fn)vt[FS_READ / 4])(fs, buf, FILE_SIZE, res.handle);
     ((fs_close_fn)vt[FS_CLOSE / 4])(fs, res.handle, 1);
-    ok = ok && get32(buf) == FILE_MAGIC && get32(buf + 12) == data_sum(buf + 4)
-         && (get32(buf + 8) & ~MASK_HIGH) == 0;
-    if (!ok)
+    int v2 = n == (int)FILE_SIZE && get32(buf) == FILE_MAGIC && get32(buf + 20) == data_sum(buf + 4, 16)
+             && (get32(buf + 16) & ~MASK_HIGH) == 0;
+    int v1 = n == (int)FILE_SIZE_V1 && get32(buf) == FILE_MAGIC_V1 && get32(buf + 12) == data_sum(buf + 4, 8);
+    if (!(v1 || v2) || (get32(buf + 8) & ~MASK_HIGH))
         return 0;
     BT->flags[0] = get32(buf + 4);
     BT->flags[1] = get32(buf + 8);
+    BT->loop[0] = v2 ? get32(buf + 12) & BT->flags[0] : 0;     /* Loop only with Thru */
+    BT->loop[1] = v2 ? get32(buf + 16) & BT->flags[1] : 0;
     return 1;
 }
 
@@ -433,10 +555,13 @@ static void settings_save(void)
     void **vt = *(void ***)fs;
     uint8_t buf[FILE_SIZE];
     uint32_t lo = BT->flags[0], hi = BT->flags[1] & MASK_HIGH;
+    uint32_t loop_lo = BT->loop[0], loop_hi = BT->loop[1] & MASK_HIGH;
     put32(buf, FILE_MAGIC);
     put32(buf + 4, lo);
     put32(buf + 8, hi);
-    put32(buf + 12, data_sum(buf + 4));
+    put32(buf + 12, loop_lo);
+    put32(buf + 16, loop_hi);
+    put32(buf + 20, data_sum(buf + 4, 16));
     struct fs_open_result res = {0, 0, {0, 0, 0}};
     ((fs_remove_fn)vt[FS_REMOVE / 4])(fs, path);
     ((fs_open_fn)vt[FS_OPEN / 4])(&res, fs, path, FS_MODE_WRITE, 0);
@@ -447,6 +572,8 @@ static void settings_save(void)
     if (ok) {
         BT->saved[0] = lo;
         BT->saved[1] = hi;
+        BT->saved_loop[0] = loop_lo;
+        BT->saved_loop[1] = loop_hi;
         BT->saved_valid = 1;
     }
 }
@@ -478,8 +605,8 @@ static int settings_tick(void)
         BT->saved_valid = 0;                /* after a Save As: written to the new folder */
         BT->wait = SAVE_DELAY;
         BT->load = unsaved || save_as ? LOAD_NONE : LOAD;
-        if (!save_as)
-            BT->flags[0] = BT->flags[1] = 0;     /* nothing of the old project plays through */
+        if (!save_as)                       /* nothing of the old project plays through */
+            BT->flags[0] = BT->flags[1] = BT->loop[0] = BT->loop[1] = 0;
     }
     if (!file_manager_idle())
         return 0;
@@ -488,12 +615,15 @@ static int settings_tick(void)
         settings_load();                    /* none or a bad one: no flags */
         BT->saved[0] = BT->flags[0];        /* nothing to write until a flag changes */
         BT->saved[1] = BT->flags[1];
+        BT->saved_loop[0] = BT->loop[0];
+        BT->saved_loop[1] = BT->loop[1];
         BT->saved_valid = 1;
         return 1;
     }
     clear_stale();
     if (unsaved || (BT->saved_valid && BT->flags[0] == BT->saved[0]
-                    && (BT->flags[1] & MASK_HIGH) == BT->saved[1])) {
+                    && (BT->flags[1] & MASK_HIGH) == BT->saved[1] && BT->loop[0] == BT->saved_loop[0]
+                    && (BT->loop[1] & MASK_HIGH) == BT->saved_loop[1])) {
         BT->wait = SAVE_DELAY;
         return 0;
     }

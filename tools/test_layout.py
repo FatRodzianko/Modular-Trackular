@@ -348,8 +348,11 @@ def main() -> int:
                 for k in ("bin", "sym", "rel", "prebuilt_bin", "prebuilt_sym", "prebuilt_rel")}
 
     def bt_copy(name: str, branches: list[dict], own: bool = True) -> Path:
-        """slicethru with `branches` added (own: its own hooks too; else only those)."""
-        spec = dict(bt_spec, name=name, branches=(bt_spec["branches"] if own else []) + branches,
+        """slicethru with `branches` added (own: its own hooks too, less any at the same
+        address; else only those)."""
+        ats = {int(br["at"], 16) for br in branches}
+        kept = [br for br in bt_spec["branches"] if int(br["at"], 16) not in ats] if own else []
+        spec = dict(bt_spec, name=name, branches=kept + branches,
                     words=bt_spec["words"] if own else [], **bt_files)
         path = outdir / f"{name}.json"
         path.write_text(json.dumps(spec, indent=2))

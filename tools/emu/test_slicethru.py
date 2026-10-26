@@ -21,6 +21,15 @@ system's app objects (tools/emu/synth_rig.py).
    stock's does.
 5. The Slice FX (S), reverse, tune and finetune: as stock, with the end at the sample end.
 6. Stereo: the right voice (+0x118 set) copies the left one's extended end.
+6b. Loop (the render's end, 0x60035522, through the mixer's render 0x600357b4): with
+    Thru and Loop on, notes from slices 1, 2 and 4 play to the end and then the sample
+    from frame 0, sample-exact for three passes, also at pitch 2 and 3; stereo voices in
+    step. No loop with Thru or Loop off, the flag on another instrument, a 1-Shot
+    instrument, a note started before the flags were set, or reverse; Loop off during a
+    pass stops at that pass's end. OFF, CUT and FADE (the real voice note-off, amp
+    envelope on and off) end a looping note; a pad preview loops while the pad is held
+    and stops when it is released. A block that doesn't reach the end costs
+    what stock's does, and the end's code runs only at the end.
 7. Re-entry: a note-on made while another is in progress (as when the audio interrupt
    cuts into a pad preview) uses its own flag and leaves the other's.
 8. The patch writes nothing outside its RAM and the stack; cost of a note-on.
@@ -29,10 +38,14 @@ system's app objects (tools/emu/synth_rig.py).
     move by the step; steps that don't touch Beat Slice Thru leave the instrument as
     stock's same step does; Beat Slice <-> Thru changes only the flag.
 11. Off the list (another control focused, a pop-up open): the inputs as stock.
+11b. Loop's button: page 2 of a Beat Slice Thru instrument reads Loop Off/On, a press
+    toggles it and relabels. Beat Slice, Slice, page 1 and a pop-up: as stock, no
+    toggle. Beat Slice Thru -> Beat Slice clears Loop and goes back to page 1.
 12. From the list to the voice: Beat Slice Thru chosen with a button plays to the end.
 13. The settings file (slicethru.bin, the fake SD card of tools/emu/fakefs.py), through
-    the Sample Playback and Pattern screens' update hooks: written once, a moment
-    after a change; read on a project change and the list redrawn; a damaged or short
+    the Sample Playback and Pattern screens' update hooks: written once (BTS2), a
+    moment after a change; Loop saved and restored, a BTS1 file loads with Loop off, a
+    Loop bit without Thru ignored; read on a project change and the list redrawn; a damaged or short
     file, or bits above instrument 48: none; nothing read while the file manager is
     busy, and the old project's flags cleared at once; stale flags (an instrument no
     longer an active Beat Slice instrument) cleared only while it is idle; a new project
@@ -88,12 +101,22 @@ FM_STATE = 0x2001E488 + 0x13D
 FM_OP = 0x2001E488 + 0x13F
 SAVE_REQUEST = 0x60114E34           # (fm + 0x8c, path, name): Save As; (.., 0, 0): Save
 SAVE_NAME_SITE = 0x60114EAA         # bl strncpy(fm + 0x340, name, 0x21) in it, Save As only
-FILE_MAGIC = 0x31535442             # "BTS1"
+WRAP_SITE = 0x60035522              # the forward 1-shot render's end (two instructions, not a BL)
+RENDER, BLOCK_FREE = 0x600357B4, 0x60030524     # (voice) -> a 128-frame block (samples at +4); (block)
+VOICE_NOTE_ON, NOTE_OFF, PLAYER = 0x60030D50, 0x5678, 0x2001A138   # NOTE_OFF: ITCM (player, mode)
+LOOP_MASK = 32                      # the Loop mask's offset in the patch's RAM
+PAD_PRESS, PAD_RELEASE = 0x600C73C8, 0x600AC700  # (seq, track, note, velocity, pad): a pad's note on / off
+SEQ, PREVIEW_TRACK = 0x20017274, 0x14
+PAGE2_LABEL_SITE = 0x600F820A       # bl disp_ctrl_set_text(4th button, "") on page 2
+BUTTON4_WORD = 0x600F5158           # the 4th button's callback word (0x600f4b55)
+SCR_PAGE = 0xF0                     # nonzero: page 2 of the slice buttons
+FILE_MAGIC = 0x32535442             # "BTS2": Thru and Loop masks
+FILE_MAGIC_V1 = 0x31535442          # "BTS1" (bt4 and older): the Thru mask
 SAVE_DELAY = 25
 STOCK_NAMES = ["1-Shot", "Forward Loop", "Backward Loop", "Pingpong Loop", "Slice", "Beat Slice",
                "Wavetable", "Granular"]
 NAMES = STOCK_NAMES[:6] + ["Beat Slice Thru"] + STOCK_NAMES[6:]
-BT_MAGIC = 0x5442544D
+BT_MAGIC = 0x3542544D                # "MTB5"
 VOICE_SIZE = 0x140
 BEAT_SLICE = 5
 FRAMES = 44100
@@ -171,6 +194,11 @@ class Rig:
         m.w32(self.ram + 8, hi)
         m.w8(self.ram + 12, 0)
 
+    def loop(self, *instruments: int) -> None:
+        mask = sum(1 << i for i in instruments)
+        self.m.w32(self.ram + LOOP_MASK, mask & 0xFFFFFFFF)
+        self.m.w32(self.ram + LOOP_MASK + 4, mask >> 32)
+
     def cur(self) -> int:
         return self.m.uc.mem_read(self.ram + 12, 1)[0]
 
@@ -206,10 +234,13 @@ def site_checks(p: Rig) -> None:
     lo, hi = p.code
     for at, name in ((BS_SITE, "the dispatcher's Beat Slice call"), (END_SITE, "the Beat Slice end point"),
                      (LIST_DATA_SITE, "the Play Mode list's data"), (BUTTON_PLUS_SITE, "the 8th button's step"),
-                     (BUTTON_MINUS_SITE, "the 7th button's step"), (SAVE_NAME_SITE, "Save As's name copy")):
+                     (BUTTON_MINUS_SITE, "the 7th button's step"), (SAVE_NAME_SITE, "Save As's name copy"),
+                     (WRAP_SITE, "the forward 1-shot render's end"),
+                     (PAGE2_LABEL_SITE, "the 4th button's label on page 2")):
         t = bl_target(img, 0x60030000, at)
         check(lo <= t < hi, f"{name} ({at:#x}) branches into the patch ({t:#x})")
-    for at, name in ((ENCODER_WORD, "encoder"), (PLUS_WORD, "+1"), (MINUS_WORD, "-1")):
+    for at, name in ((ENCODER_WORD, "encoder"), (PLUS_WORD, "+1"), (MINUS_WORD, "-1"),
+                     (BUTTON4_WORD, "4th button")):
         w = p.m.r32(at)
         check(bool(w & 1) and lo <= w - 1 < hi, f"the {name} callback word ({at:#x}) points into the patch ({w:#x})")
     m = p.m
@@ -373,6 +404,186 @@ def stereo_checks(p: Rig, s: Rig) -> None:
           f"both voices: frames {b['start']}..{b['end']}")
 
 
+# ---- 6b. Loop: a Beat Slice Thru note loops the whole sample -------------------------
+
+LOOP_FRAMES = 10000                 # a short sample, each frame's value = its frame + 1
+
+
+def loop_rig(ptf: Path, patched: bool) -> Rig:
+    r = Rig(ptf, patched)
+    r.instrument(3, frames=LOOP_FRAMES, slices=QUARTERS)
+    r.m.write(r.samples[(3, LOOP_FRAMES)], b"".join(struct.pack("<h", k + 1) for k in range(LOOP_FRAMES)))
+    return r
+
+
+def output(r: Rig, v: int, blocks: int, pitch: float = 1.0) -> list[int]:
+    """The voice's next `blocks` blocks of samples, from the render the mixer calls."""
+    r.m.write(v + V_PITCH, struct.pack("<f", pitch))
+    out = []
+    for _ in range(blocks):
+        blk = r.m.call(RENDER, v)
+        if not blk:
+            out += [0] * 128
+            continue
+        out += list(struct.unpack("<128h", bytes(r.m.uc.mem_read(blk + 4, 256))))
+        r.m.call(BLOCK_FREE, blk)
+    return out
+
+
+def ramp(start: int, n: int, step: int = 1) -> list[int]:
+    """The sample from frame `start` on, `step` frames at a time, wrapping to frame 0."""
+    out, pos = [], start
+    while len(out) < n:
+        out.append(pos + 1)
+        pos += step
+        if pos >= LOOP_FRAMES:
+            pos -= LOOP_FRAMES
+    return out
+
+
+def playing(r: Rig, v: int) -> int:
+    return r.m.uc.mem_read(v + V_PLAYING, 1)[0]
+
+
+def looping_rig(ptf: Path) -> Rig:
+    r = loop_rig(ptf, True)
+    r.flags(3)
+    r.loop(3)
+    return r
+
+
+def loop_checks(ptf: Path, stock: Path) -> None:
+    print("Loop: a Beat Slice Thru note loops the whole sample")
+    for note in (24, 25, 27):
+        p = looping_rig(ptf)
+        v = p.voice()
+        p.note_on(v, 3, note)
+        start = p.fields(v)["start"]
+        n = LOOP_FRAMES - start + 3 * LOOP_FRAMES
+        got = output(p, v, -(-n // 128))[:n]
+        check(got == ramp(start, n) and playing(p, v),
+              f"note {note} (from frame {start}): to the end, then the sample from frame 0 three times, "
+              f"sample-exact, still playing")
+    for note, ratio in ((25, 2.0), (25, 3.0), (27, 2.0)):
+        p = looping_rig(ptf)
+        v = p.voice()
+        p.note_on(v, 3, note)
+        start = p.fields(v)["start"]
+        got = output(p, v, 300, ratio)
+        check(got == ramp(start, len(got), int(ratio)),
+              f"note {note} at pitch {ratio}: sample-exact over {len(got)} samples, the wraps included")
+    p = looping_rig(ptf)
+    left = p.voice(0)
+    right = p.voice(1, partner=left)
+    p.note_on(left, 3, 25)
+    p.note_on(right, 3, 25)
+    check(output(p, left, 250) == output(p, right, 250), "stereo: both voices loop in step over 250 blocks")
+
+    print("Loop: when it doesn't loop")
+    for label, setup in (
+            ("Loop on, Beat Slice Thru off", lambda r: (r.flags(), r.loop(3))),
+            ("Beat Slice Thru on, Loop off", lambda r: (r.flags(3), r.loop())),
+            ("Loop on another instrument", lambda r: (r.flags(3), r.loop(4))),
+            ("both flags on a 1-Shot instrument",
+             lambda r: (r.m.w8(INS + INS_SIZE * 3 + 0x3C, 0), r.flags(3), r.loop(3)))):
+        p = loop_rig(ptf, True)
+        setup(p)
+        v = p.voice()
+        p.note_on(v, 3, 25)
+        f = p.fields(v)
+        got = output(p, v, -(-(f["frames"] + 256) // 128))
+        check(got[:f["frames"]] == ramp(f["start"], f["frames"]) and not any(got[f["frames"]:])
+              and not playing(p, v), f"{label}: plays frames {f['start']}..{f['end']} once and stops")
+    p = loop_rig(ptf, True)
+    p.flags()
+    v = p.voice()
+    p.note_on(v, 3, 25)                         # a plain Beat Slice note: slice 2 only
+    p.flags(3)
+    p.loop(3)                                   # both chosen while it plays
+    got = output(p, v, 40)
+    check(got[:2500] == ramp(2500, 2500) and not any(got[2500:]) and not playing(p, v),
+          "a Beat Slice note started before Thru and Loop were chosen: stops at its slice end")
+    outs = []
+    for looping in (False, True):
+        p = loop_rig(ptf, True)
+        p.flags(3)
+        p.loop(*((3,) if looping else ()))
+        v = p.voice()
+        p.m.w8(v + V_REVERSE, 1)
+        p.note_on(v, 3, 25)
+        outs.append((output(p, v, 70), playing(p, v)))
+    (off, off_playing), (on, on_playing) = outs
+    check(on == off and on[0] == LOOP_FRAMES and not any(on[LOOP_FRAMES - 2500:]) and not on_playing,
+          "reverse with Loop on: plays once from the sample end towards the slice start and stops, "
+          "exactly as with Loop off")
+    p = looping_rig(ptf)
+    v = p.voice()
+    p.note_on(v, 3, 25)
+    first = output(p, v, 70)                    # 8,960 frames: into the second pass
+    p.loop()                                    # Loop off while it plays
+    got = first + output(p, v, 90)
+    n = 7500 + LOOP_FRAMES
+    check(got[:n] == ramp(2500, n) and not any(got[n:]) and not playing(p, v),
+          "Loop off during the second pass: that pass plays to the sample end, then the note stops")
+
+    print("Loop: what ends a looping note")
+    for env_off in (0, 1):
+        for mode, name in ((0, "OFF"), (-3 & 0xFFFFFFFF, "CUT"), (-2 & 0xFFFFFFFF, "FADE")):
+            p = looping_rig(ptf)
+            p.m.stub_function(0x6010D530, lambda mm: 0)     # objects the rig doesn't build
+            p.m.stub_function(0x6010D59C, lambda mm: 0)
+            v = p.m.r32(p.m.r32(PLAYER + 0x73C))           # player 0's first voice
+            p.m.call(VOICE_NOTE_ON, v, 3, 25)
+            p.m.w8(v + 0xEE, env_off)
+            output(p, v, 200)                              # 25,600 frames: looping
+            was = playing(p, v)
+            p.m.call(NOTE_OFF, PLAYER, mode, max_insns=5_000_000)
+            stopped = None
+            for k in range(400):
+                output(p, v, 1)
+                if not playing(p, v):
+                    stopped = k
+                    break
+            check(was and stopped is not None,
+                  f"{name}, amp envelope {'off' if env_off else 'on'}: still looping after 200 blocks, "
+                  f"stopped {stopped} blocks after the {name}")
+
+    print("Loop: a pad preview")
+    p = looping_rig(ptf)
+    for stub in (0x6010D530, 0x6010D544, 0x6010D59C):   # player+0x77c objects the rig doesn't build
+        p.m.stub_function(stub, lambda mm: 0)
+    p.m.w8(INS + 0x46C5, 3)                     # the instrument the pads play
+    p.m.call(PAD_PRESS, SEQ, PREVIEW_TRACK, 25, 0xFFFFFFFF, 1, max_insns=20_000_000)
+    pl = PLAYER
+    pad_voices = [p.m.r32(a) for a in range(p.m.r32(pl + 0x73C), p.m.r32(pl + 0x740), 4)]
+    pad_voices = [v for v in pad_voices if playing(p, v) and p.m.uc.mem_read(v + 0x6F, 1)[0] == 3]
+    for v in pad_voices:
+        output(p, v, 200)                       # 25,600 frames, past the 7,500 to the end
+    held = bool(pad_voices) and all(playing(p, v) for v in pad_voices)
+    p.m.call(PAD_RELEASE, SEQ, PREVIEW_TRACK, 25, 0, 1, max_insns=20_000_000)
+    for v in pad_voices:
+        output(p, v, 1)
+    check(held and not any(playing(p, v) for v in pad_voices),
+          f"a pad held (0x600c73c8, preview track {PREVIEW_TRACK}): {len(pad_voices)} voices still looping after "
+          f"200 blocks; the pad released (0x600ac700): all stopped")
+
+    print("Loop: cost")
+    p, s = looping_rig(ptf), loop_rig(stock, False)
+    vp, vs = p.voice(), s.voice()
+    p.note_on(vp, 3, 24)
+    s.note_on(vs, 3, 24)
+    for r, v in ((p, vp), (s, vs)):
+        r.m.write(v + V_PITCH, struct.pack("<f", 1.0))
+    cp = sum(steps(p, vp) for _ in range(10))
+    cs = sum(steps(s, vs) for _ in range(10))
+    check(cp == cs, f"a block without the end: {cp // 10} instructions, as stock ({cs // 10})")
+    hits = []
+    h = p.m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, sz, u: hits.append(1), begin=WRAP_SITE, end=WRAP_SITE)
+    output(p, vp, 60)                           # up to 8,960 of the 10,000 frames
+    p.m.uc.hook_del(h)
+    check(not hits, "the end's code runs only at the end (not in the 60 blocks before it)")
+
+
 # ---- 7. re-entry --------------------------------------------------------------------
 
 def reentry_checks(p: Rig, s: Rig) -> None:
@@ -487,8 +698,8 @@ class ScreenRig:
         m.w32(SAMPLE_TABLE + 8 * i, self.buf)
         m.w32(SAMPLE_TABLE + 8 * i + 4, self.buf)
 
-    def set(self, mode: int, flag: bool) -> None:
-        """Instrument 0's mode and flag, shown on the screen (as after a step)."""
+    def set(self, mode: int, flag: bool, loop: bool = False) -> None:
+        """Instrument 0's mode and flags, shown on the screen (as after a step)."""
         m = self.m
         m.w8(INS + 0x3C, mode)
         m.w8(INS + 4, 1 if mode == 6 else 0)
@@ -496,9 +707,27 @@ class ScreenRig:
             m.w32(self.ram, BT_MAGIC)
             m.w32(self.ram + 4, 1 if flag else 0)
             m.w32(self.ram + 8, 0)
+            m.w32(self.ram + LOOP_MASK, 1 if loop else 0)
+            m.w32(self.ram + LOOP_MASK + 4, 0)
         m.w8(SCR + SCR_POPUP, 0)
         m.w8(SCR + SCR_FOCUS, FOCUS_PLAY_MODE)
         m.call(SCR_SHOW_MODE, SCR, max_insns=50_000_000)
+
+    def label(self, k: int) -> tuple[str, str]:
+        """Button k's (1-based) two lines: its control's text (+0x10) and second line (+0x38)."""
+        m = self.m
+        cid = m.uc.mem_read(SCR + 0xC4 + k - 1, 1)[0]
+        ctl = m.r32(CONTROLS + 0x10 + 4 * cid)
+        a, b = m.r32(ctl + 0x10), m.r32(ctl + 0x38)
+        return (m.cstr(a) if a else "", m.cstr(b) if b else "")
+
+    def press4(self) -> None:
+        """The 4th button pressed and released (its callback word, r0 = 1, then 0)."""
+        for state in (1, 0):
+            self.m.call(self.m.r32(BUTTON4_WORD) & ~1, state, max_insns=50_000_000)
+
+    def loop(self) -> int:
+        return self.m.r32(self.ram + LOOP_MASK) | self.m.r32(self.ram + LOOP_MASK + 4) << 32
 
     def state(self) -> tuple[int, bool]:
         mode = self.m.uc.mem_read(INS + 0x3C, 1)[0]
@@ -638,6 +867,69 @@ def ui_play_checks(q: ScreenRig) -> None:
           f"{m.r32(w + V_END)}")
 
 
+def loop_ui_checks(q: ScreenRig, t: ScreenRig) -> None:
+    print("Loop: the 4th button on page 2")
+    m = q.m
+
+    def page2(r: ScreenRig, mode: int, flag: bool = False, loop: bool = False) -> None:
+        r.set(mode, flag and r.patched, loop and r.patched)
+        r.m.w8(SCR + SCR_PAGE, 1)
+        r.m.call(SCR_SHOW_MODE, SCR, max_insns=50_000_000)
+
+    def snapshot(r: ScreenRig) -> tuple[bytes, bytes]:
+        return bytes(r.m.uc.mem_read(SCR, 0xC00)), r.ins()
+
+    page2(q, BEAT_SLICE, True)
+    check(q.label(4) == ("Loop", "Off"), f"Beat Slice Thru, page 2: the 4th button reads {q.label(4)}")
+    q.press4()
+    page = m.uc.mem_read(SCR + SCR_PAGE, 1)[0]
+    check(q.loop() == 1 and q.label(4) == ("Loop", "On") and page and q.state() == (BEAT_SLICE, True),
+          f"a press: Loop on, the button reads {q.label(4)}, still page 2, still Beat Slice Thru")
+    q.press4()
+    check(q.loop() == 0 and q.label(4) == ("Loop", "Off"), f"another press: Loop off, {q.label(4)}")
+    for label, mode in (("Beat Slice", BEAT_SLICE), ("Slice", 4)):
+        page2(q, mode)
+        page2(t, mode)
+        same_label = q.label(4) == t.label(4) == ("", "")
+        before = snapshot(q), snapshot(t)
+        q.press4()
+        t.press4()
+        after = snapshot(q), snapshot(t)
+        changed = [[k for k in range(len(b[0])) if b[0][k] != a[0][k]] for b, a in zip(before, after)]
+        check(same_label and changed[0] == changed[1] and after[0][1] == before[0][1] and q.loop() == 0,
+              f"{label}, page 2: the 4th button blank as stock, a press does what stock's does "
+              f"(screen bytes changed {changed[0]}), no Loop")
+    page2(q, BEAT_SLICE, True)
+    m.w8(SCR + SCR_POPUP, 1)
+    q.press4()
+    check(q.loop() == 0, "a pop-up open: a press doesn't toggle Loop")
+    m.w8(SCR + SCR_POPUP, 0)
+    for r in (q, t):                            # page 1 with Loop on: the stock 4th button
+        r.m.w8(SCR + SCR_PAGE, 0)
+    q.set(BEAT_SLICE, True, True)
+    t.set(BEAT_SLICE, False)
+    check(q.label(4) == t.label(4), f"page 1: the 4th button as stock {q.label(4)}")
+    before = snapshot(q), snapshot(t)
+    q.press4()
+    t.press4()
+    after = snapshot(q), snapshot(t)
+    changed = [[k for k in range(len(b[0])) if b[0][k] != a[0][k]] for b, a in zip(before, after)]
+    check(changed[0] == changed[1] and q.loop() == 1,
+          f"page 1: a press does what stock's does (screen bytes changed {changed[0]}), Loop unchanged")
+    page2(q, BEAT_SLICE, True, True)
+    q.m.w8(SCR + SCR_FOCUS, FOCUS_PLAY_MODE)
+    q.step("7th button")                        # Beat Slice Thru -> Beat Slice, on page 2
+    page = m.uc.mem_read(SCR + SCR_PAGE, 1)[0]
+    check(q.state() == (BEAT_SLICE, False) and q.loop() == 0 and not page and q.label(4)[1] == "",
+          f"Beat Slice Thru -> Beat Slice on page 2: Loop cleared with Thru, back to page 1, "
+          f"the 4th button's second line {q.label(4)[1]!r}")
+    page2(q, BEAT_SLICE, True, True)
+    for r in (q, t):
+        r.m.w8(SCR + SCR_PAGE, 0)
+        r.m.call(SCR_SHOW_MODE, SCR, max_insns=50_000_000)
+    check(q.label(4) == t.label(4), f"from page 2 (Loop On) back to page 1: the 4th button as stock {q.label(4)}")
+
+
 # ---- the settings file -----------------------------------------------------------------
 
 def fnv1a(data: bytes) -> int:
@@ -649,6 +941,11 @@ def fnv1a(data: bytes) -> int:
 
 def bts1(mask: int) -> bytes:
     body = struct.pack("<Q", mask)
+    return struct.pack("<I", FILE_MAGIC_V1) + body + struct.pack("<I", fnv1a(body))
+
+
+def bts2(thru: int, loop: int) -> bytes:
+    body = struct.pack("<QQ", thru, loop)
     return struct.pack("<I", FILE_MAGIC) + body + struct.pack("<I", fnv1a(body))
 
 
@@ -695,8 +992,8 @@ def file_checks(ptf: Path, stock: Path) -> None:
     tick(SAVE_DELAY - 2)
     check(writes() == 0, "no write right after a change")
     tick(5)
-    check(writes() == 1 and fs.overlay.get(path("A")) == bts1(1 | 1 << 40),
-          "the change is written once, a moment later (BTS1, the mask, the checksum: 16 bytes)")
+    check(writes() == 1 and fs.overlay.get(path("A")) == bts2(1 | 1 << 40, 0),
+          "the change is written once, a moment later (BTS2, the Thru and Loop masks, the checksum: 24 bytes)")
     check(max(fs.read_sizes + fs.write_sizes, default=0) <= 256, "every read and write is at most 256 bytes")
 
     fs.set_project(Path("."), "B", "Projects/User")
@@ -710,9 +1007,12 @@ def file_checks(ptf: Path, stock: Path) -> None:
           f"back to the first project: instruments 1 and 41 again, and the list redrawn on Beat Slice Thru ({row})")
 
     good = fs.overlay[path("A")]
-    for label, bad in (("a wrong checksum", good[:15] + bytes([good[15] ^ 1])),
+    for label, bad in (("a wrong checksum", good[:-1] + bytes([good[-1] ^ 1])),
                        ("a wrong magic", b"X" + good[1:]),
-                       ("bits above instrument 48", bts1(1 | 1 << 50)),
+                       ("Thru bits above instrument 48", bts2(1 | 1 << 50, 0)),
+                       ("Loop bits above instrument 48", bts2(1, 1 | 1 << 50)),
+                       ("a BTS1 file with bits above instrument 48", bts1(1 | 1 << 50)),
+                       ("a BTS2 file 16 bytes long", good[:16]),
                        ("a short file", good[:12])):
         fs.overlay[path("A")] = bad
         fs.set_project(Path("."), "B", "Projects/User")
@@ -721,6 +1021,33 @@ def file_checks(ptf: Path, stock: Path) -> None:
         tick()
         check(mask() == 0, f"{label}: none")
     fs.overlay[path("A")] = good
+
+    print("Loop in the file")
+
+    def loops() -> int:
+        return m.r32(q.ram + LOOP_MASK) | m.r32(q.ram + LOOP_MASK + 4) << 32
+
+    def reopen() -> None:
+        fs.set_project(Path("."), "B", "Projects/User")
+        tick()
+        fs.set_project(Path("."), "A", "Projects/User")
+        tick()
+
+    reopen()
+    m.w32(q.ram + LOOP_MASK, 1)                 # Loop on for instrument 1 (Beat Slice Thru)
+    tick(SAVE_DELAY + 5)
+    check(fs.overlay.get(path("A")) == bts2(1 | 1 << 40, 1), "Loop on: written a moment later, in the Loop mask")
+    reopen()
+    check(mask() == 1 | 1 << 40 and loops() == 1, "the project reopened: Thru and Loop as saved")
+    fs.overlay[path("A")] = bts1(1 | 1 << 40)
+    reopen()
+    check(mask() == 1 | 1 << 40 and loops() == 0, "a BTS1 file (bt4 and older): its Thru flags, every Loop off")
+    fs.overlay[path("A")] = bts2(1, 1 | 1 << 5)
+    reopen()
+    check(mask() == 1 and loops() == 1, "a Loop bit on an instrument without Thru: ignored")
+    fs.overlay[path("A")] = good
+    reopen()
+    check(mask() == 1 | 1 << 40 and loops() == 0, "the file put back: Thru only")
 
     fs.set_project(Path("."), "B", "Projects/User")
     tick()
@@ -742,16 +1069,18 @@ def file_checks(ptf: Path, stock: Path) -> None:
     tick()
 
     print("stale flags")
+    m.w32(q.ram + LOOP_MASK + 4, 1 << 8)    # Loop on for instrument 41
     m.w8(INS + INS_SIZE * 40 + 0x3C, 0)     # instrument 41 is now a 1-Shot instrument
     m.w8(FM_STATE, 5)
     tick()
     check(mask() & 1 << 40, "an instrument's mode changed while the file manager is busy: its flag kept for now")
     m.w8(FM_STATE, 0)
     tick()
-    check(mask() == 1, "once it is idle: the flag of the instrument that isn't Beat Slice any more is cleared")
+    check(mask() == 1 and loops() == 0,
+          "once it is idle: the flag of the instrument that isn't Beat Slice any more is cleared, its Loop too")
     m.w8(INS + INS_SIZE * 40 + 0x3C, BEAT_SLICE)
     tick(SAVE_DELAY + 5)
-    check(mask() == 1 and fs.overlay.get(path("A")) == bts1(1),
+    check(mask() == 1 and fs.overlay.get(path("A")) == bts2(1, 0),
           "it stays cleared when the instrument becomes Beat Slice again, and the file follows")
     m.w32(q.ram + 4, 1 | 1 << 2)
     m.w8(INS + INS_SIZE * 2, 0)             # instrument 3 deleted
@@ -781,16 +1110,18 @@ def file_checks(ptf: Path, stock: Path) -> None:
     tick()
     check(mask() == 0, "a new project (\"New Project\", no path): none")
     m.w32(q.ram + 4, 1 << 1)
+    m.w32(q.ram + LOOP_MASK, 1 << 1)
     n = writes()
     tick(SAVE_DELAY * 2)
     check(writes() == n and not any("New Project" in x for x in fs.log),
           "while it has no folder: nothing written or read")
     ok = save("C")
-    check(ok and m.cstr(PROJECT_NAME) == "C" and mask() == 1 << 1 and fs.overlay.get(path("C")) == bts1(1 << 1),
-          "its first save (Save As through the firmware's save request): the flags kept and written to its folder")
+    check(ok and m.cstr(PROJECT_NAME) == "C" and mask() == 1 << 1 and loops() == 1 << 1
+          and fs.overlay.get(path("C")) == bts2(1 << 1, 1 << 1),
+          "its first save (Save As through the firmware's save request): Thru and Loop kept and written to its folder")
     ok = save("D")
-    check(ok and mask() == 1 << 1 and fs.overlay.get(path("D")) == bts1(1 << 1)
-          and fs.overlay.get(path("C")) == bts1(1 << 1),
+    check(ok and mask() == 1 << 1 and loops() == 1 << 1 and fs.overlay.get(path("D")) == bts2(1 << 1, 1 << 1)
+          and fs.overlay.get(path("C")) == bts2(1 << 1, 1 << 1),
           "Save As from a saved project: the flags kept, written to the new folder, the old file left")
     n = writes()
     ok = save(None)
@@ -829,6 +1160,7 @@ def main() -> int:
     render_checks(p, s)
     fx_checks(p, s)
     stereo_checks(p, s)
+    loop_checks(ptf, stock)
     reentry_checks(p, s)
     write_checks(p, s)
     q, t = ScreenRig(ptf, True), ScreenRig(stock, False)
@@ -836,6 +1168,7 @@ def main() -> int:
     input_checks(q, t)
     ui_play_checks(q)
     off_list_checks(ScreenRig(ptf, True), ScreenRig(stock, False))     # fresh: the same history in both
+    loop_ui_checks(ScreenRig(ptf, True), ScreenRig(stock, False))
     file_checks(ptf, stock)
     print(f"{len(failures)} failure(s)")
     return 1 if failures else 0

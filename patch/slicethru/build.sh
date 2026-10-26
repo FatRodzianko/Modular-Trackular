@@ -30,7 +30,7 @@ CFLAGS=(-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -Os -std=c11
 link() {                               # link <linker script> <elf> <map>
     "$ARM_GCC_BIN/arm-none-eabi-gcc" -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 \
         -nostdlib -nostartfiles -T "$1" -Wl,--gc-sections \
-        -Wl,--undefined=mt_bt_bs_note_on -Wl,--undefined=mt_bt_end_frames -Wl,--undefined=mt_bt_list_data -Wl,--undefined=mt_bt_encoder -Wl,--undefined=mt_bt_plus -Wl,--undefined=mt_bt_minus -Wl,--undefined=mt_bt_button_plus -Wl,--undefined=mt_bt_button_minus -Wl,--undefined=mt_bt_playback_update -Wl,--undefined=mt_bt_pattern_update -Wl,--undefined=mt_bt_save_name -Wl,--undefined=mt_version_fmt \
+        -Wl,--undefined=mt_bt_bs_note_on -Wl,--undefined=mt_bt_end_frames -Wl,--undefined=mt_bt_list_data -Wl,--undefined=mt_bt_encoder -Wl,--undefined=mt_bt_plus -Wl,--undefined=mt_bt_minus -Wl,--undefined=mt_bt_button_plus -Wl,--undefined=mt_bt_button_minus -Wl,--undefined=mt_bt_playback_update -Wl,--undefined=mt_bt_pattern_update -Wl,--undefined=mt_bt_save_name -Wl,--undefined=mt_bt_wrap -Wl,--undefined=mt_bt_page2_label -Wl,--undefined=mt_bt_button4 -Wl,--undefined=mt_version_fmt \
         -Wl,-Map="$3" "$OUT/slicethru.o" -o "$2"
 }
 link "$HERE/link.ld" "$OUT/slicethru.elf" "$OUT/slicethru.map"

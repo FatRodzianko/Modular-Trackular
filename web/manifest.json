@@ -93,7 +93,7 @@
       "bit": 10,
       "spec": "patch/slicethru/patch.json",
       "title": "Beat Slice Thru",
-      "summary": "A play mode after Beat Slice in the Sample Playback screen's Play Mode list: slice a sample as in Beat Slice, and each note plays from its slice to the end of the sample instead of stopping at the next slice. Saved per project; stock firmware plays such an instrument as Beat Slice.",
+      "summary": "A play mode after Beat Slice in the Sample Playback screen's Play Mode list: slice a sample as in Beat Slice, and each note plays from its slice to the end of the sample instead of stopping at the next slice. With Loop on (More, the 4th button) the note then loops the whole sample until stopped. Saved per project; stock firmware plays such an instrument as Beat Slice.",
       "status": "Tested on hardware"
     },
     {
@@ -137,6 +137,8 @@
     "5cf21721e8c1f9339304b24adfcc355a07f37dcaff9697a5b97ab41d50352925": "resample (1.2.0-rs4)",
     "b2376c91b9382658c39018a78daf78c9b22a083bfb1b4c739e147bffea84748f": "all twelve mods (1.2.0-MR4)",
     "8aed6732660f5c8e8ab231b20fbfa58bfaf3b875896ce790b5b9ae2bd6552232": "slicethru (1.2.0-bt4)",
-    "eec53343f9fc18ed981863af0808761974ee23024158705df4c362a87442fee8": "all twelve mods (1.2.0-MT4)"
+    "eec53343f9fc18ed981863af0808761974ee23024158705df4c362a87442fee8": "all twelve mods with slicethru bt4 (1.2.0-MT4)",
+    "5f50698d8545833a6c6a7cbba495de4004da2cd9250b36e7ad548f50dc4981e8": "slicethru (1.2.0-bt5)",
+    "61446c44bfd6669dd1044da4415ceb13f0df6b47c6f6a49ad37f2405195ae4f7": "all twelve mods (1.2.0-MT5)"
   }
 }

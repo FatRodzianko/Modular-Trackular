@@ -5,15 +5,16 @@ to the Sample Playback screen's Play Mode list, right after Beat Slice. You slic
 sample exactly as in Beat Slice (Slice, Adjust, Add, Remove, Auto, Evenly), and the
 pads and notes pick slices the same way. The difference is playback: a note starts at
 its slice and plays on to the end of the sample, instead of stopping where the next
-slice starts. Installed on its own, Config shows the firmware version as `1.2.0-bt4`.
-[docs/BEAT_SLICE_THROUGH_PLAN.md](../../docs/BEAT_SLICE_THROUGH_PLAN.md) has the
-investigation and the plan.
+slice starts. With **Loop** on, the note then loops the whole sample until something
+stops it. Installed on its own, Config shows the firmware version as `1.2.0-bt5`.
+[docs/BEAT_SLICE_THROUGH_PLAN.md](../../docs/BEAT_SLICE_THROUGH_PLAN.md) and
+[docs/SLICETHRU_LOOP_PLAN.md](../../docs/SLICETHRU_LOOP_PLAN.md) have the
+investigations and the plans.
 
-**Status:** tested on hardware, on its own (`1.2.0-bt4`) and in `patch/all`
-(`1.2.0-MT4`), including Save As and a new project's first save, which keep Beat Slice
-Thru (`1.2.0-bt3` lost it there). A project saved with Beat Slice Thru instruments
-plays them as Beat Slice in stock firmware, and as Beat Slice Thru again back on this
-firmware.
+**Status:** tested on hardware, on its own (`1.2.0-bt5`) and in `patch/all`
+(`1.2.0-MT5`), Loop included, as are Save As and a new project's first save. A project
+saved with Beat Slice Thru instruments plays them as Beat Slice in stock firmware, and
+as Beat Slice Thru again back on this firmware.
 
 ## Using it
 
@@ -37,6 +38,25 @@ So with a note on every step, Beat Slice Thru sounds like Beat Slice. It makes a
 difference when there's room after a note: a note on step 1 and the next on step 9 plays
 on from its slice for eight steps.
 
+### Loop
+
+On a Beat Slice Thru instrument, press **More** in Sample Playback. The 4th button
+reads **Loop**, with **Off** or **On** under it; a press switches it. With Loop on, a
+note plays from its slice to the end of the sample, then jumps to the start of the
+sample (its first frame) and plays the whole sample again, over and over, until the
+next note, OFF, the end of a gate, CUT, FADE, stopping playback or muting the track
+stops it. A held pad loops until you let go.
+
+- The loop jumps straight from the last frame to the first, as stock's Forward Loop
+  does at its loop points; there's no crossfade. A sample that doesn't loop cleanly
+  clicks there.
+- With reverse (`r`) the note plays once, from the sample end back to its slice, as
+  with Loop off.
+- Switching Loop off while a note plays lets that pass finish; the note then stops at
+  the end of the sample.
+- Loop belongs to Beat Slice Thru: switching the instrument to another mode turns its
+  Loop off. Plain Beat Slice and Slice instruments show no Loop button.
+
 Other things work as in Beat Slice:
 
 - **The Slice FX (`S`)** picks the slice to start from.
@@ -46,8 +66,8 @@ Other things work as in Beat Slice:
 - The Instrument End point isn't used, as in Beat Slice: the last slice, and every
   slice here, runs to the end of the sample.
 
-The choice is saved per project, in `slicethru.bin` in the project's folder, a moment
-after you change it. A project without that file, and every project in stock firmware,
+The choices (Beat Slice Thru and Loop) are saved per project, in `slicethru.bin` in
+the project's folder, a moment after you change them. A project without that file, and every project in stock firmware,
 has no Beat Slice Thru instruments: there the instruments play Beat Slice, with their
 slices intact.
 
@@ -91,34 +111,54 @@ frames to play, the reverse start, and the copy a stereo sample's right voice ta
 | `mt_bt_playback_update` | Sample Playback screen vtable slot `0x60042698` (update `0x600f6070`) | `slicethru.bin` load and save; the list redrawn after a load |
 | `mt_bt_pattern_update` | Pattern screen vtable slot `0x600403dc` (update `0x600e1f98`) | `slicethru.bin` load and save |
 | `mt_bt_save_name` | `bl strncpy` at `0x60114eaa` in the save request `0x60114e34` (the new name; Save As only) | Marks the Save As, so the flags go with the project to its new name |
+| `mt_bt_wrap` | the 4 bytes at `0x60035522` in the forward 1-shot render `0x600353fc`: two instructions, not a BL (`"replaces": "insns"`), run only when a voice reaches its end | A Beat Slice Thru note with Loop on: its position goes on from the sample's first frame. Otherwise the two stock instructions (the stop) |
+| `mt_bt_page2_label` | `bl disp_ctrl_set_text` at `0x600f820a` (the 4th button on page 2 of Slice and Beat Slice) | On a Beat Slice Thru instrument: "Loop", and "On" or "Off" under it |
+| `mt_bt_button4` | the 4th button's callback word `0x600f5158` (`0x600f4b55`) | Page 2 of a Beat Slice Thru instrument, no pop-up: a press toggles Loop and relabels the button; then the stock callback (which does nothing there) |
 
-All the hooks are chained: each calls whatever the site pointed to before (the stock
+The hooks are chained: each calls whatever the site pointed to before (the stock
 function, or another patch's hook), so other patches can hook the same sites. The
-Pattern screen's update slot is shared with most of the other mods.
+Pattern screen's update slot is shared with most of the other mods. The exception is
+`mt_bt_wrap`: its site isn't a call, so nothing can chain it, and the patcher refuses a
+second patch there.
+
+- **The loop** happens where the render stops a voice at its end. Instead of the stop
+  position, the hook sets the position back by the frames played plus the start
+  frame, which is the same frame counted from the sample's start, and the render goes
+  on. It loops only when all of these hold:
+  - the voice's play mode is Beat Slice and its instrument (the voice keeps both) is a
+    Beat Slice instrument with Thru and Loop on;
+  - the voice's end is the sample's end, so a note started before Thru was chosen still
+    stops at its slice.
+
+  It costs about 20 instructions once per pass; every other block renders exactly as
+  stock.
 
 - **A step of the list** moves the row by the step (the encoder's at most 4 rows, as
   in stock), sets or clears the flag, and calls the stock mode-change handler
   (`0x600f5b98`) with the mode's step. Between Beat Slice and Beat Slice Thru that is
   a step of 0, which changes nothing in the instrument. A step that doesn't start or
   end on Beat Slice Thru goes to the stock handler unchanged.
-- **The file** is 16 bytes: `BTS1`, a 48-bit mask (one bit per instrument), and a
-  checksum. It is read and written only from the two screens' update methods, where
+- **The file** is 24 bytes: `BTS2`, the Thru and Loop masks (48 bits each, one per
+  instrument), and a checksum. A 16-byte `BTS1` file from bt4 and older still loads,
+  with every Loop off; those builds ignore a `BTS2` file (no Beat Slice Thru there). A
+  Loop bit without its Thru bit is ignored. It is read and written only from the two screens' update methods, where
   the stock code does its own file work, and only while the firmware's file manager
   is idle. On another project the flags are cleared at once, then read from that
   project's file. A Save As keeps them for the project's new name and writes them
   there; the save request's name copy (`0x60114eaa`, Save As only) marks it, from any
   screen. A new project ("New Project" with no path) has no folder: nothing is
   written until its first save. A
-  flag whose instrument isn't an active Beat Slice instrument any more is cleared,
-  only while the file manager is idle (never in the middle of a project load).
+  flag whose instrument isn't an active Beat Slice instrument any more is cleared
+  (its Loop too), only while the file manager is idle (never in the middle of a
+  project load).
 - **The cost:** a Beat Slice note-on runs 54 instructions more than stock; rendering
   (per 128-frame block) is unchanged. Voices play longer, but never more of them than
   stock: one per sample track (two for a stereo sample), as a 1-Shot sample can.
 
-The code is 1,929 bytes. Its state is 32 bytes (the flags, the saved copy, the project
-it belongs to), which the patcher places in free RAM: the OCRAM tail on its own,
-`sdram_top` with all the other mods. The 9-name table is in flash. The patcher moves
-the code's 17 code-address words and 9 RAM-address words to match
+The code is 2,597 bytes. Its state is 48 bytes (the Thru and Loop flags, their saved
+copies, the project they belong to), which the patcher places in free RAM: the OCRAM
+tail on its own, `sdram_top` with all the other mods. The 9-name table is in flash. The
+patcher moves the code's 19 code-address words and 13 RAM-address words to match
 (`prebuilt/slicethru.rel`). Firmware addresses are in
 [docs/FINDINGS.md](../../docs/FINDINGS.md) section 27.
 
@@ -128,7 +168,7 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/slicethru/patch.json build/TrackerPlus_bt4.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/slicethru/patch.json build/TrackerPlus_bt5.ptf
 ```
 
 To combine it with other mods, list it in a bundle spec (see "Choosing patches" in
@@ -148,7 +188,7 @@ patch/slicethru/build.sh
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_slicethru.py build/TrackerPlus_bt4.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/emu/test_slicethru.py build/TrackerPlus_bt5.ptf path/to/TrackerPlus_1.2.0.ptf
 ```
 
 It runs the stock code with the patch in place, next to stock firmware:
@@ -162,11 +202,20 @@ It runs the stock code with the patch in place, next to stock firmware:
   - the Slice FX, reverse, tune, stereo samples and a note-on inside another all
     behave correctly;
   - the patch writes nothing outside its own RAM.
+- **Loop** (the render the mixer calls): notes from slices 1, 2 and 4 play to the end,
+  then the sample from its first frame, sample-exact for three passes, also at double
+  and triple pitch; stereo voices in step. No loop with Thru or Loop off, on another
+  instrument, a 1-Shot instrument, a note started before the flags, or reverse. Loop
+  off during a pass stops at its end. OFF, CUT and FADE (amp envelope on and off) end
+  a looping note; a held pad loops and its release stops it. A block that doesn't
+  reach the end costs what stock's does.
 - **Screen** (the real Sample Playback screen): the list draws 9 names with the right
   row highlighted. Every input from every row moves to the right mode; steps that
   don't involve Beat Slice Thru do what stock does. With another control focused, the
-  inputs behave as stock.
-- **File** (a fake SD card): written once after a change, read on a project change,
+  inputs behave as stock. Page 2 of a Beat Slice Thru instrument shows Loop On/Off and
+  a press toggles it; Beat Slice, Slice, page 1 and a pop-up behave as stock.
+- **File** (a fake SD card): written once after a change (`BTS2`, Loop included), read
+  on a project change, a `BTS1` file loading with Loop off,
   damaged files ignored, nothing read or written while the file manager is busy, stale
   flags cleared; a new project as the firmware makes it writes nothing; Save As through
   the firmware's own save request (a new project's first save, and from a saved
@@ -177,7 +226,7 @@ It runs the stock code with the patch in place, next to stock firmware:
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-bt4 Build 1504`.
+Config → Firmware → the patched file. Config should show `1.2.0-bt5 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Beat Slice Thru instruments
 play Beat Slice in stock firmware, with their slices intact; `slicethru.bin` files stay

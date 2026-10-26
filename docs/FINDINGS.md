@@ -2624,6 +2624,25 @@ Found while planning the Beat Slice Thru Loop, `docs/SLICETHRU_LOOP_PLAN.md`.
     the stack (emulator, press and release).
 - **A mode step reruns `0x600f7c54` and returns to page 1** (`scr+0xf0` = 0), from
   either page, in stock and in bt3 (emulator: +1, −1, buttons 7 and 8, the encoder).
+- **A button's two lines** are fields of its display control
+  (`*(0x20027d64 + 0x10 + 4·id)`): the first line at `+0x10` (`disp_ctrl_set_text`
+  `0x60101d5c` stores the pointer through the control's vtable `+0x18`); the second
+  line at `+0x38` (`0x60101d74` → `0x601049b4`).
+  - `0x600f7c54` clears every button's second line first (the call from `0x600f7d62`),
+    then labels the mode's buttons. So a second line one page sets never stays on
+    another page or mode (emulator: modes 0, 1, 4–7, both pages).
+  - Stock leaves the 4th button's second line empty (`0x60038660`) on both pages of
+    Slice and Beat Slice. Its first line on page 1 of Beat Slice is "Remove".
+- **The 4th button's callback** (`0x600f4b55`) passes a state of 0, 1 or 0xff to
+  `0x600f4a1c`, which, in Slice and Beat Slice, acts only on a press on page 1
+  (`0x600f4b1a`).
+- **A pad preview** goes through `0x600c6a4c(pad, state)`, which is called from
+  `0x600d477e`. A press starts the note with `0x600c73c8(0x20017274, 20, note, −1, pad)`
+  on player 0 (two voices), with the note from `0x6010eea8` in Beat Slice. A release
+  sends `0x600ac700(0x20017274, 20, note, 0, pad)` in every play mode. Emulator
+  (slicethru bt5, Loop on): the preview loops while the pad is held and stops on the
+  release. The rig needs `0x6010d530`, `0x6010d544` and `0x6010d59c` stubbed, because
+  the `player+0x77c` objects aren't built.
 
 ### The slice editor (a slicer object; the instrument is the second argument)
 

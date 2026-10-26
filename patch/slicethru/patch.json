@@ -51,6 +51,20 @@
       "to": "mt_bt_save_name",
       "next": "mt_bt_next_save_name",
       "note": "save request 0x60114e34, Save As only: bl strncpy(fm+0x340, name, 0x21) -> mt_bt_save_name (the flags go with the project to its new name)"
+    },
+    {
+      "at": "0x60035522",
+      "old": "e369e367",
+      "to": "mt_bt_wrap",
+      "replaces": "insns",
+      "note": "forward 1-shot render 0x600353fc, a voice's end: ldr r3, [r4, #0x1c]; str r3, [r4, #0x7c] -> mt_bt_wrap (a Beat Slice Thru note with Loop on goes on from frame 0)"
+    },
+    {
+      "at": "0x600F820A",
+      "old": "09f0a7fd",
+      "to": "mt_bt_page2_label",
+      "next": "mt_bt_next_page2_label",
+      "note": "0x600f7c54, page 2 of Slice and Beat Slice: bl disp_ctrl_set_text(controls, 4th button, \"\") -> mt_bt_page2_label (Loop On/Off on a Beat Slice Thru instrument)"
     }
   ],
   "words": [
@@ -95,11 +109,19 @@
       "note": "Pattern screen vtable: update method 0x600e1f99 -> mt_bt_pattern_update (slicethru.bin load/save)"
     },
     {
+      "at": "0x600F5158",
+      "old": "554b0f60",
+      "to": "mt_bt_button4",
+      "next": "mt_bt_next_button4",
+      "thumb": true,
+      "note": "Sample Playback screen callback pool: the 4th button 0x600f4b55 -> mt_bt_button4 (page 2, Beat Slice Thru: a press toggles Loop)"
+    },
+    {
       "at": "0x600CBF9C",
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-bt4"
+      "note": "version text 1.2.0-bt5"
     }
   ]
 }

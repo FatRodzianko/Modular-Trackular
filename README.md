@@ -70,8 +70,9 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
 - **slicethru**: Beat Slice (Play Through), a ninth play mode in the Sample Playback
   screen's Play Mode list, after Beat Slice. You slice a sample as in Beat Slice, and
   each note plays from its slice to the end of the sample instead of stopping at the
-  next slice. The instrument stays a Beat Slice instrument, so stock firmware plays it
-  as Beat Slice; the choice is saved per project. Tested on hardware. See
+  next slice. With Loop on (More, the 4th button) it then loops the whole sample until
+  stopped. The instrument stays a Beat Slice instrument, so stock firmware plays it as
+  Beat Slice; the choices are saved per project. Tested on hardware, Loop included. See
   [patch/slicethru/README.md](patch/slicethru/README.md).
 - **resample**: live resampling in the Sample Recorder. Press Play during a recording,
   or start it with Shift+Rec (after the count-in, if Pre Roll is on), and the pattern
@@ -79,7 +80,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   input. Recordings go into the free part of the sample memory, so the loaded samples
   stay intact; the longest recording is that free part. Otherwise the recorder is
   stock. Tested on hardware. See [patch/resample/README.md](patch/resample/README.md).
-- **all**: all twelve mods above in one firmware (version text `1.2.0-MT4`), from
+- **all**: all twelve mods above in one firmware (version text `1.2.0-MT5`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
@@ -140,7 +141,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/synths/` | WAVE (wavetables) and PHASE (phase distortion), synths in place of synth models per project; their table generators `gen_wavetables.py` and `gen_phase_tables.py` |
 | `patch/legato/` | Legato: a Glide FX on a MIDI or synth note sends its note-on before the previous note's note-off |
 | `patch/copypattern/` | Copy to New: copies the current pattern into the next empty one |
-| `patch/slicethru/` | Beat Slice Thru: a play mode whose notes play from their slice to the sample end |
+| `patch/slicethru/` | Beat Slice Thru: a play mode whose notes play from their slice to the sample end, and can loop the whole sample |
 | `patch/resample/` | Live resampling: the pattern plays during a Sample Recorder recording (Play, or Shift+Rec); recordings after the loaded samples |
 | `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
@@ -176,7 +177,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/synth_rig.py` | The firmware's synth system (host, slots, voices, the audio graph) driven block by block, for the synth tools |
 | `tools/emu/test_synths.py` | synths: stock output unchanged, the swap, the WAVE model and its pages, Model list and Edit Patch drawing, settings and patch files, oscillators, filters, envelopes, LFOs and Mod Matrix, banks, voices, stress, and WAV renders |
 | `tools/emu/test_phase.py` | synths' PHASE: WAVE unchanged, the PHASE model, tiles, swaps with both engines, settings and patch files; the shapes against their formulas, aliasing, pairs, ring and noise mod, envelopes, pitch, Mod Matrix, level, voices, cost, stress, and WAV renders |
-| `tools/emu/test_slicethru.py` | slicethru: every play mode's note-on as stock without the flag, the slice-to-end span, render cost, `S`, reverse, stereo and re-entry with it; the Play Mode list and every input on the real Sample Playback screen; the settings file |
+| `tools/emu/test_slicethru.py` | slicethru: every play mode's note-on as stock without the flag, the slice-to-end span, render cost, `S`, reverse, stereo and re-entry with it; Loop (the whole sample from frame 0, sample-exact, and what ends it); the Play Mode list, the Loop button and every input on the real Sample Playback screen; the settings file |
 | `tools/emu/test_resample.py` | resample: the record buffer's placement and the loaded samples kept; Play during a recording against stock and normal playback, the input and Monitor, the stop; Shift+Rec and Play in the count-in through the real Rec handler; stock where not asked for; cost |
 | `tools/emu/test_legato.py` | legato: random patterns against stock (identical without `G`, only reordered with it), the legato order and every case that keeps the stock order, other FX, stuck notes, cost; synth slots: the order, envelopes on every model and WAVE, PERC unchanged |
 | `tools/emu/test_itcmtest.py` | itcmtest: the ITCM stubs after the boot copy, Chance FX and count-in playing exactly as stock through the hooks |
