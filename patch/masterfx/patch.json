@@ -28,6 +28,13 @@
       "to": "mt_mfx_last_item",
       "next": "mt_mfx_next_last_item",
       "note": "Config menu constructor: last item (Licenses); then adds the Master FX folder (Reverb, Delay) to Project Settings, and puts the reverb and delay back to stock until the Pattern screen runs"
+    },
+    {
+      "at": "0x60114EAA",
+      "old": "52f094fa",
+      "to": "mt_mfx_save_name",
+      "next": "mt_mfx_next_save_name",
+      "note": "save request 0x60114e34, Save As only: bl strncpy(fm+0x340, name, 0x21) -> mt_mfx_save_name (the choices go with the project to its new name)"
     }
   ],
   "words": [
@@ -66,7 +73,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-mf4"
+      "note": "version text 1.2.0-mf5"
     }
   ]
 }

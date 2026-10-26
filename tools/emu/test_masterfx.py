@@ -47,7 +47,8 @@ audio graph does, with the block helpers stubbed (tools/emu/reverb_rig.py).
 5. Settings file: masterfx.bin per project, through the screens' update hooks with a fake
    SD card: default Stock and no file, one write a while after a change, per-project
    values, a damaged file and a file naming an unknown reverb (Stock, and the file is
-   kept), a file naming an unknown delay, a project without a name.
+   kept), a file naming an unknown delay, a project without a name; Save As and new
+   projects through the firmware's save request (project_save.save_as_checks).
 6. Cost: instructions per block with Stock (against stock firmware) and for each reverb
    and delay, and for a switch's clearing blocks.
 7. WAV files (if a folder is given): the same test sounds through the stock reverb,
@@ -74,10 +75,11 @@ from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
 from layout import patch_code  # noqa: E402
 from machine import Machine  # noqa: E402
 from patch_ptf import bl_target  # noqa: E402
+from project_save import save_as_checks  # noqa: E402
 
 B = tf.BLOCK
 REVERB = tf.REVERB
-MX_MAGIC = 0x5846464D
+MX_MAGIC = 0x3558464D
 REVERB_STOCK, REVERB_FREEVERB, REVERB_PLATE, REVERB_SPRING, REVERB_SHIMMER = 0, 1, 2, 3, 4
 REVERB_NAMES = ["Stock", "Freeverb", "Plate", "Spring", "Shimmer"]
 DELAY_STOCK, DELAY_TAPE, DELAY_BBD, DELAY_GATED = 0, 1, 2, 3
@@ -943,11 +945,13 @@ def file_checks(ptf: Path) -> None:
     n = writes()
     tick(SAVE_DELAY * 2)
     check(writes() == n, "project without a name: nothing written")
-    fs.set_project(Path("."), "C", "Projects/User")
-    tick()
-    check(value() == 1, "first save of a new project keeps its choice")
-    tick(SAVE_DELAY + 5)
-    check(fs.overlay.get(path("C"), b"") == hmf1(1), "and writes it to its folder")
+
+    def put(v):
+        m.w8(MX + 8, v[0])
+        m.w8(MX + 13, v[1])
+
+    save_as_checks(check, m, fs, tick, "masterfx.bin", lambda: (value(), delay()), put, (0, 0), (1, 1), (3, 2),
+                   lambda v: hmf1(*v), SAVE_DELAY)
     check(calls["pattern"] > 0 and calls["config"] > 0, f"stock update methods ran ({calls})")
 
 

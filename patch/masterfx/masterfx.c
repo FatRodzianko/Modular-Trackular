@@ -5,9 +5,13 @@
  * Project Settings gets a "Master FX" folder with two items: "Reverb", Stock (the
  * default), Freeverb, Plate, Spring or Shimmer, and "Delay", Stock (the default), Tape,
  * BBD or "Gated".
- * Each named project keeps its choices in <project folder>/masterfx.bin; a project
- * without the file, and every project in stock firmware, plays the stock reverb and
- * delay.
+ * Each saved project keeps its choices in <project folder>/masterfx.bin; a project
+ * without the file, a new project ("New Project", no path: nothing written until it
+ * has a folder), and every project in stock firmware, play the stock reverb and delay.
+ * Save As (a new project's first save is one; marked at the save request's name copy,
+ * 0x60114eaa) keeps the choices for the new name and writes them there, as the
+ * firmware copies only its own files. The file is read and written only while the
+ * file manager is idle.
  *
  * The reverb. The master reverb is one audio object (0x20019014) in the firmware's
  * Teensy-style audio graph; once per audio block its update() (vtable 0x60042f94,
@@ -49,7 +53,7 @@
 #include <stdint.h>
 
 #ifndef MASTERFX_VERSION
-#define MASTERFX_VERSION "mf4"
+#define MASTERFX_VERSION "mf5"
 #endif
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
@@ -59,6 +63,7 @@ CHAIN_WORD(mt_mfx_next_folder);             /* Project Settings: cfg_menu_folder
 CHAIN_WORD(mt_mfx_next_last_item);          /* last item: cfg_menu_item 0x601183e9 */
 CHAIN_WORD(mt_mfx_next_pattern_update);     /* Pattern screen update 0x600e1f99 */
 CHAIN_WORD(mt_mfx_next_config_update);      /* Config screen update 0x600c6475 */
+CHAIN_WORD(mt_mfx_next_save_name);          /* strncpy 0x601673d7 (Save As: the new name) */
 
 #include "freeverb_dsp.h"
 #include "plate_dsp.h"
@@ -70,8 +75,12 @@ CHAIN_WORD(mt_mfx_next_config_update);      /* Config screen update 0x600c6475 *
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */
 #define FW_FM               0x2001E488u     /* file manager object; *FW_FM = FS object */
-#define FW_PROJECT_PATH     ((const uint8_t *)(FW_FM + 0x241u))
-#define FW_PROJECT_NAME     ((const uint8_t *)(FW_FM + 0x340u))
+#define FM_STATE            0x13Du          /* file manager state; 0 or 0x0c when idle */
+#define FM_SUBSTATE         0x13Fu
+#define FW_PROJECT_PATH     ((const uint8_t *)(FW_FM + 0x241u))     /* 254 characters and a 0 */
+#define FW_PROJECT_NAME     ((const uint8_t *)(FW_FM + 0x340u))     /* 32 characters and a 0 */
+#define PATH_MAX_LEN        254u
+#define NAME_MAX_LEN        32u
 #define FW_PROJECT_SETTINGS 0x20028714u     /* Config menu folder "Project Settings" */
 #define FW_MENU_FOLDER      0x60118395u     /* (node, parent, label, capacity) */
 #define FW_MENU_ITEM        0x601183E9u     /* (node, parent, label, help, type, descriptor) */
@@ -90,6 +99,7 @@ typedef void *(*item_fn)(void *node, void *parent, const char *label, const char
                          uint32_t type, const void *descriptor);
 typedef void *(*malloc_fn)(uint32_t size);
 typedef int (*snprintf_fn)(char *buf, uint32_t size, const char *fmt, ...);
+typedef char *(*strncpy_fn)(char *dst, const char *src, uint32_t n);
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
@@ -108,7 +118,7 @@ typedef int (*snprintf_fn)(char *buf, uint32_t size, const char *fmt, ...);
 #define DL_BUFFERS          3u
 #define DL_BUFFER_WORDS     (TAPE_LEN / 2u)
 
-#define MX_MAGIC            0x5846464Du     /* "MFFX": the settings fields are valid */
+#define MX_MAGIC            0x3558464Du     /* "MFX5": the settings fields are valid (mf5's layout) */
 #define MX_READY            0x59444552u     /* "REDY": booted, a swapped reverb may run */
 #define SAVE_DELAY          25u             /* screen updates between a change and the save */
 
@@ -118,9 +128,9 @@ struct mfx_state {
     uint8_t reverb;                         /* the choice (the menu edits it): REVERB_* */
     uint8_t saved;                          /* what masterfx.bin holds for it */
     uint8_t saved_valid;
-    uint8_t unnamed;                        /* the session is a project without a name */
+    uint8_t load;                           /* the project's file is still to be read */
     uint8_t wait;                           /* updates left before saving */
-    uint8_t delay;                          /* the delay choice (the menu edits it): DELAY_* */
+    uint8_t delay;                         /* the delay choice (the menu edits it): DELAY_* */
     uint8_t saved_delay;                    /* what masterfx.bin holds for it */
     uint8_t pad;
     /* the audio side (reset at every start) */
@@ -137,6 +147,8 @@ struct mfx_state {
     uint8_t pad3;
     uint32_t dl_cleared;                    /* words of the delay buffers cleared so far */
     uint32_t dl_buf[DL_BUFFERS];            /* the buffers being cleared */
+    /* the settings again, last, so the audio side stays where the tests expect it */
+    uint32_t save_as;                       /* the session a Save As moves the choices to; 0: none */
 };
 static struct mfx_state mfx_state_ram __attribute__((section(".mt_ram")));
 #define MX (&mfx_state_ram)
@@ -148,8 +160,9 @@ static void mx_init_if_needed(void)         /* RAM outside .bss holds garbage at
     MX->reverb = REVERB_STOCK;
     MX->session = 0;
     MX->saved_valid = 0;
-    MX->unnamed = 0;                        /* the first project gets its file or the default */
+    MX->load = 0;
     MX->wait = 0;
+    MX->save_as = 0;
     MX->delay = DELAY_STOCK;
     MX->magic = MX_MAGIC;
 }
@@ -454,15 +467,32 @@ static uint32_t fnv1a(uint32_t h, uint32_t byte)
     return (h ^ byte) * 16777619u;
 }
 
+/* At most the lengths the firmware keeps: the Save As request copies the name before it
+ * writes its terminating 0. */
 static uint32_t project_session(void)
 {
     uint32_t h = 2166136261u;
-    for (uint32_t i = 0; i < 64 && FW_PROJECT_NAME[i]; i++)
+    for (uint32_t i = 0; i < NAME_MAX_LEN && FW_PROJECT_NAME[i]; i++)
         h = fnv1a(h, FW_PROJECT_NAME[i]);
     h = fnv1a(h, 0);
-    for (uint32_t i = 0; i < 255 && FW_PROJECT_PATH[i]; i++)
+    for (uint32_t i = 0; i < PATH_MAX_LEN && FW_PROJECT_PATH[i]; i++)
         h = fnv1a(h, FW_PROJECT_PATH[i]);
     return fnv1a(h, 0) | 1;                 /* never 0 */
+}
+
+/* A project with no folder yet: no name (while Workspace loads), or the new project
+ * 0x60117c8c makes, "New Project" with no path. */
+static int project_unsaved(void)
+{
+    static const char fresh[] = "New Project";
+    if (!FW_PROJECT_NAME[0])
+        return 1;
+    if (FW_PROJECT_PATH[0])
+        return 0;
+    for (uint32_t i = 0; i < sizeof fresh; i++)
+        if (FW_PROJECT_NAME[i] != (uint8_t)fresh[i])
+            return 0;
+    return 1;
 }
 
 static uint32_t data_sum(const uint8_t *v)
@@ -485,11 +515,18 @@ static uint32_t get32(const uint8_t *b)
 
 static int settings_path(char *path, uint32_t size)
 {
-    if (!FW_PROJECT_NAME[0])
+    if (project_unsaved())
         return 0;
     int n = ((snprintf_fn)FW_SNPRINTF)(path, size, "%s/%s/masterfx.bin",
                                        (const char *)FW_PROJECT_PATH, (const char *)FW_PROJECT_NAME);
     return n > 0 && (uint32_t)n < size;
+}
+
+static int file_manager_idle(void)
+{
+    const volatile uint8_t *fm = (const volatile uint8_t *)FW_FM;
+    uint8_t state = fm[FM_STATE];
+    return (state == 0 || state == 0x0C) && (fm[FM_SUBSTATE] & 0xFD) == 0;
 }
 
 /* 1: the file was read and applied */
@@ -553,34 +590,34 @@ static void settings_tick(void)
     if (!*(void **)FW_FM)
         return;
     uint32_t session = project_session();
-    int unnamed = !FW_PROJECT_NAME[0];
+    int unsaved = project_unsaved();
     if (session != MX->session) {
-        int keep = MX->unnamed;             /* a new project being saved for the first time */
+        int save_as = session == MX->save_as;   /* the same project under its new name */
+        MX->save_as = 0;
         MX->session = session;
-        MX->unnamed = (uint8_t)unnamed;
-        MX->saved_valid = 0;
+        MX->saved_valid = 0;                /* after a Save As: written to the new folder */
         MX->wait = SAVE_DELAY;
-        if (unnamed) {
-            if (!keep) {
-                MX->reverb = REVERB_STOCK;  /* a new, empty project */
-                MX->delay = DELAY_STOCK;
-            }
-        } else if (!settings_load()) {
-            if (!keep) {
-                MX->reverb = REVERB_STOCK;  /* a project without the file */
-                MX->delay = DELAY_STOCK;
-                MX->saved = REVERB_STOCK;
-                MX->saved_delay = DELAY_STOCK;
-                MX->saved_valid = 1;        /* nothing to write until the choice changes */
-            }
+        MX->load = (uint8_t)(!unsaved && !save_as);
+        if (!save_as) {
+            MX->reverb = REVERB_STOCK;      /* another project: its file, once read, decides */
+            MX->delay = DELAY_STOCK;
         }
+    }
+    if (!file_manager_idle())
+        return;
+    if (MX->load) {
+        MX->load = 0;
+        settings_load();                    /* none or a bad one: stock */
+        MX->saved = MX->reverb;
+        MX->saved_delay = MX->delay;
+        MX->saved_valid = 1;                /* nothing to write until the choice changes */
         return;
     }
     if (MX->reverb >= REVERBS)
         MX->reverb = REVERB_STOCK;
     if (MX->delay >= DELAYS)
         MX->delay = DELAY_STOCK;
-    if (unnamed || (MX->saved_valid && MX->reverb == MX->saved && MX->delay == MX->saved_delay)) {
+    if (unsaved || (MX->saved_valid && MX->reverb == MX->saved && MX->delay == MX->saved_delay)) {
         MX->wait = SAVE_DELAY;
         return;
     }
@@ -606,6 +643,18 @@ void mt_mfx_config_update(void *screen, void *a1, void *a2, void *a3)
 {
     settings_tick();
     ((screen_update_fn)mt_mfx_next_config_update)(screen, a1, a2, a3);
+}
+
+/* 0x60114eaa in the save request 0x60114e34: "bl strncpy(fm + 0x340, name, 0x21)",
+ * run only for Save As, after the new path is copied. The next tick sees the new
+ * session and keeps the choices for it. (Any screen: the request comes from the
+ * project screen, whose update isn't hooked.) */
+char *mt_mfx_save_name(char *dst, const char *src, uint32_t n)
+{
+    char *r = ((strncpy_fn)mt_mfx_next_save_name)(dst, src, n);
+    mx_init_if_needed();
+    MX->save_as = project_session();
+    return r;
 }
 
 /* ---- where the state is, for the emulator tests (tools/emu/reverb_rig.py): a marker,

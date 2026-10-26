@@ -24,9 +24,15 @@
  * call site; that one is hooked too.
  *
  * The settings: a "Global Swing" folder in Project Settings with "Global swing" (Off/On,
- * Off by default) and "Swing amount" (25..75, 50 by default). Each named project keeps
+ * Off by default) and "Swing amount" (25..75, 50 by default). Each saved project keeps
  * them in <project folder>/swing.bin, read and written from the Pattern and Config
- * screens' update methods, as humanize and interpolate do.
+ * screens' update methods, as humanize and interpolate do, only while the file manager
+ * is idle:
+ *  - another project: the defaults at once, then its file once the file manager is idle;
+ *  - Save As (and a new project's first save, which is one): the firmware copies only
+ *    its own files to the new folder, so the settings go with the project to its new
+ *    name and are written there. The Save As request's name copy (0x60114eaa) marks it;
+ *  - a new project ("New Project", no path) has no folder yet: nothing is written.
  *
  * Shared hooks go through chain words (mt_sw_next_*) that tools/patch_ptf.py fills with
  * what the site pointed to before, so other patches can hook them too.
@@ -34,13 +40,17 @@
 #include <stdint.h>
 
 #ifndef SWING_VERSION
-#define SWING_VERSION "sw1"
+#define SWING_VERSION "sw2"
 #endif
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */
 #define FW_FM               0x2001E488u     /* file manager object; *FW_FM = FS object */
-#define FW_PROJECT_PATH     ((const uint8_t *)(FW_FM + 0x241u))
-#define FW_PROJECT_NAME     ((const uint8_t *)(FW_FM + 0x340u))
+#define FM_STATE            0x13Du          /* file manager state; 0 or 0x0c when idle */
+#define FM_SUBSTATE         0x13Fu
+#define FW_PROJECT_PATH     ((const uint8_t *)(FW_FM + 0x241u))     /* 254 characters and a 0 */
+#define FW_PROJECT_NAME     ((const uint8_t *)(FW_FM + 0x340u))     /* 32 characters and a 0 */
+#define PATH_MAX_LEN        254u
+#define NAME_MAX_LEN        32u
 #define FW_PROJECT_SETTINGS 0x20028714u     /* Config menu folder "Project Settings" */
 #define FW_MENU_FOLDER      0x60118395u     /* (node, parent, label, capacity) */
 #define FW_MENU_ITEM        0x601183E9u     /* (node, parent, label, help, type, descriptor) */
@@ -71,6 +81,7 @@ typedef void *(*item_fn)(void *node, void *parent, const char *label, const char
                          uint32_t type, const void *descriptor);
 typedef void *(*malloc_fn)(uint32_t size);
 typedef int (*snprintf_fn)(char *buf, uint32_t size, const char *fmt, ...);
+typedef char *(*strncpy_fn)(char *dst, const char *src, uint32_t n);
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
  * compiler must read them, not assume the 0 they are linked with. */
@@ -82,10 +93,11 @@ CHAIN_WORD(mt_sw_next_folder);              /* Project Settings: cfg_menu_folder
 CHAIN_WORD(mt_sw_next_last_item);           /* last item: cfg_menu_item 0x601183e9 */
 CHAIN_WORD(mt_sw_next_pattern_update);      /* Pattern screen update 0x600e1f99 */
 CHAIN_WORD(mt_sw_next_config_update);       /* Config screen update 0x600c6475 */
+CHAIN_WORD(mt_sw_next_save_name);           /* strncpy 0x601673d7 (Save As: the new name) */
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
-#define SW_MAGIC            0x57534D47u     /* "GMSW" */
+#define SW_MAGIC            0x32534D47u     /* "GMS2": the state's layout of sw2 */
 #define SAVE_DELAY          25u             /* screen updates between a change and the save */
 
 struct sw_state {
@@ -95,13 +107,14 @@ struct sw_state {
     uint8_t amount;                         /* Swing amount - 25, 0..50 (the menu edits it) */
     uint8_t saved_on, saved_amount;         /* what swing.bin holds */
     uint8_t saved_valid;
-    uint8_t unnamed;                        /* the session is a project without a name */
+    uint8_t load;                           /* the project's file is still to be read */
     uint8_t wait;                           /* updates left before saving */
     /* the audio side */
     uint8_t was_on;                         /* Global swing as last seen there */
     uint8_t was_playing;
     uint8_t applied;                        /* the amount last set */
     uint8_t pad[2];
+    uint32_t save_as;                       /* the session a Save As moves the settings to; 0: none */
 };
 static struct sw_state sw_state_ram __attribute__((section(".mt_ram")));
 #define SW (&sw_state_ram)
@@ -114,8 +127,9 @@ static void sw_init_if_needed(void)         /* RAM outside .bss holds garbage at
     SW->amount = SWING_NONE - SWING_MIN;
     SW->session = 0;
     SW->saved_valid = 0;
-    SW->unnamed = 0;
+    SW->load = 0;
     SW->wait = 0;
+    SW->save_as = 0;
     SW->was_on = 0;
     SW->was_playing = 0;
     SW->applied = 0xFF;
@@ -269,15 +283,32 @@ static uint32_t fnv1a(uint32_t h, uint32_t byte)
     return (h ^ byte) * 16777619u;
 }
 
+/* At most the lengths the firmware keeps: the Save As request copies the name before it
+ * writes its terminating 0. */
 static uint32_t project_session(void)
 {
     uint32_t h = 2166136261u;
-    for (uint32_t i = 0; i < 64 && FW_PROJECT_NAME[i]; i++)
+    for (uint32_t i = 0; i < NAME_MAX_LEN && FW_PROJECT_NAME[i]; i++)
         h = fnv1a(h, FW_PROJECT_NAME[i]);
     h = fnv1a(h, 0);
-    for (uint32_t i = 0; i < 255 && FW_PROJECT_PATH[i]; i++)
+    for (uint32_t i = 0; i < PATH_MAX_LEN && FW_PROJECT_PATH[i]; i++)
         h = fnv1a(h, FW_PROJECT_PATH[i]);
     return fnv1a(h, 0) | 1;                 /* never 0 */
+}
+
+/* A project with no folder yet: no name (while Workspace loads), or the new project
+ * 0x60117c8c makes, "New Project" with no path. */
+static int project_unsaved(void)
+{
+    static const char fresh[] = "New Project";
+    if (!FW_PROJECT_NAME[0])
+        return 1;
+    if (FW_PROJECT_PATH[0])
+        return 0;
+    for (uint32_t i = 0; i < sizeof fresh; i++)
+        if (FW_PROJECT_NAME[i] != (uint8_t)fresh[i])
+            return 0;
+    return 1;
 }
 
 static uint32_t data_sum(const uint8_t *v)
@@ -300,11 +331,18 @@ static uint32_t get32(const uint8_t *b)
 
 static int settings_path(char *path, uint32_t size)
 {
-    if (!FW_PROJECT_NAME[0])
+    if (project_unsaved())
         return 0;
     int n = ((snprintf_fn)FW_SNPRINTF)(path, size, "%s/%s/swing.bin",
                                        (const char *)FW_PROJECT_PATH, (const char *)FW_PROJECT_NAME);
     return n > 0 && (uint32_t)n < size;
+}
+
+static int file_manager_idle(void)
+{
+    const volatile uint8_t *fm = (const volatile uint8_t *)FW_FM;
+    uint8_t state = fm[FM_STATE];
+    return (state == 0 || state == 0x0C) && (fm[FM_SUBSTATE] & 0xFD) == 0;
 }
 
 static void defaults(void)
@@ -374,31 +412,32 @@ static void settings_tick(void)
     if (!*(void **)FW_FM)
         return;
     uint32_t session = project_session();
-    int unnamed = !FW_PROJECT_NAME[0];
+    int unsaved = project_unsaved();
     if (session != SW->session) {
-        int keep = SW->unnamed;             /* a new project being saved for the first time */
+        int save_as = session == SW->save_as;   /* the same project under its new name */
+        SW->save_as = 0;
         SW->session = session;
-        SW->unnamed = (uint8_t)unnamed;
-        SW->saved_valid = 0;
+        SW->saved_valid = 0;                /* after a Save As: written to the new folder */
         SW->wait = SAVE_DELAY;
-        if (unnamed) {
-            if (!keep)
-                defaults();                 /* a new, empty project */
-        } else if (!settings_load()) {
-            if (!keep) {
-                defaults();                 /* a project without the file */
-                SW->saved_on = SW->on;
-                SW->saved_amount = SW->amount;
-                SW->saved_valid = 1;        /* nothing to write until a setting changes */
-            }
-        }
+        SW->load = (uint8_t)(!unsaved && !save_as);
+        if (!save_as)
+            defaults();                     /* another project: its file, once read, decides */
+    }
+    if (!file_manager_idle())
+        return;
+    if (SW->load) {
+        SW->load = 0;
+        settings_load();                    /* none or a bad one: the defaults */
+        SW->saved_on = SW->on;
+        SW->saved_amount = SW->amount;
+        SW->saved_valid = 1;                /* nothing to write until a setting changes */
         return;
     }
     if (SW->on > 1)
         SW->on = 0;
     if (SW->amount > SWING_MAX - SWING_MIN)
         SW->amount = SWING_NONE - SWING_MIN;
-    if (unnamed || (SW->saved_valid && SW->on == SW->saved_on && SW->amount == SW->saved_amount)) {
+    if (unsaved || (SW->saved_valid && SW->on == SW->saved_on && SW->amount == SW->saved_amount)) {
         SW->wait = SAVE_DELAY;
         return;
     }
@@ -422,6 +461,18 @@ void mt_sw_config_update(void *screen, void *a1, void *a2, void *a3)
 {
     settings_tick();
     ((update_fn)mt_sw_next_config_update)(screen, a1, a2, a3);
+}
+
+/* 0x60114eaa in the save request 0x60114e34: "bl strncpy(fm + 0x340, name, 0x21)",
+ * run only for Save As, after the new path is copied. The next tick sees the new
+ * session and keeps the settings for it. (Any screen: the request comes from the
+ * project screen, whose update isn't hooked.) */
+char *mt_sw_save_name(char *dst, const char *src, uint32_t n)
+{
+    char *r = ((strncpy_fn)mt_sw_next_save_name)(dst, src, n);
+    sw_init_if_needed();
+    SW->save_as = project_session();
+    return r;
 }
 
 /* ---- version text: Config shows 1.2.0-<SWING_VERSION> ----------------------------- */

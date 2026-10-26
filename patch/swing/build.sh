@@ -30,7 +30,7 @@ CFLAGS=(-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -Os -std=c11
 link() {                               # link <linker script> <elf> <map>
     "$ARM_GCC_BIN/arm-none-eabi-gcc" -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 \
         -nostdlib -nostartfiles -T "$1" -Wl,--gc-sections \
-        -Wl,--undefined=mt_sw_seq_advance -Wl,--undefined=mt_sw_render_advance -Wl,--undefined=mt_sw_advance_step -Wl,--undefined=mt_sw_settings_folder -Wl,--undefined=mt_sw_last_item -Wl,--undefined=mt_sw_pattern_update -Wl,--undefined=mt_sw_config_update -Wl,--undefined=mt_version_fmt \
+        -Wl,--undefined=mt_sw_seq_advance -Wl,--undefined=mt_sw_render_advance -Wl,--undefined=mt_sw_advance_step -Wl,--undefined=mt_sw_settings_folder -Wl,--undefined=mt_sw_last_item -Wl,--undefined=mt_sw_pattern_update -Wl,--undefined=mt_sw_config_update -Wl,--undefined=mt_sw_save_name -Wl,--undefined=mt_version_fmt \
         -Wl,-Map="$3" "$OUT/swing.o" -o "$2"
 }
 link "$HERE/link.ld" "$OUT/swing.elf" "$OUT/swing.map"

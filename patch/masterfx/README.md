@@ -9,7 +9,7 @@ and master delay:
 
 The sends work as always, and the Master Reverb and Master Delay pages set the chosen
 effect. Each effect gives the knobs its own meaning, described below. Installed on its
-own, Config shows the firmware version as `1.2.0-mf4`.
+own, Config shows the firmware version as `1.2.0-mf5`.
 
 **Status:** tested on hardware, on its own and together with colorsong, humanize and
 interpolate (in both orders): every reverb and delay, switching, also during playback,
@@ -21,7 +21,9 @@ and the choices saved per project.
    and any project that never had them changed, uses Stock for both.
 2. The choices are saved with the project (in `masterfx.bin` in the project's folder), a
    moment after you change them. Loading another project switches to that project's
-   effects.
+   effects. Save As keeps the choices for the project's new name and writes them to its
+   new folder (also on a new project's first save, and on Save As over another
+   project).
 3. Send to the effects as usual (the reverb and delay send FX, the instruments' and
    synths' Reverb and Delay Sends), and set them on Master → Reverb and Master → Delay
    with the knobs below.
@@ -163,6 +165,7 @@ sends it on as the reverb return. The master delay is another (`0x20018fc0`): it
 | `mt_mfx_last_item` | the Config menu constructor's last `bl cfg_menu_item` (`0x601193e6`, chained) | Adds the Master FX folder with the Reverb and Delay items; runs at every start, so it also puts both effects back to stock until the Pattern screen runs |
 | `mt_mfx_pattern_update` | Pattern screen vtable slot `0x600403dc` (chained) | Reads and writes `masterfx.bin`; the unit has booted, so the chosen effects may run |
 | `mt_mfx_config_update` | Config screen vtable slot `0x6003b5f8` (chained) | Reads and writes `masterfx.bin` |
+| `mt_mfx_save_name` | `bl strncpy` at `0x60114eaa` in the save request `0x60114e34` (the new name; Save As only; chained) | Marks the Save As, so the choices go with the project to its new name and are written there |
 
 - **Stock:** the hooks call the stock `update()` and nothing else, so with Stock chosen
   the reverb and the delay are exactly the stock ones (the emulator tests compare them
@@ -257,8 +260,10 @@ sends it on as the reverb return. The master delay is another (`0x20018fc0`): it
   1 Freeverb, 2 Plate, 3 Spring, 4 Shimmer), the delay (0 Stock, 1 Tape, 2 BBD,
   3 "Gated"), two zero bytes and a checksum. A missing or damaged file, or one naming an
   effect this firmware doesn't have, means Stock for both (and the file is left as it
-  is). A project without a name (not saved yet) writes no file; it gets one when it is
-  saved.
+  is). It is read and written only while the file manager is idle. A project with no
+  folder yet (the new project "New Project", which has no path) writes no file; it gets
+  one when it is first saved. The firmware's Save As copies only its own files, so the
+  patch writes `masterfx.bin` to the new folder itself.
 - **Memory:** the patch's RAM (816 bytes: the choices, and each effect's positions and
   filter states) is on-chip (the OCRAM tail, or the DTCM gap above the heap in a
   bundle). The Master FX folder and its items come from the firmware's heap.
@@ -344,7 +349,8 @@ is (`mt_mfx_ram_map`), which the tests read. It checks:
   stock Apply stores every choice.
 - **File:** `masterfx.bin` through the screens' update hooks with a fake SD card:
   per-project choices, one write a while after a change, damaged and unknown files, a
-  project without a name.
+  project without a name; Save As and new projects through the firmware's own save
+  request (`tools/emu/project_save.py`).
 - **Cost:** instructions per block for each effect, and for a switch's clearing blocks.
 
 With a folder given, it also writes the WAV files the samples here were cut from: the
@@ -378,7 +384,7 @@ python tools/emu/compare_masterfx.py build/TrackerPlus_a.ptf build/TrackerPlus_b
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-mf4 Build 1504`.
+Config → Firmware → the patched file. Config should show `1.2.0-mf5 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Projects play with the stock
 effects again; their `masterfx.bin` files stay in their folders and do nothing in stock

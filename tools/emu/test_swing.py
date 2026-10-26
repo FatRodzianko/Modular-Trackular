@@ -23,7 +23,8 @@ swing s a pair of steps lasts two plain steps, split (s + 50) : (150 - s).
    Off) and "Swing amount" (25..75, showing 50); the stock Apply stores the values.
 4. Settings file: swing.bin per project, through the screens' update hooks with a fake
    SD card: defaults and no file, one write a while after a change, per-project values,
-   a damaged file, a project without a name.
+   a damaged file, a project without a name; Save As and new projects through the
+   firmware's save request (project_save.save_as_checks).
 """
 from __future__ import annotations
 
@@ -39,6 +40,7 @@ from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
 from layout import patch_code, patch_ram  # noqa: E402
 from machine import Machine  # noqa: E402
 from patch_ptf import bl_target  # noqa: E402
+from project_save import save_as_checks  # noqa: E402
 import seq_timing as st  # noqa: E402
 
 SEQ = st.SEQ
@@ -316,10 +318,13 @@ def file_checks(ptf: Path) -> None:
     n = writes()
     tick(SAVE_DELAY * 2)
     check(writes() == n, "project without a name: nothing written")
-    fs.set_project(Path("."), "C", "Projects/User")
-    tick()
-    tick(SAVE_DELAY + 5)
-    check(fs.overlay.get(path("C"), b"")[:6] == hsw1(1, 50)[:6], "first save of a new project keeps its settings")
+
+    def put(v):
+        m.w8(SW + 8, v[0])
+        m.w8(SW + 9, v[1] - 25)
+
+    save_as_checks(check, m, fs, tick, "swing.bin", values, put, (0, 50), (1, 70), (1, 30),
+                   lambda v: hsw1(*v), SAVE_DELAY)
 
 
 def main() -> int:

@@ -30,7 +30,7 @@ CFLAGS=(-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -Os -std=c11
 link() {                               # link <linker script> <elf> <map>
     "$ARM_GCC_BIN/arm-none-eabi-gcc" -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 \
         -nostdlib -nostartfiles -T "$1" -Wl,--gc-sections \
-        -Wl,--undefined=mt_hz_bind -Wl,--undefined=mt_hz_label -Wl,--undefined=mt_hz_colors -Wl,--undefined=mt_hz_data -Wl,--undefined=mt_version_fmt -Wl,--undefined=mt_hz_settings_folder -Wl,--undefined=mt_hz_last_item -Wl,--undefined=mt_hz_pattern_update -Wl,--undefined=mt_hz_config_update \
+        -Wl,--undefined=mt_hz_bind -Wl,--undefined=mt_hz_label -Wl,--undefined=mt_hz_colors -Wl,--undefined=mt_hz_data -Wl,--undefined=mt_hz_save_name -Wl,--undefined=mt_version_fmt -Wl,--undefined=mt_hz_settings_folder -Wl,--undefined=mt_hz_last_item -Wl,--undefined=mt_hz_pattern_update -Wl,--undefined=mt_hz_config_update \
         -Wl,-Map="$3" "$OUT/humanize.o" -o "$2"
 }
 link "$HERE/link.ld" "$OUT/humanize.elf" "$OUT/humanize.map"

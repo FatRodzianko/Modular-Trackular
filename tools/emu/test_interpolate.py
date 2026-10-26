@@ -42,7 +42,8 @@ Works with the interpolate-only build and with bundles that include it.
 3. Settings file: interpolate.bin per project, through the screens' update hooks with
    a fake SD card, as for humanize: default Off and no file, one write a while after a
    change (both settings in it), per-project values, a file from before the synth
-   setting (synths Off), a damaged file, a project without a name.
+   setting (synths Off), a damaged file, a project without a name; Save As and new
+   projects through the firmware's save request (project_save.save_as_checks).
 """
 from __future__ import annotations
 
@@ -60,6 +61,7 @@ from patch_ptf import bl_target  # noqa: E402
 from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
 from layout import patch_code, patch_ram  # noqa: E402
 from machine import Machine  # noqa: E402
+from project_save import save_as_checks  # noqa: E402
 from seq_timing import PROJECT, SEQ, SEQ_PLAY_FROM, SETTINGS, make, pattern, set_step  # noqa: E402
 
 APP, APP_AUDIO_BLOCK = 0x200170E0, 0x600AA7C8
@@ -71,7 +73,7 @@ RENDER_CALL = 0x600BC27A            # the render loop's bl seq_advance (hooked)
 SYNTH = 64                          # S1; S2 = 65, S3 = 66
 AUDIO_STUBS = (0x6010C2C0, 0x6010C2EC, 0x600AB89C, 0x600AA848, 0x600AA850)
 IP = 0                              # the patch's state: from the .map.json
-IP_MAGIC = 0x5049544D
+IP_MAGIC = 0x36504D4D
 IP_VALUE = 0                        # IP + 8: Interpolate MIDI CC, 0 Off / 1 On
 IP_SYNTH = 0                        # IP + 16: Interpolate synths
 CC_NUMBERS = PROJECT + 0xAB3        # + 0x10 * (channel - 1) + letter
@@ -695,11 +697,13 @@ def file_checks(ptf: Path) -> None:
     n = writes()
     tick(SAVE_DELAY * 2)
     check(writes() == n, "project without a name: nothing written")
-    fs.set_project(Path("."), "C", "Projects/User")
-    tick()
-    check(values() == (1, 1), "first save of a new project keeps its values")
-    tick(SAVE_DELAY + 5)
-    check(fs.overlay.get(path("C"), b"") == hip1(1, 1), "and writes them to its folder")
+
+    def put(v):
+        m.w8(IP_VALUE, v[0])
+        m.w8(IP_SYNTH, v[1])
+
+    save_as_checks(check, m, fs, tick, "interpolate.bin", values, put, (0, 0), (1, 1), (0, 1),
+                   lambda v: hip1(*v), SAVE_DELAY)
     check(calls["pattern"] > 0 and calls["config"] > 0, f"stock update methods ran ({calls})")
 
 

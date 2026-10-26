@@ -48,9 +48,13 @@
  * The settings. Project Settings gets an "FX Interpolation" folder with two Off/On
  * items, both Off by default: "MIDI CC" (MIDI channel instruments) and "Synths"
  * (S1..S3, also when rendering). The folder and item nodes come from the firmware's
- * heap, as humanize's do. Each named project keeps them in <project folder>/
+ * heap, as humanize's do. Each saved project keeps them in <project folder>/
  * interpolate.bin, read and written from the Pattern and Config screens' update
- * methods, in the same way as humanize.
+ * methods, only while the file manager is idle, in the same way as humanize: another
+ * project gets Off at once, then its file; Save As (a new project's first save is one;
+ * marked at the save request's name copy, 0x60114eaa) keeps them for the new name and
+ * writes them there, as the firmware copies only its own files; a new project ("New
+ * Project", no path) writes nothing until it has a folder.
  *
  * Shared hooks. The Project Settings folder, the menu constructor's last item, the
  * two update methods and the two seq_advance calls are hooked through chain words
@@ -65,13 +69,17 @@
 #include <stdint.h>
 
 #ifndef INTERPOLATE_VERSION
-#define INTERPOLATE_VERSION "ip5"
+#define INTERPOLATE_VERSION "ip6"
 #endif
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */
 #define FW_FM               0x2001E488u     /* file manager object; *FW_FM = FS object */
-#define FW_PROJECT_PATH     ((const uint8_t *)(FW_FM + 0x241u))
-#define FW_PROJECT_NAME     ((const uint8_t *)(FW_FM + 0x340u))
+#define FM_STATE            0x13Du          /* file manager state; 0 or 0x0c when idle */
+#define FM_SUBSTATE         0x13Fu
+#define FW_PROJECT_PATH     ((const uint8_t *)(FW_FM + 0x241u))     /* 254 characters and a 0 */
+#define FW_PROJECT_NAME     ((const uint8_t *)(FW_FM + 0x340u))     /* 32 characters and a 0 */
+#define PATH_MAX_LEN        254u
+#define NAME_MAX_LEN        32u
 #define FW_PROJECT_SETTINGS 0x20028714u     /* Config menu folder "Project Settings" */
 #define FW_SETTINGS         0x2002061Cu     /* global settings: +0x2c MIDI out */
 #define FW_CC_NUMBERS       0x20204AB3u     /* + 0x10 * (channel - 1) + letter: CC number */
@@ -132,6 +140,7 @@ typedef void *(*item_fn)(void *node, void *parent, const char *label, const char
                          uint32_t type, const void *descriptor);
 typedef void *(*malloc_fn)(uint32_t size);
 typedef int (*snprintf_fn)(char *buf, uint32_t size, const char *fmt, ...);
+typedef char *(*strncpy_fn)(char *dst, const char *src, uint32_t n);
 typedef void (*update_fn)(void *screen, void *a1, void *a2, void *a3);
 typedef void (*advance_fn)(void *seq, float seconds);
 
@@ -144,6 +153,7 @@ CHAIN_WORD(mt_ip_next_folder);              /* Project Settings: cfg_menu_folder
 CHAIN_WORD(mt_ip_next_last_item);           /* last item: cfg_menu_item 0x601183e9 */
 CHAIN_WORD(mt_ip_next_pattern_update);      /* Pattern screen update 0x600e1f99 */
 CHAIN_WORD(mt_ip_next_config_update);       /* Config screen update 0x600c6475 */
+CHAIN_WORD(mt_ip_next_save_name);           /* strncpy 0x601673d7 (Save As: the new name) */
 
 /* CC FX types for the letters a..f, and the other way round: FX type -> letter + 1 */
 static const uint8_t cc_type[LETTERS] = {8, 9, 10, 11, 12, 37};
@@ -152,7 +162,7 @@ static const uint8_t cc_letter[FX_TYPES] = {[8] = 1, [9] = 2, [10] = 3, [11] = 4
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
-#define IP_MAGIC            0x5049544Du     /* "MTIP" */
+#define IP_MAGIC            0x36504D4Du     /* "MMP6": the state's layout of ip6 */
 #define SAVE_DELAY          25u             /* screen updates between a change and the save */
 #define NO_STEP             0xFFFFu
 #define NOT_SENT            0xFFu
@@ -200,7 +210,7 @@ struct ip_state {
     uint8_t value;                          /* MIDI CC: 0 Off, 1 On (the menu edits it) */
     uint8_t saved;                          /* what interpolate.bin holds for it */
     uint8_t saved_valid;
-    uint8_t unnamed;                        /* the session is a project without a name */
+    uint8_t load;                           /* the project's file is still to be read */
     uint8_t wait;                           /* updates left before saving */
     uint8_t running;                        /* the ramps below are valid */
     uint8_t next_ramp;                      /* round-robin start for sending, 0..95 */
@@ -208,6 +218,7 @@ struct ip_state {
     uint8_t synth;                          /* Synths: 0 Off, 1 On (the menu edits it) */
     uint8_t saved_synth;                    /* what interpolate.bin holds for it */
     uint8_t pad[2];
+    uint32_t save_as;                       /* the session a Save As moves the settings to; 0: none */
     struct track_state track[PAT_TRACKS];
 #ifdef IP_DIAG
     struct ip_diag diag;
@@ -233,8 +244,9 @@ static void ip_init_if_needed(void)         /* RAM outside .bss holds garbage at
     IP->synth = 0;
     IP->session = 0;
     IP->saved_valid = 0;
-    IP->unnamed = 0;                        /* the first project gets its file or the default */
+    IP->load = 0;
     IP->wait = 0;
+    IP->save_as = 0;
     IP->running = 0;
     IP->next_ramp = 0;
     IP->next_scan = 0;
@@ -680,15 +692,32 @@ static uint32_t fnv1a(uint32_t h, uint32_t byte)
     return (h ^ byte) * 16777619u;
 }
 
+/* At most the lengths the firmware keeps: the Save As request copies the name before it
+ * writes its terminating 0. */
 static uint32_t project_session(void)
 {
     uint32_t h = 2166136261u;
-    for (uint32_t i = 0; i < 64 && FW_PROJECT_NAME[i]; i++)
+    for (uint32_t i = 0; i < NAME_MAX_LEN && FW_PROJECT_NAME[i]; i++)
         h = fnv1a(h, FW_PROJECT_NAME[i]);
     h = fnv1a(h, 0);
-    for (uint32_t i = 0; i < 255 && FW_PROJECT_PATH[i]; i++)
+    for (uint32_t i = 0; i < PATH_MAX_LEN && FW_PROJECT_PATH[i]; i++)
         h = fnv1a(h, FW_PROJECT_PATH[i]);
     return fnv1a(h, 0) | 1;                 /* never 0 */
+}
+
+/* A project with no folder yet: no name (while Workspace loads), or the new project
+ * 0x60117c8c makes, "New Project" with no path. */
+static int project_unsaved(void)
+{
+    static const char fresh[] = "New Project";
+    if (!FW_PROJECT_NAME[0])
+        return 1;
+    if (FW_PROJECT_PATH[0])
+        return 0;
+    for (uint32_t i = 0; i < sizeof fresh; i++)
+        if (FW_PROJECT_NAME[i] != (uint8_t)fresh[i])
+            return 0;
+    return 1;
 }
 
 static uint32_t data_sum(const uint8_t *v)
@@ -711,11 +740,18 @@ static uint32_t get32(const uint8_t *b)
 
 static int settings_path(char *path, uint32_t size)
 {
-    if (!FW_PROJECT_NAME[0])
+    if (project_unsaved())
         return 0;
     int n = ((snprintf_fn)FW_SNPRINTF)(path, size, "%s/%s/interpolate.bin",
                                        (const char *)FW_PROJECT_PATH, (const char *)FW_PROJECT_NAME);
     return n > 0 && (uint32_t)n < size;
+}
+
+static int file_manager_idle(void)
+{
+    const volatile uint8_t *fm = (const volatile uint8_t *)FW_FM;
+    uint8_t state = fm[FM_STATE];
+    return (state == 0 || state == 0x0C) && (fm[FM_SUBSTATE] & 0xFD) == 0;
 }
 
 /* 1: the file was read and applied */
@@ -777,26 +813,28 @@ static void settings_tick(void)
     if (!*(void **)FW_FM)
         return;
     uint32_t session = project_session();
-    int unnamed = !FW_PROJECT_NAME[0];
+    int unsaved = project_unsaved();
     if (session != IP->session) {
-        int keep = IP->unnamed;             /* a new project being saved for the first time */
+        int save_as = session == IP->save_as;   /* the same project under its new name */
+        IP->save_as = 0;
         IP->session = session;
-        IP->unnamed = (uint8_t)unnamed;
-        IP->saved_valid = 0;
+        IP->saved_valid = 0;                /* after a Save As: written to the new folder */
         IP->wait = SAVE_DELAY;
-        if (unnamed) {
-            if (!keep)
-                IP->value = IP->synth = 0;  /* a new, empty project */
-        } else if (!settings_load()) {
-            if (!keep) {
-                IP->value = IP->synth = 0;  /* a project without the file */
-                IP->saved = IP->saved_synth = 0;
-                IP->saved_valid = 1;        /* nothing to write until the value changes */
-            }
-        }
+        IP->load = (uint8_t)(!unsaved && !save_as);
+        if (!save_as)
+            IP->value = IP->synth = 0;      /* another project: its file, once read, decides */
+    }
+    if (!file_manager_idle())
+        return;
+    if (IP->load) {
+        IP->load = 0;
+        settings_load();                    /* none or a bad one: Off */
+        IP->saved = IP->value;
+        IP->saved_synth = IP->synth;
+        IP->saved_valid = 1;                /* nothing to write until the value changes */
         return;
     }
-    if (unnamed || (IP->saved_valid && IP->value == IP->saved && IP->synth == IP->saved_synth)) {
+    if (unsaved || (IP->saved_valid && IP->value == IP->saved && IP->synth == IP->saved_synth)) {
         IP->wait = SAVE_DELAY;
         return;
     }
@@ -824,6 +862,18 @@ void mt_ip_config_update(void *screen, void *a1, void *a2, void *a3)
 #endif
     settings_tick();
     ((update_fn)mt_ip_next_config_update)(screen, a1, a2, a3);
+}
+
+/* 0x60114eaa in the save request 0x60114e34: "bl strncpy(fm + 0x340, name, 0x21)",
+ * run only for Save As, after the new path is copied. The next tick sees the new
+ * session and keeps the settings for it. (Any screen: the request comes from the
+ * project screen, whose update isn't hooked.) */
+char *mt_ip_save_name(char *dst, const char *src, uint32_t n)
+{
+    char *r = ((strncpy_fn)mt_ip_next_save_name)(dst, src, n);
+    ip_init_if_needed();
+    IP->save_as = project_session();
+    return r;
 }
 
 /* ---- version text: Config shows 1.2.0-<INTERPOLATE_VERSION> --------------------- */

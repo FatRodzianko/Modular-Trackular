@@ -139,6 +139,11 @@
     "8aed6732660f5c8e8ab231b20fbfa58bfaf3b875896ce790b5b9ae2bd6552232": "slicethru (1.2.0-bt4)",
     "eec53343f9fc18ed981863af0808761974ee23024158705df4c362a87442fee8": "all twelve mods with slicethru bt4 (1.2.0-MT4)",
     "5f50698d8545833a6c6a7cbba495de4004da2cd9250b36e7ad548f50dc4981e8": "slicethru (1.2.0-bt5)",
-    "61446c44bfd6669dd1044da4415ceb13f0df6b47c6f6a49ad37f2405195ae4f7": "all twelve mods (1.2.0-MT5)"
+    "61446c44bfd6669dd1044da4415ceb13f0df6b47c6f6a49ad37f2405195ae4f7": "all twelve mods before the Save As fix (1.2.0-MT5)",
+    "05a3f65fb21381224f95f0e41f1782909b86fbe0628cbaa9263da18e4ac1a275": "swing (1.2.0-sw2)",
+    "1b4585815fa0c66b5689135375f2da8e7bfec57cce6f5cf2e62592f4c4765626": "humanize (1.2.0-hz9)",
+    "598dc01fb55ec0549c9809d2a14702e591354f29a07c0ad7d7401d405171391e": "interpolate (1.2.0-ip6)",
+    "f7ec780456867eac7a8cb469d6bb929949ef7a334ccaeb1c0c645863c8657a5a": "masterfx (1.2.0-mf5)",
+    "ac0edf2f1f2d3077e3c9f95babd136f065ca40ec18080e23d8cab1f496f595c9": "all twelve mods (1.2.0-MTS)"
   }
 }

@@ -38,6 +38,13 @@
       "to": "mt_ip_last_item",
       "next": "mt_ip_next_last_item",
       "note": "Config menu constructor: last item (Licenses); then adds the FX Interpolation folder (MIDI CC, Synths) to Project Settings"
+    },
+    {
+      "at": "0x60114EAA",
+      "old": "52f094fa",
+      "to": "mt_ip_save_name",
+      "next": "mt_ip_next_save_name",
+      "note": "save request 0x60114e34, Save As only: bl strncpy(fm+0x340, name, 0x21) -> mt_ip_save_name (the settings go with the project to its new name)"
     }
   ],
   "words": [
@@ -62,7 +69,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-ip5"
+      "note": "version text 1.2.0-ip6"
     }
   ]
 }

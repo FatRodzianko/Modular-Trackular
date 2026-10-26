@@ -2,6 +2,7 @@
 
   python tools/run_tests.py <stock TrackerPlus_1.2.0.ptf> [--tier quick|release|deep]
                             [--jobs N] [--no-cache] [--out DIR] [--dry-run] [--update]
+                            [--mixes-of a,b,...]
 
 Tiers (times with an empty cache on an 8-core PC; with the cache, only what changed runs):
   quick    (about 2 min) tools/test_layout.py, plus every patch's emulator test on each patch alone
@@ -40,6 +41,10 @@ patch/all gets the --quick run (the checks that depend on the mix) instead; the 
 always runs full mode. The harness keeps its own cache, per selection (see
 test_web_patcher.py), so after a change to one patch it redoes only the selections that
 contain it.
+
+--mixes-of a,b,... (release and deep): also every patch's test on every web mix of two
+or more of these mods and no others (26 for five), for a change to a hook they all
+share, beyond the cover set's neighbour pairs.
 
 --update (release and deep): the harness rewrites web/expected.json (the hashes the
 page accepts) when everything else in it passes, as test_web_patcher.py --update does.
@@ -323,6 +328,9 @@ def main() -> int:
     update = "--update" in opts
     if update and tier == "quick":
         sys.exit("--update needs --tier release or deep (the quick tier doesn't run the web harness)")
+    mixes_of = [n for n in opt("--mixes-of", "").split(",") if n]
+    if mixes_of and tier == "quick":
+        sys.exit("--mixes-of needs --tier release or deep (the mixes are the web harness's outputs)")
     workers = int(opt("--jobs", max(1, (os.cpu_count() or 2) - 1)))
     out = Path(opt("--out", ROOT / "build" / "testrun")).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -398,6 +406,15 @@ def main() -> int:
         print(f"cover set: {len(cover)} of {len(mixes) + 1} mixes, plus {len(extra)} bundles in other orders",
               flush=True)
         (out / "cover_set.txt").write_text("".join(f"{f.stem}\n" for f in cover))
+        if mixes_of:
+            unknown = set(mixes_of) - set(names)
+            if unknown:
+                sys.exit(f"--mixes-of: no mod {', '.join(sorted(unknown))}")
+            pick = [n for n in names if n in mixes_of]          # the web patcher's order
+            chosen = [py / ("sel-" + "+".join(c) + ".ptf")
+                      for k in range(2, len(pick) + 1) for c in itertools.combinations(pick, k)]
+            extra += [f for f in chosen if f not in cover and f != every]
+            print(f"--mixes-of: {len(chosen)} mixes of {', '.join(pick)}", flush=True)
         failed += r.run_all(emu_jobs([(f, tier == "deep") for f in cover + extra]))
 
     # 4. summary

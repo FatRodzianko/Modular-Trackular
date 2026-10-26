@@ -30,7 +30,7 @@ CFLAGS=(-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -Os -std=c11
 link() {                               # link <linker script> <elf> <map>
     "$ARM_GCC_BIN/arm-none-eabi-gcc" -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 \
         -nostdlib -nostartfiles -T "$1" -Wl,--gc-sections \
-        -Wl,--undefined=mt_ip_seq_advance -Wl,--undefined=mt_ip_render_advance -Wl,--undefined=mt_ip_settings_folder -Wl,--undefined=mt_ip_last_item -Wl,--undefined=mt_ip_pattern_update -Wl,--undefined=mt_ip_config_update -Wl,--undefined=mt_version_fmt \
+        -Wl,--undefined=mt_ip_seq_advance -Wl,--undefined=mt_ip_render_advance -Wl,--undefined=mt_ip_settings_folder -Wl,--undefined=mt_ip_last_item -Wl,--undefined=mt_ip_pattern_update -Wl,--undefined=mt_ip_config_update -Wl,--undefined=mt_ip_save_name -Wl,--undefined=mt_version_fmt \
         -Wl,-Map="$3" "$OUT/interpolate.o" -o "$2"
 }
 link "$HERE/link.ld" "$OUT/interpolate.elf" "$OUT/interpolate.map"

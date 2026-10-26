@@ -10,7 +10,7 @@ Swing FX (I, 25 to 75, 50 is no swing). That has two catches:
 
 With Global Swing on, every take and every pattern starts with the project's own Swing
 amount, the same every time. Installed on its own, Config shows the firmware version as
-`1.2.0-sw1`.
+`1.2.0-sw2`.
 
 **Status:** tested on hardware, on its own and together with colorsong, humanize,
 interpolate and masterfx.
@@ -26,7 +26,9 @@ Config → Project Settings → **Global Swing**:
 
 Both are saved per project (in `swing.bin` in the project's folder), a moment after you
 change them. A project without that file, and every project in stock firmware, has
-Global swing Off.
+Global swing Off. Save As keeps them: the project goes on with them under its new name,
+and they are written to its new folder (also on a new project's first save, and on Save
+As over another project). A new project starts with the defaults.
 
 With Global swing On:
 
@@ -60,11 +62,14 @@ nothing turns it off or resets the pair when playback starts.
 | `mt_sw_last_item` | the Config menu constructor's last `bl cfg_menu_item` (`0x601193e6`, chained) | Adds the Global Swing folder with its two items |
 | `mt_sw_pattern_update` | Pattern screen vtable slot `0x600403dc` (chained) | Reads and writes `swing.bin` |
 | `mt_sw_config_update` | Config screen vtable slot `0x6003b5f8` (chained) | Reads and writes `swing.bin` |
+| `mt_sw_save_name` | `bl strncpy` at `0x60114eaa` in the save request `0x60114e34` (the new name; Save As only; chained) | Marks the Save As, so the settings go with the project to its new name and are written there |
 
 - **`swing.bin`:** 12 bytes in the project's folder: `HSW1`, Global swing (0 or 1), the
   Swing amount − 25 (0 to 50), two zero bytes and a checksum. A missing or damaged file
-  means the defaults (Off, 50). A project without a name (not saved yet) writes no file;
-  it gets one when it is saved.
+  means the defaults (Off, 50). It is read and written only while the file manager is
+  idle. A project with no folder yet (the new project "New Project", which has no path)
+  writes no file; it gets one when it is first saved. The firmware's Save As copies only
+  its own files, so the patch writes `swing.bin` to the new folder itself.
 - **Memory:** 32 bytes of RAM (the settings and what the audio side last saw), on-chip;
   1,737 bytes of code.
 - **CPU:** a few instructions per audio block and per step end.
@@ -111,13 +116,14 @@ checks:
   item, and a number item showing 25 to 75), and the stock Apply stores the values.
 - **File:** `swing.bin` through the screens' update hooks with a fake SD card:
   defaults, one write a while after a change, per-project values, a damaged file, a
-  project without a name.
+  project without a name; Save As and new projects through the firmware's own save
+  request (`tools/emu/project_save.py`).
 
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-sw1 Build 1504`.
+Config → Firmware → the patched file. Config should show `1.2.0-sw2 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Projects play with the Swing FX
 only again; their `swing.bin` files stay in their folders and do nothing in stock

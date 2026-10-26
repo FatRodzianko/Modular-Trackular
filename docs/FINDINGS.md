@@ -2362,6 +2362,16 @@ Details and the full design: [COPY_PATTERN_PLAN.md](COPY_PATTERN_PLAN.md).
   finds no file. bt4 marks the Save As at its name copy and keeps the flags for the new
   name; on hardware (bt4 and MT4), Save As and a new project's first save keep Beat
   Slice Thru.
+  swing, humanize, interpolate and masterfx had the same bug: their files were left in
+  the old folder, and a new project's settings were lost on its first save. swing sw2,
+  humanize hz9, interpolate ip6 and masterfx mf5 (all: MTS) chain the same name copy,
+  keep their values for the new name and write their file to the new folder; they read
+  and write only while the file manager is idle. On hardware (2026-10-26), Save As and a
+  new project's first save left every mod's file in the new folder, and reopening the
+  projects loaded the settings. colorsong is still not carried (cosmetic: its colors
+  are worked out again). synths keeps its choices, but Save As over an existing project
+  leaves that folder's `synths.bin`, which wins when the project is reopened (seen in
+  the emulator, not yet fixed).
   The buffer swap (`0x600acc68`) sets the current pattern from `fm+0x130` (the last
   pattern `pattern_load_now` loaded, `0x600c2510`).
 - Song screen file operations work on pattern files, not RAM: `0x600c3a8c` and

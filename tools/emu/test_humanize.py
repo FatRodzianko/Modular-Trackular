@@ -44,7 +44,9 @@ Works with the humanize-only build and with bundles that include it.
    changed value is written once, a while later; another project gets its own values;
    coming back loads the saved ones; a damaged file gives the defaults; a file from
    an earlier version (HHZ1, one range) gives both ranges its range; a project
-   without a name writes nothing and keeps its values when it is first saved. The
+   without a name writes nothing. Save As and new projects through the firmware's
+   save request (project_save.save_as_checks): a new project writes nothing until its
+   first save, and Save As keeps the values and writes them to the new folder. The
    stock update methods run on every call.
 """
 from __future__ import annotations
@@ -57,6 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
 from layout import patch_code, patch_ram  # noqa: E402
 from machine import Machine  # noqa: E402
+from project_save import save_as_checks  # noqa: E402
 from song_grid import PATTERN_DATA_SIZE  # noqa: E402
 
 SEQ = 0x20017274                    # bytes 0..3: selection rectangle; +0x14: pattern data
@@ -78,7 +81,7 @@ CUR_PATTERN = 0x202046C8
 CHANGED = FM + 0x4CA                # + pattern number
 STOCK_HANDLERS = {0: 0x600DFE65, 1: 0x600DFDD1, 7: 0x600E2A45}
 HZ = 0                              # humanize state (magic, session, value[5], ...): from the .map.json
-HZ_MAGIC = 0x5A48544D
+HZ_MAGIC = 0x395A484D
 HZ_VALUE = 0                        # HZ + 8: timing-1, volume (0 Off / 1 On), MIDI-1, sample-1, volume range-1
 MENU_CTOR = 0x60118ACC
 ATEXIT = 0x600A3594
@@ -653,19 +656,20 @@ def file_checks(ptf: Path) -> None:
     fs.set_project(Path("."), "D", "Projects/User")
     tick()
     check(values() == DEFAULT_VALUES, "damaged HHZ1 file: defaults")
-    m.write(PROJECT_NAME, b"\0")                           # a new project, no name yet
+    m.write(PROJECT_NAME, b"\0")                           # the name cleared while Workspace loads
     tick()
-    check(values() == DEFAULT_VALUES, "new project: defaults")
+    check(values() == DEFAULT_VALUES, "project without a name: defaults")
     opened = fs.writes_opened
     m.write(HZ_VALUE, bytes([4, 1, 69, 69, 7]))
     tick(SAVE_DELAY * 2)
     check(fs.writes_opened == opened, "project without a name: nothing written")
-    fs.set_project(Path("."), "C", "Projects/User")       # its first save
-    tick()
-    check(values() == bytes([4, 1, 69, 69, 7]), "first save of a new project keeps its values")
-    tick(SAVE_DELAY + 5)
-    data = fs.overlay.get(path("C"))
-    check(data is not None and data[4:9] == bytes([4, 1, 69, 69, 7]), "and writes them to its folder")
+
+    def hhz2(v):
+        data = bytes(v) + bytes(3)
+        return FILE_MAGIC + data + struct.pack("<I", fnv1a(data))
+
+    save_as_checks(check, m, fs, tick, "humanize.bin", values, lambda v: m.write(HZ_VALUE, bytes(v)),
+                   DEFAULT_VALUES, bytes([4, 1, 69, 69, 7]), bytes([14, 0, 29, 9, 2]), hhz2, SAVE_DELAY)
     total = sum(calls.values())
     check(calls["pattern"] > 0 and calls["config"] > 0 and total == calls["pattern"] + calls["config"],
           f"stock update methods ran on every call ({calls['pattern']} + {calls['config']})")

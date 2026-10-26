@@ -38,7 +38,7 @@ Python command below does, without installing anything:
    one in step 1) and the image's, and refuses anything else, including a file that's
    already patched.
 2. Tick the mods you want. One mod gives its own build, "Select all" gives the
-   `patch/all` bundle (all twelve, `1.2.0-MT5`), and any other mix gets a version text
+   `patch/all` bundle (all twelve, `1.2.0-MTS`), and any other mix gets a version text
    that says which mods are in it: `M` plus two hex digits for colorsong 01, humanize 02,
    interpolate 04, masterfx 08, swing 10, visualizer 20, condtrig 40 and synths 80
    (colorsong + swing is `1.2.0-M11`); `N` instead of `M` when legato is in it
@@ -79,10 +79,14 @@ must be byte-identical to these builds:
 | Patch | Output file | Version text in Config | On hardware | Output SHA-256 |
 |---|---|---|---|---|
 | colorsong | `TrackerPlus_c11.ptf` | `1.2.0-c11` | tested | `cc9119abe627d994ba6010bfe0db59129e3f494611dbc8c1e5c68fcf0653ebc6` |
-| humanize | `TrackerPlus_hz8.ptf` | `1.2.0-hz8` | tested (with colorsong and interpolate) | `ec3c30fda0d186299e39cce2be48031303f3bc0583fd1e8803600b500bf4b46f` |
-| interpolate | `TrackerPlus_ip5.ptf` | `1.2.0-ip5` | tested (with colorsong and humanize) | `f3d98eb18f5852dc718d41ba9311e813d056d1ab5b37b1252e87cf0341c0942a` |
-| masterfx | `TrackerPlus_mf4.ptf` | `1.2.0-mf4` | tested | `0f3f9cd0c0c00ceed7651aacece96bd52dd084991e82f9e03d814630b898df1a` |
-| swing | `TrackerPlus_sw1.ptf` | `1.2.0-sw1` | tested | `510fe9ad078ed737f1cf3c63ea706a8a0e50f978c9d115bfbc773f4252a0e8d7` |
+| humanize | `TrackerPlus_hz9.ptf` | `1.2.0-hz9` | tested | `1b4585815fa0c66b5689135375f2da8e7bfec57cce6f5cf2e62592f4c4765626` |
+| the previous humanize (Save As dropped the settings) | `TrackerPlus_hz8.ptf` | `1.2.0-hz8` | tested (with colorsong and interpolate) | `ec3c30fda0d186299e39cce2be48031303f3bc0583fd1e8803600b500bf4b46f` |
+| interpolate | `TrackerPlus_ip6.ptf` | `1.2.0-ip6` | tested | `598dc01fb55ec0549c9809d2a14702e591354f29a07c0ad7d7401d405171391e` |
+| the previous interpolate (Save As dropped the settings) | `TrackerPlus_ip5.ptf` | `1.2.0-ip5` | tested (with colorsong and humanize) | `f3d98eb18f5852dc718d41ba9311e813d056d1ab5b37b1252e87cf0341c0942a` |
+| masterfx | `TrackerPlus_mf5.ptf` | `1.2.0-mf5` | tested | `f7ec780456867eac7a8cb469d6bb929949ef7a334ccaeb1c0c645863c8657a5a` |
+| the previous masterfx (Save As dropped the settings) | `TrackerPlus_mf4.ptf` | `1.2.0-mf4` | tested | `0f3f9cd0c0c00ceed7651aacece96bd52dd084991e82f9e03d814630b898df1a` |
+| swing | `TrackerPlus_sw2.ptf` | `1.2.0-sw2` | tested | `05a3f65fb21381224f95f0e41f1782909b86fbe0628cbaa9263da18e4ac1a275` |
+| the previous swing (Save As dropped the settings) | `TrackerPlus_sw1.ptf` | `1.2.0-sw1` | tested | `510fe9ad078ed737f1cf3c63ea706a8a0e50f978c9d115bfbc773f4252a0e8d7` |
 | visualizer | `TrackerPlus_vz5.ptf` | `1.2.0-vz5` | tested | `46970bb1689414fd711cadc6cfd149da458145aafcd9f6d274f10759dce9bdbd` |
 | the previous visualizer (the same animation, every pad update a full flush) | `TrackerPlus_vz2.ptf` | `1.2.0-vz2` | tested | `8b3ddcb09de46829799f542cf9d7423d95d4f39aa76db44881f5c18eb0361736` |
 | condtrig | `TrackerPlus_ct1.ptf` | `1.2.0-ct1` | tested | `539328948185c4a02577ce62181fc4143a5e86dc06a33e61b469d52b21da8197` |
@@ -94,7 +98,8 @@ must be byte-identical to these builds:
 | legato (MIDI and synth slots) | `TrackerPlus_lg2.ptf` | `1.2.0-lg2` | tested | `a7bab99688e6036e58b66bd8e60806170a045b10c57a218d6607ab9261f81a75` |
 | the previous legato (MIDI only) | `TrackerPlus_lg1.ptf` | `1.2.0-lg1` | tested | `f266ed1f131fc15edf12b224e081f16d9109938b004d8410e2cb0cdb380a68e6` |
 | copypattern | `TrackerPlus_cp4.ptf` | `1.2.0-cp4` | tested (also with humanize) | `7bfbc3eb09a7eb9d9dd4ccf3a8a52b1221743be7061397048f72bbc32908db01` |
-| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample) | `TrackerPlus_MT5.ptf` | `1.2.0-MT5` | tested | `61446c44bfd6669dd1044da4415ceb13f0df6b47c6f6a49ad37f2405195ae4f7` |
+| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample) | `TrackerPlus_MTS.ptf` | `1.2.0-MTS` | tested | `ac0edf2f1f2d3077e3c9f95babd136f065ca40ec18080e23d8cab1f496f595c9` |
+| the previous all (the same with swing sw1, humanize hz8, interpolate ip5, masterfx mf4) | `TrackerPlus_MT5.ptf` | `1.2.0-MT5` | tested | `61446c44bfd6669dd1044da4415ceb13f0df6b47c6f6a49ad37f2405195ae4f7` |
 | the previous all (the same with slicethru bt4, without Loop) | `TrackerPlus_MT4.ptf` | `1.2.0-MT4` | tested | `eec53343f9fc18ed981863af0808761974ee23024158705df4c362a87442fee8` |
 | the previous all (the same with slicethru bt3) | `TrackerPlus_MR4.ptf` | `1.2.0-MR4` | tested | `b2376c91b9382658c39018a78daf78c9b22a083bfb1b4c739e147bffea84748f` |
 | the previous all (without resample) | `TrackerPlus_MS8.ptf` | `1.2.0-MS8` | tested | `ee0c901bd8cc7c7786e68c19d7c9e97fc93847fb10adbaa48a80b138638fbd4d` |
@@ -144,7 +149,7 @@ Each patch can be installed on its own, or several can go into one firmware:
               "../masterfx/patch.json", "../swing/patch.json", "../visualizer/patch.json",
               "../condtrig/patch.json", "../synths/patch.json", "../legato/patch.json",
               "../copypattern/patch.json", "../slicethru/patch.json", "../resample/patch.json"],
-  "version": "MT5",
+  "version": "MTS",
   ```
 
 To make your own mix, copy `patch/all/` to a new folder (for example `patch/mymix/`)
@@ -238,6 +243,9 @@ python tools/run_tests.py path/to/TrackerPlus_1.2.0.ptf --tier quick      # whil
 python tools/run_tests.py path/to/TrackerPlus_1.2.0.ptf --tier release    # before a commit users get (~40 min with an empty cache)
 ```
 
+`--mixes-of swing,humanize,...` (release or deep) also runs every patch's test on every
+mix of two or more of the named mods, for a change to a hook they all share.
+
 - **quick:** `test_layout.py`, then every patch's emulator test on each patch alone and
   on `patch/all`.
 - **release:** quick, plus `test_web_patcher.py` (every web patcher selection
@@ -270,10 +278,10 @@ python -m pip install unicorn capstone numpy
 python tools/emu/check_version.py build/TrackerPlus_c11.ptf          # -> '1.2.0-c11'
 python tools/emu/test_colorsong.py build/TrackerPlus_c11.ptf
 python tools/emu/test_rescan.py build/TrackerPlus_c11.ptf "path/to/<project A>" "path/to/<project B>"
-python tools/emu/test_humanize.py build/TrackerPlus_hz8.ptf
-python tools/emu/test_interpolate.py build/TrackerPlus_ip5.ptf
-python tools/emu/test_masterfx.py build/TrackerPlus_mf4.ptf path/to/TrackerPlus_1.2.0.ptf out/fx_wav
-python tools/emu/test_swing.py build/TrackerPlus_sw1.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/emu/test_humanize.py build/TrackerPlus_hz9.ptf
+python tools/emu/test_interpolate.py build/TrackerPlus_ip6.ptf
+python tools/emu/test_masterfx.py build/TrackerPlus_mf5.ptf path/to/TrackerPlus_1.2.0.ptf out/fx_wav
+python tools/emu/test_swing.py build/TrackerPlus_sw2.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_visualizer.py build/TrackerPlus_vz5.ptf
 python tools/emu/test_condtrig.py build/TrackerPlus_ct1.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_itcmtest.py build/TrackerPlus_it1.ptf path/to/TrackerPlus_1.2.0.ptf

@@ -57,6 +57,7 @@ system's app objects (tools/emu/synth_rig.py).
 """
 from __future__ import annotations
 
+import json
 import random
 import struct
 import sys
@@ -72,7 +73,8 @@ from layout import patch_code, patch_ram  # noqa: E402
 import seq_timing as st  # noqa: E402
 import synth_rig as sr  # noqa: E402
 from machine import FAKE_DISPLAY_VT  # noqa: E402
-from fakefs import FILEMAN, PROJECT_NAME, FakeFS  # noqa: E402
+from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
+import project_save  # noqa: E402
 
 INS = 0x20200000                    # 48 instruments, 0x174 bytes each
 INS_SIZE = 0x174
@@ -98,8 +100,6 @@ SCR_INSTRUMENT = 0xF4
 CUR_INS = INS + 0x46C5
 PLAYBACK_UPDATE_WORD, PATTERN_UPDATE_WORD, PATTERN_UPDATE = 0x60042698, 0x600403DC, 0x600E1F98
 FM_STATE = 0x2001E488 + 0x13D
-FM_OP = 0x2001E488 + 0x13F
-SAVE_REQUEST = 0x60114E34           # (fm + 0x8c, path, name): Save As; (.., 0, 0): Save
 SAVE_NAME_SITE = 0x60114EAA         # bl strncpy(fm + 0x340, name, 0x21) in it, Save As only
 WRAP_SITE = 0x60035522              # the forward 1-shot render's end (two instructions, not a BL)
 RENDER, BLOCK_FREE = 0x600357B4, 0x60030524     # (voice) -> a 128-frame block (samples at +4); (block)
@@ -144,6 +144,8 @@ class Rig:
         self.patched = patched
         self.ram = patch_ram(ptf, "slicethru") if patched else None
         self.code = patch_code(ptf, "slicethru") if patched else None
+        self.all_code = [tuple(int(x, 16) for x in q["code"]) for q in json.loads(
+            ptf.with_suffix(".map.json").read_text())["patches"]] if patched else []
         self.samples: dict[tuple[int, int], int] = {}
         m.call(AUDIO_MEM_INIT, 0x20004378, 80)
 
@@ -234,11 +236,16 @@ def site_checks(p: Rig) -> None:
     lo, hi = p.code
     for at, name in ((BS_SITE, "the dispatcher's Beat Slice call"), (END_SITE, "the Beat Slice end point"),
                      (LIST_DATA_SITE, "the Play Mode list's data"), (BUTTON_PLUS_SITE, "the 8th button's step"),
-                     (BUTTON_MINUS_SITE, "the 7th button's step"), (SAVE_NAME_SITE, "Save As's name copy"),
+                     (BUTTON_MINUS_SITE, "the 7th button's step"),
                      (WRAP_SITE, "the forward 1-shot render's end"),
                      (PAGE2_LABEL_SITE, "the 4th button's label on page 2")):
         t = bl_target(img, 0x60030000, at)
         check(lo <= t < hi, f"{name} ({at:#x}) branches into the patch ({t:#x})")
+    # shared with the patches that keep a settings file (chained): the last one's hook;
+    # the Save As checks below show the chain reaches this patch
+    t = bl_target(img, 0x60030000, SAVE_NAME_SITE)
+    check(any(a <= t < b for a, b in p.all_code),
+          f"Save As's name copy ({SAVE_NAME_SITE:#x}) branches into a patch ({t:#x})")
     for at, name in ((ENCODER_WORD, "encoder"), (PLUS_WORD, "+1"), (MINUS_WORD, "-1"),
                      (BUTTON4_WORD, "4th button")):
         w = p.m.r32(at)
@@ -1089,22 +1096,8 @@ def file_checks(ptf: Path, stock: Path) -> None:
 
     print("a new project and Save As")
 
-    def save(name: str | None, where: str = "Projects/User") -> int:
-        """The firmware's save request: Save As with a path and a name, Save with neither;
-        then the save running (file manager busy) and done."""
-        p = n = 0
-        if name is not None:
-            p, n = m.alloc(256), m.alloc(64)
-            m.write(p, where.encode() + b"\0")
-            m.write(n, name.encode() + b"\0")
-        m.w8(FM_STATE, 0)
-        m.w8(FM_OP, 0)
-        ok = m.call(SAVE_REQUEST, FILEMAN + 0x8C, p, n, max_insns=50_000_000)
-        tick(3)
-        m.w8(FM_STATE, 0)
-        m.w8(FM_OP, 0)
-        tick(SAVE_DELAY + 5)
-        return ok
+    def save(name: str | None) -> int:
+        return project_save.save(m, tick, name, settle=SAVE_DELAY + 5)
 
     fs.set_project(Path("."), "New Project", "")    # as the firmware's new project 0x60117c8c
     tick()

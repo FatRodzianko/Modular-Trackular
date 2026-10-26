@@ -80,7 +80,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   input. Recordings go into the free part of the sample memory, so the loaded samples
   stay intact; the longest recording is that free part. Otherwise the recorder is
   stock. Tested on hardware. See [patch/resample/README.md](patch/resample/README.md).
-- **all**: all twelve mods above in one firmware (version text `1.2.0-MT5`), from
+- **all**: all twelve mods above in one firmware (version text `1.2.0-MTS`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
