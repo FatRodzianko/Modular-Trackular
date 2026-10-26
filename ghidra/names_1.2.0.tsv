@@ -425,3 +425,27 @@
 6003080c	bitcrush_update	per-track bit crusher (vtable 0x60042eb0): ANDs each sample with the mask at +0x18
 6003084c	bitcrush_set_bits	(obj, bits): depth clamped to 4..16 into +0x14, mask into +0x18
 600cf90c	buttons_is_held_q	(buttons *0x200209e8, id): the Play handler's Shift (0x1d) test
+# Track lengths, the play position and the Pattern grid (FINDINGS section 29)
+600e0024	pat_change_length	(patview, delta): jog while Length is held; clamps 1..128, writes the last-step byte of tracks 0..7 only
+600e00a8	pat_length_preset_q	(patview, dir): Length + Left/Right, preset lengths at 0x6004013c
+600e0158	pat_set_length_q	(patview, length): Length + pad (from 0x600c6d48)
+600ada8c	seq_duplicate_pattern_q	(seq): Duplicate; doubles the length into all 16 last-step bytes
+600c90a0	pat_jog	Pattern screen jog callback (literal 0x600df2f0); by ed+0x354: 0 pattern, 1 length (bl 0x600e0024 at 0x600c9172), 2 step jump
+600c6bd8	pat_pads_q	Pattern screen pad callback (literal 0x600df2f8); Length held: a pad sets the length
+600c7570	pat_left_q	Pattern screen Left callback (literal 0x600df2cc)
+600c7d70	pat_right_q	Pattern screen Right callback (literal 0x600df2d0)
+600e249c	pat_length_button	Length screen button (kind 3): press ed+0x354 = 1 (pads and bar redrawn), release 0x600e2250
+600e2250	pat_hold_view_release	ed+0x354 = -1, pads and bar redrawn
+600ac700	seq_record_note_off_q	live recording of a note-off: reads +0x88 at 0x600ac75e, late = next step, +0x82
+6010b4d4	patgrid_draw_instr	Pattern grid, instrument column (vtable 0x60046dc8 method 2): color into ctrl+0x44 (+0x0c normal, +0x1c empty, +0x30 muted, +0x38 highlighted)
+6010b320	patgrid_draw_note	Pattern grid, note column (method 1; colors +0x08 / +0x18)
+6010b700	patgrid_draw_fx1	Pattern grid, FX1 column (method 3; colors +0x10 / +0x20)
+6010b908	patgrid_draw_fx2	Pattern grid, FX2 column (method 4; colors +0x14 / +0x24)
+6010a3d4	patgrid_ctor	(ctrl, desc): 0x50-byte Pattern grid control, vtable 0x60046dc8
+600e5ec8	disp_create_patgrid_q	allocates the grid control and calls patgrid_ctor (from 0x600e624e)
+600e5f68	scr_pattern_create_controls	Pattern screen create-controls (vtable slot 0x600403e8)
+600cf7b4	btn_dispatch_q	(manager, button, state): kind 1 handler +4 if state == flag; 2 +8(button); 3 +8(state) on press and release; 4 +0xc(button, state)
+600cf778	btn_bind_kind4	(manager, index, handler): kind 4, handler at +0xc
+6010b204	patgrid_draw_cell	(ctrl, x, y, ?, text, ...): one cell's text in the color at ctrl+0x44 (eve_color_rgb only when it changed)
+600cff24	instr_label_q	(ctrl desc): the current instrument's label from project+0x6c5: "%d. %s" (sample), "%d. MIDI Channel %d", or synth_slot_title_q (64+); called after a jog edit of the instrument column
+6010e0f8	pat_jog_guard_q	(0x200209ac): pat_jog returns at once while nonzero

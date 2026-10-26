@@ -97,6 +97,7 @@ PLAIN_FX = (2, 18)                  # Micro-move, Volume: nothing that ends or j
 CODE = (0, 0)                       # set in main(): the patch's code, start and end
 SLOT = 2                            # set in main(): its button, 2 alone or 3 with humanize
 HZ_CODE = None                      # humanize's code, when it is in the build
+PM_CODE = None                      # polymeter's (Trk Len on the button after this one), when it is in the build
 failures: list[str] = []
 
 
@@ -328,7 +329,7 @@ def file_rules(events: list, label: str) -> None:
 
 
 def button_checks(ptf: Path) -> None:
-    others = [b for b in range(2, 7) if b != SLOT and not (HZ_CODE and b == 2)]
+    others = [b for b in range(2, 7) if b != SLOT and not (HZ_CODE and b == 2) and not (PM_CODE and b == SLOT + 1)]
     print(f"button binding (Pattern screen, page 3): Copy to New expected on button {SLOT}")
     m = Machine(ptf)
     mgr, entries = m.alloc(0x40), m.alloc(8 * 0x14)
@@ -341,7 +342,8 @@ def button_checks(ptf: Path) -> None:
 
     m.w8(ED + ED_RECORD, 0)
     m.call(PAGE3_BIND, 0)
-    check(entry(3)[0] == 0 and entry(2)[0] == 0, "outside record mode: buttons 2 and 3 stay unbound")
+    quiet = [b for b in (2, 3) if not (PM_CODE and b == SLOT + 1)]     # Trk Len is bound in both modes
+    check(all(entry(b)[0] == 0 for b in quiet), f"outside record mode: buttons {quiet} stay unbound")
     m.w8(ED + ED_RECORD, 1)
     m.call(PAGE3_BIND, 0)
     kind, handler = entry(SLOT)
@@ -646,13 +648,17 @@ def copy_checks(ptf: Path) -> None:
 
 
 def main() -> int:
-    global CODE, HZ_CODE, SLOT
+    global CODE, HZ_CODE, PM_CODE, SLOT
     ptf = Path(sys.argv[1])
     CODE = patch_code(ptf, "copypattern")
     try:
         HZ_CODE = patch_code(ptf, "humanize")
     except SystemExit:
         HZ_CODE = None
+    try:
+        PM_CODE = patch_code(ptf, "polymeter")
+    except SystemExit:
+        PM_CODE = None
     SLOT = 3 if HZ_CODE else 2
     print(f"copypattern at {CODE[0]:#x}..{CODE[1]:#x}" + (", with humanize" if HZ_CODE else ""))
     button_checks(ptf)

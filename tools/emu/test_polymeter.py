@@ -1,0 +1,731 @@
+"""Check the polymeter patch (a length per track): playback and the Trk Len button.
+
+  python tools/emu/test_polymeter.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf>
+
+Works with the polymeter-only build and with bundles that include it. The sequencer runs
+tick by tick (seq_tick), MIDI instruments on the tracks, with fake MIDI ports that
+record each note and the tick it went out. Track lengths are set by writing the patch's
+table (its RAM, found through the .map.json): magic, then 256 patterns x 16 tracks.
+
+The oracle: a track of length E in a pattern of length P must play exactly what stock
+firmware plays for the same track with its first E steps written out to the end of the
+pattern (step s holding step s mod E: 0-5, 0-5, 0-3 for E 6 in 16). The short track's own
+steps E..P-1 hold other notes, which must never sound. That covers whatever a step
+carries (Roll, Micro-move, Break ...) and every play mode the sequencer has.
+
+1. Sites: memcpy_small at ITCM 0x2170 and seq_distance_to_next_note_q at 0x33a2 and
+   0x3520 go through ITCM stubs to the patch's hooks.
+2. No lengths (also: table not set up, a length 0, a length at or above the pattern's,
+   and a length the pattern has been shortened below): the same MIDI events at the same
+   ticks as stock firmware, with FX on every track.
+3. Lengths 1, 5, 6 and 15 in a 16-step pattern; all 16 tracks with lengths 1..16 at once;
+   a 128-step pattern with lengths 48 and 100: as the oracle over several passes. The
+   tracks' positions (+0x88) still count the whole pattern, so the pattern ends after P
+   steps whichever tracks are short, track 16 included.
+4. What a step carries, on a short track, as the oracle: Roll at several values with
+   empty steps after it (its look-ahead), Micro-move on the track's last step (the
+   delayed note crosses its loop), Break (the first one ends the pattern), and a
+   sample-track instrument (its voice note-on) and a synth (its note-on).
+5. Play modes, as the oracle: Play from a later step, a looping selection, performance
+   mode backward.
+6. Roll's look-ahead itself: the hooks give, for every step of a short track, what the
+   stock function gives on the written-out pattern; on a track without a length they
+   give what it gives on the same pattern.
+7. Song mode: the next pattern is requested on the last step as in stock firmware, a
+   short track in pattern A plays its loop, and pattern B then plays its own lengths.
+8. Cost: the instructions run in the patch's code and its ITCM stubs, per track and
+   step, with all 16 tracks short (the worst case) and with none.
+
+Rendering runs the same seq_process_track code (ITCM), so it is not checked separately.
+
+The Trk Len button and the encoder (the Pattern screen's page 3), with a fake button
+manager, the stock page-3 bind and label code, and the display calls recorded:
+9. The bind: Trk Len's button is the first one after humanize's (2) and copypattern's
+   (the next free one): 2 alone, 3 with one of them, 4 with both. It is bound as kind 3
+   to the patch; buttons 0, 1 and 7 keep their stock handlers; humanize's and
+   copypattern's buttons aren't the patch's, and the rest stay unbound.
+10. The labels: Trk Len's button reads "Trk Len" with an empty second line, the active
+   colors and Pattern Name's data; the other patches' buttons keep their texts, the
+   free ones stay empty, Pattern Name, Track Name and More are unchanged (alone: every
+   other display call is the same as stock's, in the same order).
+11. Held: a press sets up the table (from garbage) and shows the cursor's track's length
+   ("--" when it plays the whole pattern); the encoder changes that track's length in
+   the playing pattern's row, clamped to 1..the pattern's length (the pattern's length
+   is stored as 0), and stock's encoder isn't called. A label redraw while held shows
+   the length. A length the pattern was shortened below shows "--" and is kept until
+   the encoder changes it. A 128-step pattern shows 3 digits.
+12. Not held: after the release, after the bind was cleared (as pages 1 and 2 do) and
+   after page 3 is bound again, the encoder goes to stock with the same delta and the
+   table doesn't change; also while held, when an overlay is open or stock's own guard
+   is set.
+13. A length set with the button plays: track 1 set to 6 in a 16-step pattern plays
+   0-5 0-5 0-3.
+14. Without the hold the encoder is stock's: alone, cursor moves and edits (record off
+   and on, each column) leave the same RAM as stock firmware, also after a press and
+   release of Trk Len.
+"""
+from __future__ import annotations
+
+import json
+import struct
+import sys
+from pathlib import Path
+
+from unicorn import UC_HOOK_CODE
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import seq_timing as st  # noqa: E402
+from layout import patch_code, patch_ram  # noqa: E402
+
+SEQ, PROJECT = st.SEQ, st.PROJECT
+CUR_PATTERN = PROJECT + 0x6C8
+SITES = {0x2170: "step copy", 0x33A2: "Roll look-ahead (a)", 0x3520: "Roll look-ahead (b)"}
+DISTANCE = 0x3958                   # seq_distance_to_next_note_q (stock, ITCM)
+MAGIC = 0x314D504D
+ROLL, MICRO_MOVE, BREAK, VOLUME = 3, 2, 13, 18
+VOICE_NOTE_ON = 0x5C04              # sample voices
+NOTE_ON_OUT = 0x600ABB44            # synths (as test_condtrig)
+NOTE_OFF_OUT = 0x600ABBE8           # synths (no synth engine in this rig)
+ENGINE_CLICK = 0x42E4
+STEP = 576                          # ticks per step
+NOTE_OUT = 24                       # a MIDI instrument sends the step's note + 24
+FIRST_MICRO = 12                    # the tick of a take's first micro-step
+PER_TRACK_LIMIT = 50                # instructions the patch may add per track and step
+
+# the Pattern screen (page 3) and the encoder
+PATVIEW = 0x20021770
+ED = PATVIEW + 0x1000
+ED_CURSOR_TRACK, ED_COLUMN, ED_RECORD, ED_OVERLAY = 0x1E4, 0x255, 0x254, 0x398
+ED_CURSOR_ROW = 0x1E6
+BUTTON_MANAGER_PTR = 0x200209E0
+PAGE3_BIND, PAGE3_LABELS = 0x600E29A4, 0x600E584C
+BTN_CLEAR = 0x600CF53C                  # btn_clear(manager, first, last)
+JOG_WORD, STOCK_JOG = 0x600DF2F0, 0x600C90A0
+JOG_GUARD = 0x6010E0F8                  # stock pat_jog does nothing while this is nonzero
+HELD_QUERY = 0x600CF90C                 # buttons_is_held_q: no buttons object in this rig
+PAD_REFRESH = 0x600E1310                # no pads in this rig
+DISPLAY = 0x20027D64
+DISPLAY_CALLS = {0x60101D5C: "text", 0x60101D74: "text2", 0x60101DA4: "colors",
+                 0x60101DF8: "data", 0x60101E84: "refresh", 0x60102014: "sync"}
+STOCK_HANDLERS = {0: 0x600DFE65, 1: 0x600DFDD1, 7: 0x600E2A45}
+STYLE_ACTIVE, STYLE_MORE = 0x44, 0x64
+NAME_DATA, MORE_DATA = PATVIEW + 0x12CC, PATVIEW + 0x12EC
+CTRL0 = 20                              # label control of button 0 in this rig; button b's is 20 + b
+TRK_LEN = 2                             # Trk Len's button: set in main() from the build (page3_buttons)
+failures: list[str] = []
+
+
+def check(ok: bool, what: str) -> None:
+    print(("  PASS  " if ok else "  FAIL  ") + what)
+    if not ok:
+        failures.append(what)
+
+
+class Rig:
+    """The sequencer with MIDI instrument t + 1 (channel t + 1) on track t."""
+
+    def __init__(self, ptf: Path, last: int, table: int | None = None, pattern: int = 1):
+        self.m = m = st.make(ptf)
+        m.stub_function(ENGINE_CLICK, lambda mm: 0)
+        m.w8(st.SETTINGS + 0x2C, 2)             # MIDI out: jack
+        self.last = last
+        self.cur, self.nxt = st.pattern(m, last), st.pattern(m, last)
+        m.w32(SEQ + 0x14, self.cur)
+        m.w32(SEQ + 0x18, self.nxt)
+        m.w8(CUR_PATTERN, pattern)
+        self.table = table
+        if table is not None:
+            m.write(table, struct.pack("<I", MAGIC) + bytes(256 * 16))
+        self.tick0 = 0
+
+    def length(self, track: int, n: int, pattern: int = 1) -> None:
+        self.m.w8(self.table + 4 + 16 * pattern + track, n)
+
+    def put(self, track: int, step: int, note: int, fx1=(0, 0), fx2=(0, 0), instr: int | None = None,
+            bufs=None) -> None:
+        for buf in bufs or (self.cur, self.nxt):
+            st.set_step(self.m, buf, track, step, note, 48 + track if instr is None else instr, fx1, fx2)
+
+    def start(self, step: int = 0) -> None:
+        self.m.call(st.SEQ_PLAY_FROM, SEQ, step)
+        self.tick0 = self.m.ticks
+        self.m.events.clear()
+
+    def run(self, ticks: int) -> None:
+        for _ in range(ticks):
+            self.m.ticks += 1
+            self.m.call(st.SEQ_TICK, SEQ, max_insns=2_000_000)
+
+    def events(self) -> list[tuple[int, str]]:
+        return [(t - self.tick0, w) for t, w in self.m.events]
+
+    def notes(self, channel: int) -> list[int]:
+        """The step notes sent on a channel, in order."""
+        out = []
+        for _, what in self.m.events:
+            w = what.split()
+            if w[1:3] == ["note", "on"] and int(w[5][2:]) == channel:
+                out.append(int(w[3]) - NOTE_OUT)
+        return out
+
+
+def pair(ptf: Path, stock: Path, last: int, tracks: dict[int, tuple[int, list]], others=(),
+         setup=None, start: int = 0, ticks: int | None = None, voice: bool = False,
+         synth: bool = False):
+    """The patched rig with track lengths, and stock with those tracks written out.
+
+    tracks: {track: (E, steps)} where steps[s] = (note, fx1, fx2, instr) for s < E. The
+    patched rig gets notes 100 + s on the short tracks' steps E..last (never heard).
+    others: (track, step, note, fx1, fx2) put in both. setup(rig) runs after the pattern
+    is written; ticks defaults to 3 passes. Returns the two event lists."""
+    out = []
+    for path, patched in ((ptf, True), (stock, False)):
+        rig = Rig(path, last, patch_ram(ptf, "polymeter") if patched else None)
+        for t, (e, steps) in tracks.items():
+            for s in range(last + 1):
+                if patched and s >= e:
+                    rig.put(t, s, 100 + s % 20)
+                elif steps[s % e] is not None:
+                    note, fx1, fx2, instr = steps[s % e]
+                    rig.put(t, s, note, fx1, fx2, instr)
+            if patched:
+                rig.length(t, e)
+        for t, s, note, fx1, fx2 in others:
+            rig.put(t, s, note, fx1, fx2)
+        voices: list = []
+        if voice:
+            rig.m.stub_function(VOICE_NOTE_ON, lambda mm, v=voices: v.append((mm.ticks, mm.arg(1), mm.arg(2))) or 0)
+        if synth:
+            rig.m.stub_function(NOTE_ON_OUT, lambda mm, v=voices: v.append((mm.ticks, mm.arg(1), mm.arg(2))) or 0)
+            rig.m.stub_function(NOTE_OFF_OUT, lambda mm: 0)
+        if setup:
+            setup(rig)
+        rig.start(start)
+        rig.run(ticks if ticks is not None else 3 * (last + 1) * STEP + FIRST_MICRO)
+        out.append([(t - rig.tick0, w) for t, w in rig.m.events] + [(t - rig.tick0, f"voice {a} {b}") for t, a, b in voices])
+    return out
+
+
+def notes_steps(e: int, base: int = 40, fx=None) -> list:
+    return [(base + s, *(fx(s) if fx else ((0, 0), (0, 0))), None) for s in range(e)]
+
+
+class UiRig(Rig):
+    """Rig plus the Pattern screen's page 3: a fake button manager, label controls
+    20..27, the display calls recorded, stock's encoder recorded (stock_jog=True) or run."""
+
+    def __init__(self, ptf: Path, last: int = 15, table: int | None = None, pattern: int = 1,
+                 stock_jog: bool = True):
+        super().__init__(ptf, last, table, pattern)
+        m = self.m
+        self.mgr, self.entries = m.alloc(0x40), m.alloc(8 * 0x14)
+        m.w8(self.mgr + 5, 8)
+        m.w32(self.mgr + 0x1C, self.entries)
+        m.w32(BUTTON_MANAGER_PTR, self.mgr)
+        for b in range(8):
+            m.w8(ED + 0x292 + b, CTRL0 + b)
+        self.guard = 0
+        m.stub_function(JOG_GUARD, lambda mm: self.guard)
+        m.stub_function(HELD_QUERY, lambda mm: 0)
+        m.stub_function(PAD_REFRESH, lambda mm: 0)
+        self.calls: list[tuple[str, int, int]] = []
+        for addr, name in DISPLAY_CALLS.items():
+            m.stub_function(addr, lambda mm, n=name: self.calls.append((n, mm.arg(1), mm.arg(2))))
+        self.jogs: list[int] = []
+        if stock_jog:
+            m.stub_function(STOCK_JOG, lambda mm: self.jogs.append(struct.unpack("<i", struct.pack("<I", mm.arg(0)))[0]))
+
+    def r8(self, a: int) -> int:
+        return self.m.uc.mem_read(a, 1)[0]
+
+    def entry(self, b: int) -> tuple[int, int, int]:
+        """kind, kind 1's handler, kind 3's handler"""
+        e = self.entries + 0x14 * b
+        return self.r8(e), self.m.r32(e + 4), self.m.r32(e + 8)
+
+    def bind(self) -> None:
+        self.m.call(PAGE3_BIND, 0)
+
+    def labels(self) -> list[tuple[str, int, int]]:
+        self.calls.clear()
+        self.m.call(PAGE3_LABELS, PATVIEW)
+        return list(self.calls)
+
+    def button(self, state: int) -> None:
+        self.calls.clear()
+        self.m.call(self.entry(TRK_LEN)[2], state)
+
+    def jog(self, delta: int) -> None:
+        self.calls.clear()
+        self.jogs.clear()
+        self.m.call(self.m.r32(JOG_WORD), delta)
+
+    def text2(self) -> str | None:
+        """The last second-line text set on Trk Len's control"""
+        texts = [self.m.cstr(a) for n, c, a in self.calls if n == "text2" and c == CTRL0 + TRK_LEN]
+        return texts[-1] if texts else None
+
+    def stored(self, track: int, pattern: int = 1) -> int:
+        return self.r8(self.table + 4 + 16 * pattern + track)
+
+
+def page3_others(ptf: Path) -> list[str]:
+    out = []
+    for name in ("humanize", "copypattern"):
+        try:
+            patch_code(ptf, name)
+            out.append(name)
+        except SystemExit:
+            pass
+    return out
+
+
+def page3_buttons(ptf: Path) -> tuple[dict[int, str], int]:
+    """The other patches' page-3 buttons ({button: label}) and Trk Len's: humanize takes
+    button 2, copypattern the first free one, Trk Len the next."""
+    used: dict[int, str] = {}
+    for name, label in (("humanize", "Humanize"), ("copypattern", "Copy to")):
+        if name in page3_others(ptf):
+            used[2 + len(used)] = label
+    return used, 2 + len(used)
+
+
+def button_checks(ptf: Path, stock: Path) -> None:
+    code = patch_code(ptf, "polymeter")
+    others = page3_others(ptf)
+    used, ours = page3_buttons(ptf)
+    free = [b for b in range(2, 7) if b != ours and b not in used]
+    print(f"Trk Len: the bind and the labels (Pattern screen, page 3): button {ours} expected"
+          + (f" (with {', '.join(others)})" if others else ""))
+    r = UiRig(ptf, table=patch_ram(ptf, "polymeter"))
+    for rec in (0, 1):
+        r.m.w8(ED + ED_RECORD, rec)
+        r.bind()
+        mode = "record mode" if rec else "outside record mode"
+        kind, _, handler = r.entry(ours)
+        check(kind == 3 and code[0] <= handler < code[1] and handler & 1,
+              f"{mode}: button {ours} bound as kind 3 to the patch ({kind}, {handler:#x})")
+        check(all(r.entry(b)[:2] == (1, h) for b, h in STOCK_HANDLERS.items()),
+              f"{mode}: buttons 0, 1 and 7 keep their stock handlers")
+        check(all(not (code[0] <= x < code[1]) for b in used for x in r.entry(b)[1:]),
+              f"{mode}: the other patches' buttons {sorted(used)} aren't the patch's")
+        check(all(r.entry(b)[0] == 0 for b in free), f"{mode}: buttons {free} stay unbound")
+
+    s = UiRig(stock)
+    for rec in (0, 1):
+        mode = "record mode" if rec else "outside record mode"
+        r.m.w8(ED + ED_RECORD, rec)
+        s.m.w8(ED + ED_RECORD, rec)
+        calls = r.labels()
+        ctrl = CTRL0 + ours
+        styles = r.m.r32(DISPLAY + 8)
+        text = {c: r.m.cstr(a) for n, c, a in calls if n == "text"}       # the last call per control
+        text2 = {c: r.m.cstr(a) for n, c, a in calls if n == "text2"}
+        colors = [a for n, c, a in calls if n == "colors" and c == ctrl]
+        data = [a for n, c, a in calls if n == "data" and c == ctrl]
+        check(text.get(ctrl) == "Trk Len" and text2.get(ctrl) == "",
+              f"{mode}: button {ours} reads {text.get(ctrl)!r} / {text2.get(ctrl)!r}")
+        check(colors == [styles + STYLE_ACTIVE] and data == [NAME_DATA],
+              f"{mode}: button {ours} gets the active colors and Pattern Name's data")
+        check(all(text.get(CTRL0 + b) == label for b, label in used.items())
+              and all(text.get(CTRL0 + b) == "" and text2.get(CTRL0 + b) == "" for b in free),
+              f"{mode}: the other patches' labels kept ({used}), buttons {free} empty")
+        more = CTRL0 + 7
+        check(text.get(CTRL0) == "Pattern" and text.get(CTRL0 + 1) == "Track" and text.get(more) == "More"
+              and [a for n, c, a in calls if n == "colors" and c == more] == [styles + STYLE_MORE]
+              and [a for n, c, a in calls if n == "data" and c == more] == [MORE_DATA],
+              f"{mode}: Pattern Name, Track Name and More unchanged")
+        if not others:
+            base = [(n, c, s.m.cstr(a) if n.startswith("text") else a) for n, c, a in s.labels()]
+            got = [(n, c, r.m.cstr(a) if n.startswith("text") else a) for n, c, a in calls if c != ctrl]
+            check(got == [x for x in base if x[1] != ctrl],
+                  f"{mode}: every other display call as stock's ({len(got)} calls, same order)")
+
+
+def hold_checks(ptf: Path) -> None:
+    print("Trk Len held: the encoder sets the cursor's track's length")
+    table = patch_ram(ptf, "polymeter")
+    r = UiRig(ptf, table=None)
+    r.table = table
+    m = r.m
+    m.write(table, bytes([0xA5]) * (4 + 256 * 16))
+    r.bind()
+    r.button(1)
+    check(m.r32(table) == MAGIC and m.uc.mem_read(table + 4, 256 * 16) == bytes(256 * 16),
+          "the first press sets up the table from garbage (magic, all lengths 0)")
+    check(r.text2() == "--" and any(n == "refresh" and c == CTRL0 + TRK_LEN for n, c, _ in r.calls),
+          f"press: the second line reads {r.text2()!r} and is redrawn")
+    steps = [(-1, 15, "15"), (-20, 1, "1"), (1, 2, "2"), (100, 0, "--"), (-10, 6, "6"), (0, 6, "6")]
+    for delta, want, label in steps:
+        r.jog(delta)
+        check(r.stored(0) == want and r.text2() == label and not r.jogs,
+              f"encoder {delta:+d}: track 1 length {r.stored(0)} ({r.text2()!r}), stock's encoder not called")
+    m.w8(ED + ED_CURSOR_TRACK, 3)
+    m.w8(CUR_PATTERN, 5)
+    r.jog(-3)
+    check(r.stored(3, 5) == 13 and r.stored(0, 1) == 6 and r.text2() == "13",
+          f"cursor on track 4, pattern 5: track 4's length {r.stored(3, 5)} in pattern 5's row; pattern 1's untouched")
+    calls = r.labels()
+    t2 = [m.cstr(a) for n, c, a in calls if n == "text2" and c == CTRL0 + TRK_LEN]
+    check(t2[-1:] == ["13"], f"a label redraw while held shows the length (second lines set: {t2}, the last wins)")
+
+    print("Trk Len released, unbound or blocked: the encoder is stock's")
+    before = bytes(m.uc.mem_read(table, 4 + 256 * 16))
+    r.button(0)
+    check(r.text2() == "", f"release: the second line is empty again ({r.text2()!r})")
+    for delta in (1, -2):
+        r.jog(delta)
+        check(r.jogs == [delta] and bytes(m.uc.mem_read(table, 4 + 256 * 16)) == before,
+              f"released, encoder {delta:+d}: stock's encoder gets {r.jogs}, the table is unchanged")
+    for what, setup, undo in (
+            ("the bind cleared (pages 1 and 2)", lambda: m.call(BTN_CLEAR, r.mgr, 0, 6), None),
+            ("page 3 bound again", r.bind, None),
+            ("an overlay open", lambda: m.w8(ED + ED_OVERLAY, 1), lambda: m.w8(ED + ED_OVERLAY, 0)),
+            ("stock's guard set", lambda: setattr(r, "guard", 1), lambda: setattr(r, "guard", 0))):
+        r.bind()
+        r.button(1)
+        setup()
+        r.jog(2)
+        check(r.jogs == [2] and bytes(m.uc.mem_read(table, 4 + 256 * 16)) == before,
+              f"held, then {what}: stock's encoder gets {r.jogs}, the table is unchanged")
+        if undo:
+            undo()
+            r.jog(-1)
+            check(not r.jogs and r.stored(3, 5) == 12, f"... and once that's over, the encoder is Trk Len's again")
+            m.w8(table + 4 + 16 * 5 + 3, 13)
+        r.bind()
+
+    print("Trk Len and the pattern's length")
+    m.w8(CUR_PATTERN, 1)
+    m.w8(ED + ED_CURSOR_TRACK, 0)
+    m.w8(table + 4 + 16 + 0, 10)
+    for buf in (r.cur, r.nxt):
+        m.w8(buf + 0x1C, 7)
+    r.bind()
+    r.button(1)
+    check(r.text2() == "--" and r.stored(0) == 10, f"length 10 in an 8-step pattern: {r.text2()!r}, kept ({r.stored(0)})")
+    r.jog(-1)
+    check(r.stored(0) == 7 and r.text2() == "7", f"encoder -1: {r.stored(0)} ({r.text2()!r})")
+    for buf in (r.cur, r.nxt):
+        m.w8(buf + 0x1C, 127)
+    m.w8(table + 4 + 16 + 0, 0)
+    r.button(1)
+    for delta, want, label in ((-1, 127, "127"), (-27, 100, "100"), (-1, 99, "99"), (200, 0, "--")):
+        r.jog(delta)
+        check(r.stored(0) == want and r.text2() == label, f"128 steps, encoder {delta:+d}: {r.stored(0)} ({r.text2()!r})")
+    r.button(0)
+
+    print("A length set with Trk Len plays")
+    r = UiRig(ptf, table=None)
+    r.table = table
+    for s in range(16):
+        r.put(0, s, 40 + s)
+    r.bind()
+    r.button(1)
+    r.jog(-10)
+    r.button(0)
+    r.start()
+    r.run(2 * 16 * STEP + FIRST_MICRO)
+    got = [n - 40 for n in r.notes(1)]
+    want = ([0, 1, 2, 3, 4, 5] * 3)[:16] * 2
+    check(r.stored(0) == 6 and got[:32] == want, f"track 1 set to 6 with the button: plays {got[:18]} ...")
+
+
+def jog_ram(ptf: Path, press: bool, scenario, deltas=(1, 1, -1, 3, -2, 5, -7, 1)) -> tuple[list[bytes], list]:
+    r = UiRig(ptf, stock_jog=False)
+    m = r.m
+    for t in range(4):
+        for s in range(16):
+            r.put(t, s, 30 + s, (ROLL, 6) if s % 3 == 0 else (0, 0), (VOLUME, 20 + s) if s % 2 else (0, 0),
+                  instr=4 + t)                  # sample instruments: synth slots need the synth system
+    if press:
+        r.bind()
+        r.button(1)
+        r.button(0)
+    scenario(r)
+    calls = []
+    for delta in deltas:
+        r.jog(delta)
+        calls.append([(n, c) for n, c, _ in r.calls])
+    skip = []
+    try:
+        lo = patch_ram(ptf, "polymeter")
+        skip = [(lo, lo + 0x1010)]
+    except SystemExit:
+        pass
+    dumps = []
+    for lo, hi in ((0x20000000, 0x20050000), (0x20200000, 0x20208000)):
+        b = bytearray(m.uc.mem_read(lo, hi - lo))
+        for a, z in skip:
+            if lo <= a < hi:
+                b[a - lo:z - lo] = bytes(z - a)
+        dumps.append(bytes(b))
+    dumps += [bytes(m.uc.mem_read(r.cur, 0x3030)), bytes(m.uc.mem_read(r.nxt, 0x3030))]
+    return dumps, calls
+
+
+def stock_jog_checks(ptf: Path, stock: Path) -> None:
+    print("Without the hold the encoder is stock's")
+    names = [p["name"] for p in json.loads(ptf.with_suffix(".map.json").read_text())["patches"]]
+    if names != ["polymeter"]:
+        print(f"  (skipped: compared with stock only on polymeter alone; this build has {len(names)} patches)")
+        return
+
+    def column(rec, col, row=0, track=0):
+        def setup(r):
+            r.m.w8(ED + ED_RECORD, rec)
+            r.m.w8(ED + ED_COLUMN, col)
+            r.m.w16(ED + ED_CURSOR_ROW, row)
+            r.m.w8(ED + ED_CURSOR_TRACK, track)
+            r.m.w16(ED + 0x1EA, 16)
+        return setup
+
+    scenarios = [("record off", column(0, 0)), ("record off, row 5 of track 3", column(0, 0, 5, 2))]
+    scenarios += [(f"record on, column {c}", column(1, c, 3, 1)) for c in range(4)]
+    for label, scenario in scenarios:
+        want = jog_ram(stock, False, scenario)
+        still = jog_ram(stock, False, scenario, deltas=())
+        changed = [i for i, (a, b) in enumerate(zip(want[0], still[0])) if a != b]
+        for press in (False, True):
+            got = jog_ram(ptf, press, scenario)
+            diff = [i for i, (a, b) in enumerate(zip(got[0], want[0])) if a != b]
+            check(not diff and got[1] == want[1],
+                  f"{label}{', after Trk Len pressed and released' if press else ''}: "
+                  f"8 encoder turns leave the same RAM and display calls as stock" + (f" (differ: {diff})" if diff else ""))
+        check(bool(changed), f"{label}: (the turns do change stock's RAM: regions {changed})")
+
+
+def site_checks(ptf: Path) -> None:
+    print("Sites")
+    stubs = json.loads(ptf.with_suffix(".map.json").read_text())["itcm_stubs"]["sites"]
+    ours = {int(s["at"], 16) for s in stubs if s["patch"] == "polymeter"}
+    for at, what in SITES.items():
+        check(at in ours, f"ITCM {at:#x} ({what}) goes through a stub to polymeter")
+
+
+def stock_checks(ptf: Path, stock: Path) -> None:
+    print("No lengths: as stock firmware")
+    others = [(t, s, 40 + s, (MICRO_MOVE, 20 * (s % 3)) if t % 2 else (VOLUME, 50), (ROLL, 6) if s % 5 == 0 else (0, 0))
+              for t in (0, 1, 7, 15) for s in range(16) if (s + t) % 3]
+    ram = patch_ram(ptf, "polymeter")
+    cases = (("table set up, no lengths", None),
+             ("table not set up (no magic)", lambda r: r.m.w32(ram, 0)),
+             ("lengths 0, 16 and 40 in a 16-step pattern", lambda r: (r.length(0, 16), r.length(1, 40), r.length(7, 0))),
+             ("a length the pattern was shortened below (10 in 8 steps)", "short"))
+    for label, setup in cases:
+        out = []
+        for path, patched in ((ptf, True), (stock, False)):
+            last = 7 if setup == "short" else 15
+            rig = Rig(path, last, ram if patched else None)
+            for t, s, note, fx1, fx2 in others:
+                rig.put(t, s, note, fx1, fx2)
+            if patched and setup == "short":
+                rig.length(0, 10)
+            elif patched and setup:
+                setup(rig)
+            rig.start()
+            rig.run(3 * (last + 1) * STEP + FIRST_MICRO)
+            out.append(rig.events())
+        check(out[0] == out[1] and len(out[0]) > 50, f"{label}: the same {len(out[1])} MIDI events as stock")
+
+
+def length_checks(ptf: Path, stock: Path) -> None:
+    print("Lengths: as the pattern written out (the oracle)")
+    for e in (1, 5, 6, 15):
+        a, b = pair(ptf, stock, 15, {0: (e, notes_steps(e))}, others=[(1, s, 70 + s, (0, 0), (0, 0)) for s in range(16)])
+        check(a == b and len(a) > 40, f"track 1 length {e} in 16 steps: {len(a)} events as the oracle")
+    rig = Rig(ptf, 15, patch_ram(ptf, "polymeter"))
+    for s in range(16):
+        rig.put(0, s, 40 + s)
+    rig.length(0, 6)
+    rig.start()
+    rig.run(3 * 16 * STEP + FIRST_MICRO)
+    heard = [n - 40 for n in rig.notes(1)]
+    check(heard[:48] == ([0, 1, 2, 3, 4, 5] * 3)[:16] * 3, f"length 6: plays {heard[:18]} ... (0-5 0-5 0-3, then again)")
+
+    tracks = {t: (t + 1, notes_steps(t + 1, 30 + 3 * t)) for t in range(16)}
+    a, b = pair(ptf, stock, 15, tracks)
+    check(a == b and len(a) > 300, f"all 16 tracks, lengths 1..16 at once: {len(a)} events as the oracle")
+
+    # positions and the pattern's end: track 16 short, every position still runs 0..15
+    rig = Rig(ptf, 15, patch_ram(ptf, "polymeter"))
+    for s in range(16):
+        rig.put(15, s, 40 + s)
+        rig.put(1, s, 40 + s)
+    rig.length(15, 5)
+    rig.start()
+    seen = set()
+    for _ in range(2 * 16 * STEP + FIRST_MICRO):
+        rig.m.ticks += 1
+        rig.m.call(st.SEQ_TICK, SEQ, max_insns=2_000_000)
+        seen |= {struct.unpack("<H", rig.m.uc.mem_read(SEQ + 0x68 * t + 0x88, 2))[0] for t in range(16)}
+    heard15, heard1 = [n - 40 for n in rig.notes(16)], [n - 40 for n in rig.notes(2)]
+    check(heard15[:32] == ([0, 1, 2, 3, 4] * 4)[:16] * 2 and heard1[:32] == list(range(16)) * 2,
+          f"track 16 length 5: {heard15[:17]} ...; track 2 plays 0..15 (the pattern still ends after 16 steps)")
+    check(seen == set(range(16)), "every track's position (+0x88) still counts 0..15")
+
+    a, b = pair(ptf, stock, 127, {0: (48, notes_steps(48, 20)), 1: (100, notes_steps(100, 10))},
+                ticks=128 * STEP + 40 * STEP)
+    check(a == b and len(a) > 250, f"128-step pattern, lengths 48 and 100: {len(a)} events as the oracle")
+
+
+def step_checks(ptf: Path, stock: Path) -> None:
+    print("What a step carries, on a short track")
+    for v in (1, 6, 20, 40):
+        steps = [(40, (0, 0), (0, 0), None), None, None, (43, (ROLL, v), (0, 0), None), None, None]
+        a, b = pair(ptf, stock, 15, {0: (6, steps)})
+        check(a == b and len(a) > 6, f"Roll {v} on step 4 of a 6-step track, empty steps after it: {len(a)} events as the oracle")
+    steps = notes_steps(6, fx=lambda s: ((MICRO_MOVE, 90), (0, 0)) if s == 5 else ((0, 0), (0, 0)))
+    a, b = pair(ptf, stock, 15, {0: (6, steps)})
+    check(a == b, f"Micro-move 90 on the track's last step: {len(a)} events as the oracle")
+    steps = notes_steps(6, fx=lambda s: ((BREAK, 0), (0, 0)) if s == 2 else ((0, 0), (0, 0)))
+    a, b = pair(ptf, stock, 15, {0: (6, steps)}, others=[(1, s, 70 + s, (0, 0), (0, 0)) for s in range(16)])
+    check(a == b, f"Break on step 3 of a 6-step track (ends the pattern there): {len(a)} events as the oracle")
+    steps = [(40 + s, (0, 0), (0, 0), 0) for s in range(6)]
+    a, b = pair(ptf, stock, 15, {0: (6, steps)}, voice=True)
+    voices = [w for _, w in a if w.startswith("voice")]
+    check(a == b and len(voices) >= 48, f"a sample instrument on a 6-step track: {len(voices)} voice note-ons as the oracle")
+    steps = [(40 + s, (0, 0), (0, 0), 64) for s in range(5)]
+    a, b = pair(ptf, stock, 15, {9: (5, steps)}, synth=True)
+    ons = [w for _, w in a if w.startswith("voice")]
+    check(a == b and len(ons) >= 48, f"a synth (instrument 65) on a 5-step track 10: {len(ons)} note-ons as the oracle")
+
+
+def mode_checks(ptf: Path, stock: Path) -> None:
+    print("Play modes, on a 6-step track")
+    tracks = {0: (6, notes_steps(6))}
+    others = [(1, s, 70 + s, (0, 0), (0, 0)) for s in range(16)]
+    a, b = pair(ptf, stock, 15, tracks, others, start=9)
+    check(a == b and len(a) > 40, f"Play from step 10: {len(a)} events as the oracle")
+
+    def selection(rig):
+        rig.m.call(st.SEQ_PLAY_FROM, SEQ, 8)
+        rig.m.w8(SEQ + 0x1F, 1)
+        rig.m.w8(SEQ + 0x20, 8)
+        rig.m.w8(SEQ + 0x22, 11)
+    a, b = pair(ptf, stock, 15, tracks, others, setup=selection, start=8, ticks=12 * STEP)
+    check(a == b and len(a) > 10, f"a looping selection, steps 9..12: {len(a)} events as the oracle")
+
+    def performance(rig):
+        rig.m.call(st.SEQ_PLAY_FROM, SEQ, 0)
+        rig.m.w8(SEQ + 0x1D, 1)
+        for t in range(8):
+            rig.m.w16(SEQ + 0x38 + 2 * t, 15)
+        rig.m.w16(SEQ + 0x36, 0xFFFF)
+        rig.m.w8(SEQ + 0xB9, 1)                  # track 1 backward
+    a, b = pair(ptf, stock, 15, tracks, others, setup=performance, ticks=40 * STEP)
+    check(a == b and len(a) > 40, f"performance mode, track 1 backward: {len(a)} events as the oracle")
+
+
+def roll_checks(ptf: Path, stock: Path) -> None:
+    print("Roll's look-ahead")
+    hooks = {int(s["at"], 16): int(s["hook"], 16) for s in
+             json.loads(ptf.with_suffix(".map.json").read_text())["itcm_stubs"]["sites"] if s["patch"] == "polymeter"}
+    ram = patch_ram(ptf, "polymeter")
+    pm = Rig(ptf, 15, ram)
+    sk = Rig(stock, 15)
+    content = {0: None, 3: 50, 5: 52, 9: 60, 13: 64}            # notes on the 6-step track 1 and on track 2
+    for s, n in content.items():
+        if n is not None:
+            pm.put(0, s, n)
+            pm.put(1, s, n)
+            sk.put(1, s, n)
+    for s in range(16):
+        if s % 6 in content and content[s % 6] is not None:
+            sk.put(0, s, content[s % 6])
+    pm.length(0, 6)
+    bad = []
+    for at in (0x33A2, 0x3520):
+        for t in (0, 1):
+            for step in range(16):
+                got = pm.m.call(hooks[at] | 1, SEQ, t, step)
+                want = sk.m.call(DISTANCE | 1, SEQ, t, step)
+                if got != want:
+                    bad.append((hex(at), t, step, got, want))
+    check(not bad, f"both hooks, every step of a 6-step track and of a track without a length: as stock "
+                   f"on the written-out pattern{'' if not bad else f' (differs: {bad[:4]})'}")
+
+
+def song_checks(ptf: Path) -> None:
+    print("Song mode, pattern A then B")
+    rig = Rig(ptf, 15, patch_ram(ptf, "polymeter"))
+    m = rig.m
+    a_buf, b_buf = st.pattern(m, 15), st.pattern(m, 15)
+    for s in range(16):
+        st.set_step(m, a_buf, 0, s, 40 + s, 48)
+        st.set_step(m, b_buf, 0, s, 70 + s, 48)
+    data_b = bytes(m.uc.mem_read(b_buf, 0x3030))
+    m.write(rig.cur, bytes(m.uc.mem_read(a_buf, 0x3030)))
+    m.write(PROJECT + 0x5C2, bytes([1, 2, 0]))
+    m.w8(PROJECT + 0x6C1, 0)
+    rig.length(0, 6, pattern=1)
+    rig.length(0, 4, pattern=2)
+    requests = []
+
+    def request(mm):
+        requests.append((mm.ticks, mm.arg(1)))
+        mm.write(struct.unpack("<I", mm.uc.mem_read(SEQ + 0x18, 4))[0], data_b)
+        mm.w8(0x2001E488 + 0x130, mm.arg(1))
+        return 1
+    m.stub_function(st.FM_REQUEST_PATTERN_LOAD, request)
+    m.call(st.SEQ_PLAY_FROM, SEQ, 0)
+    m.w8(SEQ + 0x1C, 1)
+    rig.tick0 = m.ticks
+    m.events.clear()
+    rig.run(2 * 16 * STEP + FIRST_MICRO)
+    steps = [(t - rig.tick0 - FIRST_MICRO) // STEP for t, _ in requests]
+    heard = rig.notes(1)
+    check(steps[:1] == [15] and requests[0][1] == 2, f"B requested on step 16 ({steps[:1]}), as stock firmware")
+    check([n - 40 for n in heard[:16]] == ([0, 1, 2, 3, 4, 5] * 3)[:16],
+          f"A's track 1 (length 6): {[n - 40 for n in heard[:16]]}")
+    check([n - 70 for n in heard[16:32]] == [0, 1, 2, 3] * 4,
+          f"then B (pattern 2) plays its own length 4: {[n - 70 for n in heard[16:32]]}")
+
+
+def cost_checks(ptf: Path) -> None:
+    print("Cost (instructions in the patch's code and its ITCM stubs, 16 tracks with notes, 4 passes)")
+    lo, hi = patch_code(ptf, "polymeter")
+    stubs = [int(x["stub"], 16) for x in json.loads(ptf.with_suffix(".map.json").read_text())["itcm_stubs"]["sites"]
+             if x["patch"] == "polymeter"]
+    for label, short in (("no lengths", False), ("16 tracks of length 5", True)):
+        rig = Rig(ptf, 15, patch_ram(ptf, "polymeter"))
+        for t in range(16):
+            for s in range(16):
+                rig.put(t, s, 40 + s)
+            if short:
+                rig.length(t, 5)
+        rig.start()
+        n = [0]
+        count = lambda uc, a, size, u: n.__setitem__(0, n[0] + 1)
+        hs = [rig.m.uc.hook_add(UC_HOOK_CODE, count, begin=lo, end=hi - 1)]
+        hs += [rig.m.uc.hook_add(UC_HOOK_CODE, count, begin=a, end=a + 11) for a in stubs]
+        rig.run(4 * 16 * STEP)
+        for h in hs:
+            rig.m.uc.hook_del(h)
+        per = n[0] / (4 * 16 * 16)
+        check(per <= PER_TRACK_LIMIT, f"{label}: {per:.1f} instructions per track and step (at most {PER_TRACK_LIMIT})")
+
+
+def main() -> int:
+    ptf, stock = Path(sys.argv[1]), Path(sys.argv[2])
+    site_checks(ptf)
+    stock_checks(ptf, stock)
+    length_checks(ptf, stock)
+    step_checks(ptf, stock)
+    mode_checks(ptf, stock)
+    roll_checks(ptf, stock)
+    song_checks(ptf)
+    cost_checks(ptf)
+    global TRK_LEN
+    TRK_LEN = page3_buttons(ptf)[1]
+    button_checks(ptf, stock)
+    hold_checks(ptf)
+    stock_jog_checks(ptf, stock)
+    print(f"{len(failures)} failure(s)")
+    for f in failures:
+        print("  " + f)
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

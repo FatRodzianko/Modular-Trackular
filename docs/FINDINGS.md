@@ -2935,3 +2935,240 @@ The plan built on these facts is [LIVE_RESAMPLING_PLAN.md](LIVE_RESAMPLING_PLAN.
   the rig a second press right after the first leaves the count-in running and stock
   records at its end (577 ticks; whether a later press restarts the count is not
   checked). On hardware too there is no way to cancel the count-in.
+
+## 29. Track lengths, the play position and the Pattern grid (polymeter, emulator and static)
+
+Found while planning a per-track length (polymeter) patch (`docs/POLYMETER_PLAN.md`).
+`ed` = `patview + 0x1000` = `0x20022770` (section 13).
+
+### One position per track, one pattern length
+
+- **Every track has its own step** (`+0x88`, section 12), but in pattern and song mode
+  `seq_advance_step` (`0x600ad010`) moves all 16 with the same rule and the same last
+  step (track 0's length byte, `seq+0x36`, or a looping selection's end), so they stay
+  equal. Only performance mode (tracks 1–8: own lengths `seq+0x38`, play modes `+0xb9`)
+  makes them differ.
+- **The forward rule** (`0x600ad0ec`): `+0x8a` + 1 and `+0x88` + 1. The track wraps
+  when either passes the last step, or when a Break is pending. On a wrap through
+  `+0x8a` (`0x600ad10e`), `+0x8a` = 0, but `+0x88` only goes back to the loop start if it
+  has also passed the last step; otherwise it keeps counting.
+- **The pattern ends only when track 15 wraps** (`+0x33` set at `0x600ad112` or
+  `0x600ad16e`); track 15 by either counter. Nothing else ends a pattern.
+- **Track 0's `+0x88` is also the master position for three other readers.** The step
+  copy of every track reads that track's own `+0x88`, but these read track 0's:
+  - the metronome (`0x2346`: step mod (beats × bars)) (q for the settings);
+  - the next-pattern preload request at micro-step 1 of the last step (`0x2396`,
+    `0x2574`: `+0x88 == data+0x1c`);
+  - the Pattern screen's play row: `ed+0x1f0` = `seq+0x88` at `0x600e208e`
+    (`scr_pattern_update`), `0x600e2f44` and `0x600e17f2`.
+
+  So shortening a track by changing its `+0x88` would break song mode (no preload
+  request), the metronome and the play row whenever track 0 is short.
+- `seq_master_micro` (ITCM `0x1de8`) also keeps a master step at `seq+0x30`.
+
+### Where step data is read during playback
+
+- **`seq_process_track` reads a step's data at one place:** the 6-byte copy into the
+  work record at micro-step 1, `bl memcpy_small` at ITCM `0x2170`. There:
+  - r0 = the work record;
+  - r1 = `*(seq+0x14) + 0x1d + 0x301·t + 6·step`, with step = the track's `+0x88`;
+  - r2 = 6, r4 = seq, r5 = t.
+
+  It runs for every track, muted or not, before the mute check.
+- **The only other reads are Roll's look-aheads.** `seq_distance_to_next_note_q(seq, t,
+  step)` (ITCM `0x3958`, called at `0x33a2` and `0x3520` with step = `+0x88`) counts the
+  steps to the next note, stopping at the pattern's last step. It returns 1 when the next
+  step has a note or the pattern ends there.
+- **Emulator proof** (scratch: a Python hook at `0x2170` rewrote r1 to use
+  step mod L(t); everything else stock):
+  - without lengths, the 194 MIDI events of 3 passes were identical to stock;
+  - in a 16-step pattern, track 1 with L = 6 played steps 0–5 0–5 0–3, then all tracks
+    started again together, for 3 passes; track 16 with L = 5 played 0–4 ×3 then 0;
+  - with track 16 short, the pattern still ended after 16 steps: `+0x8a` still
+    reaches 15. `+0x88` of every track stayed 0..15, so the play row, the preload and
+    the metronome were unchanged;
+  - playing from step 9, the L = 6 track started on step 3;
+  - in song mode the preload request still came on step 15, and the next pattern
+    started on its step 0 for every track;
+  - a looping selection 8..11 played steps (8..11) mod 6 = 2..5;
+  - performance mode, track 1 backward with a performance length of 16, played
+    (0, 15, 14, …) mod 6.
+
+### Pattern lengths in the pattern data
+
+- `pat_change_length(patview, delta)` (`0x600e0024`, the jog while Length is held)
+  clamps to 1..128. It writes the last-step byte of tracks 0..7 only (`+0x1c`,
+  `+0x31d`, …, `+0x1523`), then `ed+0x1ea` = length, marks the pattern changed and
+  refreshes. The other length writers set the same bytes from track 0's:
+  - Length + Left/Right (`0x600e00a8`, preset lengths at `0x6004013c`);
+  - Length + a pad (`0x600e0158`, from `0x600c6d48`, the pad scaled over 1..128);
+  - Duplicate (`0x600ada8c`), which writes all 16.
+
+  Playback reads only track 0's byte, except performance mode's backward wrap, which
+  reads track t's (`0x600ad0aa`). Tracks 8..15's bytes are never updated by a length
+  edit, so per-track bytes in the `.mtp` can't hold a mod's lengths: stock rewrites or
+  ignores them.
+
+### Pattern screen inputs
+
+- The Pattern screen registers its input callbacks from flash literals next to the
+  column buttons' (section 20):
+  - Left `0x600df2cc` → `0x600c7571`;
+  - Right `0x600df2d0` → `0x600c7d71`;
+  - jog `0x600df2f0` → `0x600c90a1`;
+  - pads `0x600df2f8` → `0x600c6bd9`.
+
+  Each word is the only reference.
+- **The jog** (`pat_jog`, `0x600c90a0`, r0 = delta) goes by the pad mode `ed+0x354`.
+  While a bottom-bar button that has its own view is held:
+  - 0 (Pattern held): pattern select;
+  - 1 (Length held): `bl pat_change_length` at `0x600c9172`;
+  - 2 (Step jump held): `project+0x6df`.
+
+  Otherwise it edits or moves the cursor.
+- **The Length button** (`pat_length_button`, `0x600e249c`, bound as kind 3 on page 1):
+  a press sets `ed+0x354` = 1 and redraws the pads and the bar. A release goes to
+  `pat_hold_view_release` (`0x600e2250`, `ed+0x354` = −1).
+- **Shift** (button `0x1d`) plus a screen button mutes that track on the Pattern screen
+  (manual 1.2.0, quick reference), so Shift isn't free as a modifier for screen buttons
+  there.
+- **Page 3** binds only buttons 0 and 1 by `bl` (`0x600e29ba` and `0x600e29c6`, chained
+  by humanize and copypattern) and More by a tail `b.w`. The labels' text and second line
+  for button 6 are `bl`s that no patch uses yet: `0x600e58b4` and `0x600e5914`.
+
+### The Pattern grid
+
+- **Row texts.** `patview_fill_rows_q` (`0x600df3a0`) writes 15 rows × 0x13 bytes per
+  track at `patview + 0x14 + 0x11d·t + 0x13·row` (note, instrument, FX1, FX2 texts) and
+  the mute bytes at `patview+0x1200+t`. It sets:
+  - `ed+0x1ea` = length;
+  - `ed+0x1e8` = the centre row (the cursor `ed+0x1e6`, or the play row `ed+0x1f0`
+    while following).
+
+  Row r shows step `ed+0x1e8 − 7 + r`. A row outside 0..length−1 shows the step wrapped
+  round when `settings+0xd2` is 0, and is blank otherwise.
+  Each row is 0x13 bytes: note text at `+0` (5 bytes), instrument `+5` (4), FX1 `+9`
+  (5), FX2 `+0xe` (5).
+- **The grid control** (0x50 bytes, vtable `0x60046dc8`). It is built by `patgrid_ctor`
+  (`0x6010a3d4`, `(ctrl, desc)`) through `disp_create_patgrid_q` (`0x600e5ec8`), called
+  at `0x600e624e` in the Pattern screen's create-controls (`0x600e5f68`, vtable slot
+  `0x600403e8`). The descriptor:
+
+  | desc | ctrl | Value |
+  |---|---|---|
+  | `+4` | `+0x18` | `ed+0x4dc` |
+  | `+8` | `+0x2c` | the row texts, `patview+0x14` ("data") |
+  | `+0xc` | `+0xc` | flags `0x1000400` or `0x400` (font in bits 8–11) |
+  | `+0x10` | `+0x28` | the color table, `*(display+8) + 0x2b8` |
+  | `+0x14`..`+0x1a` | `+0x1c`..`+0x22` | x 0, y 0 or 0x1c, w 800, h 0x1a7 or 0x18b |
+
+  The constructor also reads a font table in SDRAM (`0x83fcd374`), which only affects
+  positions.
+- **Its draw**: vtable methods 1–4 each draw one column:
+  - `patgrid_draw_note` `0x6010b320`;
+  - `patgrid_draw_instr` `0x6010b4d4`;
+  - `patgrid_draw_fx1` `0x6010b700`;
+  - `patgrid_draw_fx2` `0x6010b908`.
+
+  Each runs when ctrl `+0x39` is 0 or has its bit (bits 0–3). The control draws
+  `+0x3c` tracks from the first visible track (`ed+0x1ec`), 15 rows each (`+0x3d`), so
+  `t` below is the absolute track.
+
+  For each cell it picks a color into ctrl `+0x44` from the color table at `+0x28`. In
+  order:
+  - the highlighted color `+0x38`: for the cursor cell (row 7 of the cursor track
+    `ed+0x1e4`, while `ed+0x1e0` and `ed+0x1e1` are set) or inside the selection
+    rectangle (ctrl `+0x38`, `+0x30`..`+0x36`);
+  - else the muted color `+0x30` when `patview+0x1200+t` is set;
+  - else the column's empty or normal color, by whether the text starts with "-".
+
+  | Column | Normal | Empty | Stock colors (normal / empty) |
+  |---|---|---|---|
+  | note | `+0x08` | `+0x18` | `0x00e8be` / `0x003933` |
+  | instrument | `+0x0c` | `+0x1c` | `0xfef749` / `0x453b1b` |
+  | FX1 | `+0x10` | `+0x20` | `0xbb58f1` / `0x321f3a` |
+  | FX2 | `+0x14` | `+0x24` | `0x57f1ff` / `0x183744` |
+
+  Muted is `0x171717` and highlighted `0xffffff` (table `0x6005a778`). Then
+  `patgrid_draw_cell` (`0x6010b204`, text pointer = first stack argument) draws the
+  text. It emits `eve_color_rgb` only when `+0x44` differs from the last color
+  (`+0x48`).
+- **The 5 `bl 0x6010b204` sites**, one per column:
+  - `0x6010b3de` note;
+  - `0x6010b62c` instrument, 2-character text;
+  - `0x6010b5ae` instrument, 3-character text (smaller font);
+  - `0x6010b7be` FX1;
+  - `0x6010b9c4` FX2.
+
+  The text pointer gives the cell: data + 0x11d·t + 0x13·row + the column's offset.
+- **Emulator** (scratch rig):
+  - stock `patview_fill_rows_q`, the constructor with the descriptor above, and
+    methods 0–4 drew 240 cells (4 tracks × 15 rows × 4 columns) through 4 of the sites;
+  - the 3-character instrument text goes through the fifth;
+  - every text pointer decoded to the expected track, row and column;
+  - row r showed step `ed+0x1e8 − 7 + r` in all three `settings+0xd2` modes, also
+    scrolled to tracks 13–16:
+    - 0: wrapped round, so row "16" is step 0;
+    - 1: blank outside the pattern;
+    - 2: the centre moves only when the cursor nears an edge.
+
+### Live recording reads the step too
+
+- `seq_record_live_note` (ITCM `0x15c8`) is reached through 8 flash veneers whose
+  literal is `0x15c9` (`0x600ab69c`, `0x600c73cc`, `0x600cd554`, `0x600d4b34`,
+  `0x600f1924`, `0x600f54ec`, `0x600fad84`, `0x6011a0fc`). It loops over the tracks
+  and reads each track's `+0x88` at `0x18b8`. Past micro-step 24 it records on the next
+  step, (step + 1) mod length, unless a flag on its stack says otherwise.
+- `0x600ac700` (live note-off recording (q), from the pads handler `0x600c6cde`) reads
+  `+0x88` at `0x600ac75e` with the same rule, and moves one step further when that step
+  equals `+0x82` (the step the note was recorded on (q)).
+- **Both take** `(seq, source, note, r3, a 16-bit stack argument)`. Source is `0x14`
+  from the pads; the note-off recorder treats `0x16` separately. They record only while
+  `settings+0xce` is 2 or 3.
+- **No single place picks the row.** `seq_record_live_note` computes the step inline
+  (`sdiv`/`mls` at ITCM `0x18d8`, against track 1's last-step byte
+  `*(seq+0x14)+0x1c`). It loops over the 16 tracks and writes the row at several stores
+  (`0x1736`, `0x1966`, `0x1aa4`, `0x1ad6`, among others). The note-off recorder also
+  writes from several places (`0x600ac8b4`, `0x600ac8d8`, …). A change to the row has to
+  wrap the whole call.
+- **The callers are a closed set:**
+  - `seq_record_live_note`: only through the 8 veneers above (`ldr.w pc, [pc]`; no other
+    reference to `0x15c9` in flash or ITCM). Their 14 callers: `0x600ab614` (sequencer
+    module, `0x600ab5da`), the Pattern pads (`0x600c6e7c`, `0x600c6faa`, `0x600c6fca` in
+    `pat_pads_q`; `0x600c6abe`, `0x600c6bb6`, `0x600c7374`), `0x600cd504`, `0x600d47a8`,
+    `0x600d497e`, `0x600f18f0`, `0x600f5478`, `0x600fabf6` (a `b.w` to the veneer) and
+    `0x6011a0da`.
+  - `seq_record_note_off_q` (`0x600ac700`): 18 direct callers, no pointer to it. These
+    16 are `bl`: `0x600ab514`, `0x600c6afc`, `0x600c6b78`, `0x600c6cde`, `0x600c6ece`,
+    `0x600c6f96`, `0x600c71ee`, `0x600c7348`, `0x600cd4a6`, `0x600d4792`, `0x600d491e`,
+    `0x600d4adc`, `0x600f0396`, `0x600f1904`, `0x600f57aa`, `0x6011a0a8`. And 2 are tail
+    calls (`b.w`): `0x600f5500` and `0x600f9418`.
+
+### Page 3's button 6 and the encoder
+
+- **Button dispatch** (`btn_dispatch_q`, `0x600cf7b4`, `(manager, button, state)`; skipped
+  while the manager's `+0xc` byte for that button is set). It acts by the entry's kind:
+
+  | Kind | Bound by | Handler | Called |
+  |---|---|---|---|
+  | 1 | `btn_bind` | `+4` | when the state equals the flag `+0x10` (1 = press only) |
+  | 2 | | `+8` | when the state equals the flag, with r0 = the button |
+  | 3 | `btn_bind_kind3` (`0x600cf74c`, flag `0xff`) | `+8` | on every press and release, with r0 = the state |
+  | 4 | `0x600cf778` | `+0xc` | with (button, state) |
+- **Emulator** (scratch):
+  - a kind-3 bind of button 6 on page 3 called its handler with r0 = 1, 0, 1, 0 for
+    press, release, press, release;
+  - the stock binds of pages 1, 2 and 3 each replace or clear it (page 3 clears buttons
+    0–6 first), so a button-6 binding never outlives page 3.
+- **Page-3 sites already hooked:**
+  - humanize, unchained: bind `0x600e29ba`, text `0x600e5884`, colors `0x600e593c`,
+    data `0x600e5966`;
+  - copypattern, chained: bind `0x600e29c6`, text `0x600e5890`, second line
+    `0x600e58f0`, colors `0x600e592e`, data `0x600e5958`.
+
+  Button 6's text (`0x600e58b4`) and second line (`0x600e5914`) are free. Page 3 has no
+  colors or data call for button 6, but button 7's (colors `0x600e594a`, data
+  `0x600e5976`) are free to chain.
+- **The encoder**: `pat_jog(delta)` has r0 = the signed delta. Its word `0x600df2f0` is
+  the literal loaded at `0x600df292`. It does nothing while `0x6010e0f8(0x200209ac)` is
+  nonzero or an overlay is open (`ed+0x398`). Then it acts by `ed+0x354`.

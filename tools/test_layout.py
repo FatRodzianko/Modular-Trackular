@@ -29,6 +29,9 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
   - resample alone, and first with patch/all's other patches after it in reverse order
     (its RAM moves to another region with all of them; an ITCM-image word, as swing's;
     patch/all has it last),
+  - polymeter (ITCM hooks, 4 KB of RAM) alone, after patch/all's patches, and first with
+    them after it in reverse order; and with page 3's other buttons (humanize,
+    copypattern, both) in both orders,
   - a copy of slicethru with a non-BL site ("replaces": "insns", the two instructions
     at 0x60035522), alone and in patch/all's place for slicethru; the site's 4 bytes
     are a BL to the hook and the bytes around it are stock,
@@ -343,6 +346,25 @@ def main() -> int:
                       version="RSR")
     all_rs_rev_spec = outdir / "all-resample-reversed.json"
     all_rs_rev_spec.write_text(json.dumps(all_rs_rev, indent=2))
+    pm = ROOT / "patch" / "polymeter" / "patch.json"
+    all_pm_list = all_rs_list + [pm]
+    all_pm = dict(rev, name="all-polymeter", include=[str(x) for x in all_pm_list], version="PMA")
+    all_pm_spec = outdir / "all-polymeter.json"
+    all_pm_spec.write_text(json.dumps(all_pm, indent=2))
+    all_pm_rev = dict(rev, name="all-polymeter-reversed", include=[str(x) for x in all_pm_list[::-1]],
+                      version="PMR")
+    all_pm_rev_spec = outdir / "all-polymeter-reversed.json"
+    all_pm_rev_spec.write_text(json.dumps(all_pm_rev, indent=2))
+    pm_page3 = {}                               # polymeter with page 3's other buttons
+    for name, version, specs in (("humanize-polymeter", "HPM", [hz, pm]), ("polymeter-humanize", "PMH", [pm, hz]),
+                                 ("copypattern-polymeter", "CPM", [cp, pm]),
+                                 ("polymeter-copypattern", "PCM", [pm, cp]),
+                                 ("humanize-copypattern-polymeter", "HCM", [hz, cp, pm]),
+                                 ("polymeter-copypattern-humanize", "MCH", [pm, cp, hz])):
+        spec_path = outdir / f"{name}.json"
+        spec_path.write_text(json.dumps(dict(rev, name=name, include=[str(x) for x in specs], version=version),
+                                        indent=2))
+        pm_page3[version] = (name, spec_path, specs)
     bt_spec = json.loads(bt.read_text())
     bt_files = {k: str((bt.parent / bt_spec[k]).resolve())
                 for k in ("bin", "sym", "rel", "prebuilt_bin", "prebuilt_sym", "prebuilt_rel")}
@@ -414,6 +436,11 @@ def main() -> int:
             ("slicethru, then patch/all's patches reversed", all_bt_rev_spec, all_bt_list[::-1], "BTR", None),
             ("resample alone", rs, [rs], None, None),
             ("resample, then patch/all's patches reversed", all_rs_rev_spec, all_rs_list[::-1], "RSR", None),
+            ("polymeter alone (ITCM hooks)", pm, [pm], None, None),
+            ("patch/all's patches, then polymeter", all_pm_spec, all_pm_list, "PMA", None),
+            ("polymeter, then patch/all's patches reversed", all_pm_rev_spec, all_pm_list[::-1], "PMR", None),
+            *[(f"page 3's buttons: {name}", spec_path, specs, version, None)
+              for version, (name, spec_path, specs) in pm_page3.items()],
             ("a non-BL site: slicethru with the two instructions at 0x60035522", bt_ins, [bt_ins], None, None),
             ("a non-BL site in patch/all: the slicethru copy in slicethru's place", all_ins_spec, all_ins_list,
              "INS", None)):

@@ -1,0 +1,90 @@
+{
+  "name": "polymeter",
+  "description": "Polymeter: each track can have its own length; a shorter track loops its steps and every track starts again together when the pattern ends",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "bin": "build/polymeter.bin",
+  "sym": "build/polymeter.sym",
+  "rel": "build/polymeter.rel",
+  "prebuilt_bin": "prebuilt/polymeter.bin",
+  "prebuilt_sym": "prebuilt/polymeter.sym",
+  "prebuilt_rel": "prebuilt/polymeter.rel",
+  "branches": [
+    {
+      "at": "0x600E29C6",
+      "old": "ecf791fe",
+      "to": "mt_pm_bind",
+      "next": "mt_pm_next_bind",
+      "note": "Pattern screen page 3: bind button 1 (Track Name; shared with copypattern); also binds Trk Len (the first button after humanize's and copypattern's: 2, 3 or 4) as kind 3"
+    },
+    {
+      "at": "0x600E58B4",
+      "old": "1cf052fa",
+      "to": "mt_pm_label",
+      "next": "mt_pm_next_label",
+      "note": "Pattern screen page 3 labels: button 6's (empty) text, the last of buttons 2..6; then Trk Len on its button"
+    },
+    {
+      "at": "0x600E5914",
+      "old": "1cf02efa",
+      "to": "mt_pm_label2",
+      "next": "mt_pm_next_label2",
+      "note": "Pattern screen page 3 labels: button 6's (empty) second line; then Trk Len's: the length while held"
+    },
+    {
+      "at": "0x600E594A",
+      "old": "1cf02bfa",
+      "to": "mt_pm_colors",
+      "next": "mt_pm_next_colors",
+      "note": "Pattern screen page 3 labels: More's colors; Trk Len gets the active set"
+    },
+    {
+      "at": "0x600E5976",
+      "old": "1cf03ffa",
+      "to": "mt_pm_data",
+      "next": "mt_pm_next_data",
+      "note": "Pattern screen page 3 labels: More's data; Trk Len gets Pattern Name's"
+    }
+  ],
+  "itcm_branches": [
+    {
+      "at": "0x2170",
+      "old": "1df0d0f9",
+      "to": "mt_pm_step_copy",
+      "next": "mt_pm_next_step_copy",
+      "args": ["r4", "r5"],
+      "note": "seq_process_track, micro-step 1: bl memcpy_small (thunk 0x1f514) copying the track's step into its work record -> mt_pm_step_copy(dst, src, seq, track): a short track's step mod its length"
+    },
+    {
+      "at": "0x33A2",
+      "old": "00f0d9fa",
+      "to": "mt_pm_roll_a",
+      "next": "mt_pm_next_roll_a",
+      "note": "Roll: bl seq_distance_to_next_note_q 0x3958 (seq, track, step) -> mt_pm_roll_a: looks at a short track's steps mod its length"
+    },
+    {
+      "at": "0x3520",
+      "old": "00f01afa",
+      "to": "mt_pm_roll_b",
+      "next": "mt_pm_next_roll_b",
+      "note": "Roll: bl seq_distance_to_next_note_q 0x3958 (seq, track, step) -> mt_pm_roll_b: the same"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x600DF2F0",
+      "old": "a1900c60",
+      "to": "mt_pm_jog",
+      "next": "mt_pm_next_jog",
+      "thumb": true,
+      "note": "Pattern screen encoder callback pat_jog 0x600c90a1 -> mt_pm_jog: sets the cursor's track's length while Trk Len is held"
+    },
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "version": true,
+      "note": "version text 1.2.0-pm1"
+    }
+  ]
+}

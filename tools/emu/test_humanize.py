@@ -309,6 +309,11 @@ def main() -> int:
         free = range(4, 7)
     except SystemExit:
         free = range(3, 7)
+    try:                                        # polymeter's Trk Len takes the next free one
+        patch_code(ptf, "polymeter")
+        free = range(free.start + 1, 7)
+    except SystemExit:
+        pass
     r = Rig(ptf)
     m = r.m
 
@@ -323,7 +328,7 @@ def main() -> int:
     check(kind == 1 and bool(in_patch), f"record mode: button 2 bound to a patch handler ({kind}, {handler:#x})")
     for i, h in STOCK_HANDLERS.items():
         check(r.entry(i) == (1, h), f"button {i} keeps its stock handler {h:#x}")
-    check(all(r.entry(i)[0] == 0 for i in free), f"buttons {free.start}..6 stay unbound")
+    check(all(r.entry(i)[0] == 0 for i in free), f"buttons {free.start}..{free.stop - 1} stay unbound")
     if not (kind == 1 and in_patch):
         print("no Humanize button: is this a humanize build?")
         return 1
