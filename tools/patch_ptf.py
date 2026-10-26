@@ -50,6 +50,12 @@ work itself. There is no old target to chain to, so "next" is refused there, and
 a second patch on the site. No two sites may overlap: one starting 1 to 3 bytes into
 another is refused.
 
+Tail calls: a branch with "tail": true is a "b.w" (a call that doesn't come back to its
+caller) and stays one: the patcher writes "b.w" to the hook instead of "bl", and chains
+it like a BL ("next" gets the old target). The hook then returns to the caller's caller,
+as the old target did. A site's old bytes must be a BL, or a b.w with "tail": true; a
+site with "replaces" can't be a tail call.
+
 ITCM hooks: "itcm_branches" lists BL sites in the sequencer's ITCM code ("at" is the
 ITCM address; the bytes live in the ITCM image in flash, which the startup copy table
 copies to ITCM at boot). ITCM code can't BL to flash, so the patcher makes a stub per
@@ -114,18 +120,27 @@ ITCM_STUBS = RAM_REGIONS["itcm_tail"][0]
 ITCM_ARG_REGS = {f"r{n}": n for n in range(4, 13)} | {"sp": 13}
 
 
-def thumb_bl(at: int, target: int) -> bytes:
-    """Encode a Thumb-2 BL at `at` to `target` (T1 encoding, +-16 MB)."""
+def thumb_bl(at: int, target: int, tail: bool = False) -> bytes:
+    """Encode a Thumb-2 BL at `at` to `target` (T1 encoding, +-16 MB), or with tail a
+    b.w (T4: the same fields, bit 14 of the second halfword clear)."""
     off = (target & ~1) - (at + 4)
     if not -(1 << 24) <= off < (1 << 24):
-        raise ValueError(f"BL from {at:#x} to {target:#x} out of range")
+        raise ValueError(f"{'B.W' if tail else 'BL'} from {at:#x} to {target:#x} out of range")
     s = (off >> 24) & 1
     i1, i2 = (off >> 23) & 1, (off >> 22) & 1
     j1, j2 = (~i1 ^ s) & 1, (~i2 ^ s) & 1
     imm10, imm11 = (off >> 12) & 0x3FF, (off >> 1) & 0x7FF
     hw1 = 0xF000 | (s << 10) | imm10
-    hw2 = 0xD000 | (j1 << 13) | (j2 << 11) | imm11
+    hw2 = (0x9000 if tail else 0xD000) | (j1 << 13) | (j2 << 11) | imm11
     return struct.pack("<HH", hw1, hw2)
+
+
+def branch_form(old: bytes) -> str:
+    """'bl', 'b.w' or '' for 4 bytes of Thumb-2 code"""
+    hw1, hw2 = struct.unpack("<HH", old)
+    if hw1 & 0xF800 != 0xF000:
+        return ""
+    return {0xD000: "bl", 0x9000: "b.w"}.get(hw2 & 0xD000, "")
 
 
 def bl_target(image: bytes, base: int, at: int) -> int:
@@ -243,6 +258,11 @@ def load_patch(spec: dict, pdir: Path, in_bundle: bool) -> dict:
             sys.exit(f"{spec['name']}: site {br['at']}: \"replaces\" takes \"insns\", not {br['replaces']!r}")
         if "next" in br:
             sys.exit(f"{spec['name']}: site {br['at']} replaces instructions, not a BL: nothing to chain (\"next\")")
+        if "tail" in br:
+            sys.exit(f"{spec['name']}: site {br['at']} replaces instructions: it can't be a tail call (\"tail\")")
+    for br in spec["branches"]:
+        if "tail" in br and br["tail"] is not True:
+            sys.exit(f"{spec['name']}: site {br['at']}: \"tail\" takes true")
     for br in spec.get("itcm_branches", []):
         args = br.get("args", [])
         if len(args) > 2 or any(r not in ITCM_ARG_REGS for r in args):
@@ -411,14 +431,18 @@ def main() -> int:
             old = bytes.fromhex(br["old"])
             if stock[off:off + 4] != old:
                 sys.exit(f"{at:#x}: expected {old.hex()}, found {stock[off:off + 4].hex()}")
-            new = thumb_bl(at, p["syms"][br["to"]])
+            tail = br.get("tail", False)
+            if "replaces" not in br and branch_form(old) != ("b.w" if tail else "bl"):
+                sys.exit(f"{at:#x} ({p['name']}): {old.hex()} is not a {'b.w' if tail else 'BL'}"
+                         + ("" if tail else " (a b.w site takes \"tail\": true)"))
+            new = thumb_bl(at, p["syms"][br["to"]], tail)
             chain = ", replaces instructions" if "replaces" in br else ""
             if "next" in br:
                 before = bl_target(image, ptf.base, at)
                 set_next(p, br["next"], before | 1)
                 chain = f", {br['next']} -> {before:#x}"
             image[off:off + 4] = new
-            print(f"{at:#x}: bl -> {br['to']} @ {p['syms'][br['to']]:#x}  ({old.hex()} -> {new.hex()}{chain})  {br.get('note', '')}")
+            print(f"{at:#x}: {'b.w' if tail else 'bl'} -> {br['to']} @ {p['syms'][br['to']]:#x}  ({old.hex()} -> {new.hex()}{chain})  {br.get('note', '')}")
 
     # ITCM sites: chain words get the stock target or the hook before; the BL goes to
     # the site's stub, which jumps to the last hook.

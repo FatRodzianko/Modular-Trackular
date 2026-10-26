@@ -411,6 +411,10 @@ details. A patch is:
   returns to the next one. With no original call to chain to, such a site takes no
   `next`, and no second patch may hook it. The patcher refuses any two sites that
   overlap.
+  A tail call (a `b.w` to the original, which never comes back to its caller) is a
+  `branches` entry with `"tail": true`: the patcher writes a `b.w` to the hook instead
+  of a `BL`, and it chains like any other site. A `b.w` site without `"tail"`, or
+  `"tail"` on a `BL` site, is refused.
   Calls inside the sequencer's ITCM code go in `itcm_branches` instead: `at` is the
   ITCM address of the `BL`, with its original bytes as in `branches`, and `args` names
   up to two registers (r4–r12, sp) that the call site holds and the hook should get

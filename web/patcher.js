@@ -198,16 +198,23 @@ export function encodePtf(ptf) {
 
 // ---- tools/patch_ptf.py ----------------------------------------------------------
 
-export function thumbBl(at, target) {
+export function thumbBl(at, target, tail = false) {
   const off = ((target & ~1) >>> 0) - (at + 4);
-  if (!(-(1 << 24) <= off && off < (1 << 24))) fail(`BL from ${hx(at)} to ${hx(target)} out of range`);
+  if (!(-(1 << 24) <= off && off < (1 << 24))) fail(`${tail ? "B.W" : "BL"} from ${hx(at)} to ${hx(target)} out of range`);
   const s = (off >> 24) & 1;
   const i1 = (off >> 23) & 1, i2 = (off >> 22) & 1;
   const j1 = (~i1 ^ s) & 1, j2 = (~i2 ^ s) & 1;
   const imm10 = (off >> 12) & 0x3ff, imm11 = (off >> 1) & 0x7ff;
   const hw1 = 0xf000 | (s << 10) | imm10;
-  const hw2 = 0xd000 | (j1 << 13) | (j2 << 11) | imm11;
+  const hw2 = (tail ? 0x9000 : 0xd000) | (j1 << 13) | (j2 << 11) | imm11;
   return new Uint8Array([hw1 & 0xff, hw1 >> 8, hw2 & 0xff, hw2 >> 8]);
+}
+
+// "bl", "b.w" or "" for 4 bytes of Thumb-2 code
+function branchForm(old) {
+  const hw1 = old[0] | (old[1] << 8), hw2 = old[2] | (old[3] << 8);
+  if ((hw1 & 0xf800) !== 0xf000) return "";
+  return { [0xd000]: "bl", [0x9000]: "b.w" }[hw2 & 0xd000] ?? "";
 }
 
 export function blTarget(image, base, at) {
@@ -334,6 +341,10 @@ async function loadPatch(spec, specUrl, inBundle, io, log) {
     if (!has(br, "replaces")) continue;
     if (br.replaces !== "insns") fail(`${spec.name}: site ${br.at}: "replaces" takes "insns", not ${JSON.stringify(br.replaces)}`);
     if (has(br, "next")) fail(`${spec.name}: site ${br.at} replaces instructions, not a BL: nothing to chain ("next")`);
+    if (has(br, "tail")) fail(`${spec.name}: site ${br.at} replaces instructions: it can't be a tail call ("tail")`);
+  }
+  for (const br of spec.branches) {
+    if (has(br, "tail") && br.tail !== true) fail(`${spec.name}: site ${br.at}: "tail" takes true`);
   }
   for (const br of spec.itcm_branches ?? []) {
     const args = br.args ?? [];
@@ -516,8 +527,12 @@ export async function patchFirmware({ stockBytes, stock: parsed, spec, specUrl, 
       const old = fromHex(br.old);
       const found = stock.slice(off, off + 4);
       if (!bytesEqual(found, old)) fail(`${hx(at)}: expected ${toHex(old)}, found ${toHex(found)}`);
+      const tail = br.tail === true;
+      if (!has(br, "replaces") && branchForm(old) !== (tail ? "b.w" : "bl")) {
+        fail(`${hx(at)} (${p.name}): ${toHex(old)} is not a ${tail ? "b.w" : "BL"}` + (tail ? "" : ' (a b.w site takes "tail": true)'));
+      }
       const to = symbol(p, br.to);
-      const neu = thumbBl(at, to);
+      const neu = thumbBl(at, to, tail);
       let chain = has(br, "replaces") ? ", replaces instructions" : "";
       if (has(br, "next")) {
         const before = blTarget(image, ptf.base, at);
@@ -525,7 +540,7 @@ export async function patchFirmware({ stockBytes, stock: parsed, spec, specUrl, 
         chain = `, ${br.next} -> ${hx(before)}`;
       }
       image.set(neu, off);
-      log(`${hx(at)}: bl -> ${br.to} @ ${hx(to)}  (${toHex(old)} -> ${toHex(neu)}${chain})  ${br.note ?? ""}`);
+      log(`${hx(at)}: ${tail ? "b.w" : "bl"} -> ${br.to} @ ${hx(to)}  (${toHex(old)} -> ${toHex(neu)}${chain})  ${br.note ?? ""}`);
     }
   }
 
