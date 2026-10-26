@@ -33,6 +33,8 @@ link() {                               # link <linker script> <elf> <map>
         -Wl,--undefined=mt_pm_step_copy -Wl,--undefined=mt_pm_roll_a -Wl,--undefined=mt_pm_roll_b \
         -Wl,--undefined=mt_pm_bind -Wl,--undefined=mt_pm_label -Wl,--undefined=mt_pm_label2 \
         -Wl,--undefined=mt_pm_colors -Wl,--undefined=mt_pm_data -Wl,--undefined=mt_pm_jog \
+        -Wl,--undefined=mt_pm_cell_note -Wl,--undefined=mt_pm_cell_instr3 -Wl,--undefined=mt_pm_cell_instr \
+        -Wl,--undefined=mt_pm_cell_fx1 -Wl,--undefined=mt_pm_cell_fx2 \
         -Wl,--undefined=mt_version_fmt \
         -Wl,-Map="$3" "$OUT/polymeter.o" -o "$2"
 }

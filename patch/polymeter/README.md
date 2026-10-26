@@ -10,11 +10,11 @@ The idea comes from a custom firmware for the Tracker Mini shown on r/PolyendTra
 This is a re-implementation from its description; nothing of it was seen or used.
 [docs/POLYMETER_PLAN.md](../../docs/POLYMETER_PLAN.md) has the investigation and the plan.
 
-**Status: in development.** This build plays the track lengths and sets them with the
-Trk Len button. It doesn't yet show them in the grid, record live notes into a short
-track's loop, or save them: lengths are lost when the unit is switched off (the next
-phases of the plan). Emulator-tested, alone and in bundles with patch/all's patches in
-both orders. Not tested on hardware.
+**Status: in development.** This build plays the track lengths, sets them with the
+Trk Len button and dims the steps past them in the grid. It doesn't yet record live
+notes into a short track's loop, or save them: lengths are lost when the unit is
+switched off (the next phases of the plan). Emulator-tested, alone and in bundles with
+patch/all's patches in both orders. Not tested on hardware.
 
 ## Using it
 
@@ -25,6 +25,10 @@ of the track the cursor is on, in the current pattern.
 While held, the button's second line shows the length, or `--` when the track plays the
 whole pattern. Turning it up to the pattern's length sets it back to `--`. Released,
 the encoder works as usual. It works in and out of record mode.
+
+In the grid, a short track's steps past its length are drawn in the dim color stock uses
+for an empty field: they stay in the pattern, but don't play. Muted tracks, the cursor
+and a selection keep their own colors.
 
 ## How it works
 
@@ -53,6 +57,12 @@ were applied in. It binds the button with page 3's other buttons and gives it it
 label, colors and second line. While it is held, the patch takes the Pattern screen's
 encoder; at any other time the encoder goes straight to stock.
 
+The grid draws each cell's text through one function, called from 5 places (note,
+instrument twice, FX1, FX2), after picking the cell's color. The patch hooks those 5
+calls: from the text's address it finds the cell's track and row, and from the row the
+step it shows. When that step is at or past the track's length and the cell has its
+column's normal color, it draws the cell in the column's empty color instead.
+
 ## Building and checking it
 
 ```bash
@@ -72,6 +82,11 @@ For the button it runs the stock page-3 bind and label code: the bind, the label
 encoder while held (lengths, clamping, the second line), the encoder going back to stock
 on release (also when the page changed or an overlay is open), and that without the
 hold the encoder leaves the same RAM as stock firmware.
+
+For the grid it runs the stock grid code and compares every cell's color with stock
+firmware drawing the same pattern with the short tracks' extra steps left empty: in all
+three row settings, scrolled, with an overlay or a side panel open, in the single-column
+views, and with the cursor and a muted track on dimmed steps.
 
 ## Reverting
 

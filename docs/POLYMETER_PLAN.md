@@ -15,7 +15,8 @@ pattern, a Trk Len button on page 3. The optional extras (section 12, question 4
 built unless asked. The web patcher choice (section 8) is still open. Phase 1 (RE
 confirmations) is done: its results are in section 9, in FINDINGS section 29, and below.
 Phase 2 (the playback core, `patch/polymeter`, `pm1`) and phase 3 (the Trk Len button
-and the encoder) are built and emulator-tested (section 9). Nothing committed.
+and the encoder) are built, emulator-tested and committed (section 9). Phase 4 (the
+grid) is built and emulator-tested (section 9). Not tested on hardware.
 
 ## 1. Verdict
 
@@ -573,6 +574,43 @@ says go.
   - the wrapped-rows setting;
   - the single-parameter views.
 - Then the optional play-row marker, if the user wants it.
+
+**Phase 4 results (2026-10-26).**
+- **Hooks.** The 5 `bl patgrid_draw_cell` sites (old bytes as in section 6), each chained
+  (`mt_pm_cell_note`, `_instr3`, `_instr`, `_fx1`, `_fx2`, one chain word each). Each
+  decodes the cell from the text pointer against ctrl `+0x2c`, maps the row to its step
+  with `ed+0x1e8` and `ed+0x1ea` (what `patview_fill_rows_q` filled the rows with), wraps
+  it round when `settings+0xd2` is 0 (a true modulo, so a 4-step pattern's rows wrap
+  more than once), and swaps ctrl `+0x44` to the column's empty color only when it holds
+  the column's normal color. It puts the old color back after the call.
+- **The encoder** held on Trk Len also refreshes the grid control (`ed+0x29b`), so the
+  dimming follows each turn.
+- **Code** 1,885 bytes (572 more); RAM unchanged (4,112 bytes).
+- **Layouts, found while testing** (FINDINGS section 29): the grid's method 0 sets its
+  layout from `ed+0x1ff` and ctrl `+0x18`. Bit 0 of `ed+0x1ff` (an overlay open) draws 8
+  rows; bits 1 and 2 (a side panel) draw 3 or 2 tracks; a single-column view (ctrl
+  `+0x18`, from `ed+0x4dc`, one bit per column) draws 8 tracks of that column. All of
+  them draw a subset of the same row texts, so one row → step rule covers them.
+- **Tests** (`test_polymeter.py` 15–16), against stock firmware drawing the same pattern
+  with the short tracks' steps E.. left empty, cell by cell and the whole display list:
+  - lengths 1, 6, 15 with the cursor highlight and a muted track on dimmed steps;
+  - the three row settings at both ends of the pattern;
+  - a 4-step pattern; 128 steps with length 100;
+  - scrolled to tracks 13–16;
+  - the overlay and side-panel layouts and the 4 single-column views;
+  - 3-character instrument texts (the fifth site); every site dims at least one cell;
+  - no lengths, a table not set up, lengths for another pattern, lengths at or above
+    the pattern's: every cell and the display list as stock;
+  - the grid refresh on a turn.
+
+  A variant built without the normal-color check fails the cursor-and-mute case, so
+  the oracle catches a swap that overrides stock's own colors.
+- **Not covered by the emulator:** glyphs (the SDRAM font table is empty there), so the
+  look on the screen is for the hardware check.
+- **Results:** pm1 0 failures (100 checks); the six humanize/copypattern combinations and
+  patch/all + polymeter in both orders pass every patch's test except legato's known
+  whole-bundle cost check (still 2,416 in all: the grid isn't on the sequencer's path);
+  the layout test 0 failures; the quick tier passes (27 jobs, 8.4 min).
 
 **Phase 5: live recording.**
 - Tests:

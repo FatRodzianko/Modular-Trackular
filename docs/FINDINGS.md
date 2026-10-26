@@ -3077,7 +3077,8 @@ Found while planning a per-track length (polymeter) patch (`docs/POLYMETER_PLAN.
   For each cell it picks a color into ctrl `+0x44` from the color table at `+0x28`. In
   order:
   - the highlighted color `+0x38`: for the cursor cell (row 7 of the cursor track
-    `ed+0x1e4`, while `ed+0x1e0` and `ed+0x1e1` are set) or inside the selection
+    `ed+0x1e4`, when `ed+0x1f4` is set and `ed+0x1f5`, the cursor's column copied from
+    `ed+0x255`, is this column; the code reads them as data `+0x11e0`/`+0x11e1`) or inside the selection
     rectangle (ctrl `+0x38`, `+0x30`..`+0x36`);
   - else the muted color `+0x30` when `patview+0x1200+t` is set;
   - else the column's empty or normal color, by whether the text starts with "-".
@@ -3111,6 +3112,17 @@ Found while planning a per-track length (polymeter) patch (`docs/POLYMETER_PLAN.
     - 0: wrapped round, so row "16" is step 0;
     - 1: blank outside the pattern;
     - 2: the centre moves only when the cursor nears an edge.
+- **Layouts** (emulator, polymeter phase 4). Method 0 (`0x6010ae8c`) sets the layout,
+  then the column methods draw:
+  - `ed+0x1ff` bit 0 (kept by `patview_fill_rows_q` only while an overlay is open,
+    `ed+0x398`): 8 rows (`+0x3d`), rows 0–7 of the same texts;
+  - bits 1 and 2 (cleared unless `0x600cd138(0x20020880)` (q), a side panel): 3 or 2
+    tracks (`+0x3c`) instead of 4;
+  - ctrl `+0x18` (the descriptor's `+4`, `ed+0x4dc`), one bit per column, into `+0x39`:
+    a single-column view, 8 tracks (6 with bit 1 of `ed+0x1ff`) of that column only.
+
+  Every layout draws a subset of the same 15 row texts through the same 5 sites, so a
+  row's step is `ed+0x1e8 − 7 + r` in all of them.
 
 ### Live recording reads the step too
 

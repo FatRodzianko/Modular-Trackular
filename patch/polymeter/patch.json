@@ -44,6 +44,41 @@
       "to": "mt_pm_data",
       "next": "mt_pm_next_data",
       "note": "Pattern screen page 3 labels: More's data; Trk Len gets Pattern Name's"
+    },
+    {
+      "at": "0x6010B3DE",
+      "old": "fff711ff",
+      "to": "mt_pm_cell_note",
+      "next": "mt_pm_next_cell_note",
+      "note": "Pattern grid, note column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
+    },
+    {
+      "at": "0x6010B5AE",
+      "old": "fff729fe",
+      "to": "mt_pm_cell_instr3",
+      "next": "mt_pm_next_cell_instr3",
+      "note": "Pattern grid, instrument column, 3-character text: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
+    },
+    {
+      "at": "0x6010B62C",
+      "old": "fff7eafd",
+      "to": "mt_pm_cell_instr",
+      "next": "mt_pm_next_cell_instr",
+      "note": "Pattern grid, instrument column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
+    },
+    {
+      "at": "0x6010B7BE",
+      "old": "fff721fd",
+      "to": "mt_pm_cell_fx1",
+      "next": "mt_pm_next_cell_fx1",
+      "note": "Pattern grid, FX1 column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
+    },
+    {
+      "at": "0x6010B9C4",
+      "old": "fff71efc",
+      "to": "mt_pm_cell_fx2",
+      "next": "mt_pm_next_cell_fx2",
+      "note": "Pattern grid, FX2 column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
     }
   ],
   "itcm_branches": [

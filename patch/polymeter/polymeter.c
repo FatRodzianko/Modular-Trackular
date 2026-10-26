@@ -40,7 +40,14 @@
  *    0x600e5976), the only ones after the texts, and give Trk Len's button the active
  *    colors and Pattern Name's data, as page 3 gives buttons 0 and 1;
  *  - mt_pm_jog takes the Pattern screen's encoder word (0x600df2f0, pat_jog 0x600c90a1)
- *    while the button is held and still bound to this patch.
+ *    while the button is held and still bound to this patch, and redraws the grid.
+ *
+ * The Pattern grid shows a short track's steps E.. in each column's empty color, the one
+ * stock gives a "-" cell, so they read as "nothing plays here" with their contents still
+ * visible. The grid control picks each cell's color into ctrl +0x44 and draws its text
+ * with patgrid_draw_cell (0x6010b204); mt_pm_cell_* chain its 5 calls (note, instrument
+ * twice, FX1, FX2) and swap the color for the call. Only the column's normal color is
+ * swapped, so empty cells, muted tracks, the cursor and a selection look as in stock.
  *
  * Shared hooks go through chain words (mt_pm_next_*) that tools/patch_ptf.py fills with
  * what the site pointed to before, so other patches can hook them too.
@@ -75,6 +82,9 @@
 #define ED_CURSOR_TRACK     0x1E4u          /* uint8: the cursor's track */
 #define ED_BUTTON_CTRL      0x292u          /* int8 control index of bottom-bar button 0..7 */
 #define ED_OVERLAY          0x398u          /* an overlay is open: pat_jog does nothing */
+#define ED_GRID_CENTRE      0x1E8u          /* uint16: the step on the grid's middle row */
+#define ED_GRID_LENGTH      0x1EAu          /* uint16: the pattern's length, as the grid was filled */
+#define ED_GRID_CTRL        0x29Bu          /* int8 control index of the grid */
 #define PATVIEW_NAME_DATA   0x12CCu         /* page 3: Pattern Name's (button 0's) data */
 #define FW_DISPLAY          0x20027D64u
 #define DISP_STYLES         8u
@@ -103,6 +113,21 @@
 #define STOCK_SET_TEXT      0x60101D5Cu     /* where they go unless a patch hooked them */
 #define LAST_BUTTON         6u              /* buttons 2..6 are free in stock; 7 is More */
 
+/* the Pattern grid control: its row texts are 15 rows of 0x13 bytes per track (note +0,
+ * instrument +5, FX1 +9, FX2 +0xe); row r shows step centre - 7 + r */
+#define GRID_COLORS         0x28u           /* color table: column c's normal at +8 + 4c, empty 0x10 further */
+#define GRID_DATA           0x2Cu           /* the row texts (patview +0x14) */
+#define GRID_COLOR          0x44u           /* the color of the cell being drawn */
+#define GRID_ROWS           15u
+#define GRID_CENTRE_ROW     7
+#define ROW_SIZE            0x13u
+#define TRACK_ROWS          0x11Du
+#define COLOR_NORMAL        0x08u
+#define COLOR_EMPTY         0x10u           /* + the normal color's offset */
+#define FW_SETTINGS         0x2002061Cu
+#define SET_ROW_WRAP        0xD2u           /* 0: rows outside the pattern show it wrapped round */
+
+
 typedef void *(*copy_fn)(void *dst, const void *src, uint32_t size);
 typedef uint32_t (*distance_fn)(void *seq, uint32_t track, uint32_t step);
 typedef void (*void_fn)(void);
@@ -114,6 +139,8 @@ typedef void (*display_fn)(void *display, int ctrl);
 typedef void (*sync_fn)(void *display);
 typedef void (*jog_fn)(int32_t delta, uint32_t a1, uint32_t a2, uint32_t a3);
 typedef uint32_t (*guard_fn)(uint32_t arg);
+typedef void (*cell_fn)(void *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text,
+                        uint32_t n, uint32_t w);
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
  * compiler must read them, not assume the 0 they are linked with. */
@@ -127,6 +154,11 @@ CHAIN_WORD(mt_pm_next_label2);              /* disp_ctrl_set_ptr38 0x60101d75 */
 CHAIN_WORD(mt_pm_next_colors);              /* disp_ctrl_set_colors 0x60101da5 */
 CHAIN_WORD(mt_pm_next_data);                /* disp_ctrl_set_data 0x60101df9 */
 CHAIN_WORD(mt_pm_next_jog);                 /* pat_jog 0x600c90a1 */
+CHAIN_WORD(mt_pm_next_cell_note);           /* patgrid_draw_cell 0x6010b205 */
+CHAIN_WORD(mt_pm_next_cell_instr3);         /* ... */
+CHAIN_WORD(mt_pm_next_cell_instr);
+CHAIN_WORD(mt_pm_next_cell_fx1);
+CHAIN_WORD(mt_pm_next_cell_fx2);
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
@@ -368,12 +400,95 @@ void mt_pm_jog(int32_t delta, uint32_t a1, uint32_t a2, uint32_t a3)
                 if (e > len)
                     e = len;
                 PM->len[*FW_PROJECT_PATTERN][track] = (uint8_t)(e < len ? e : 0);
+                int grid = *(const volatile int8_t *)(ed() + ED_GRID_CTRL);
+                if (grid >= 0)
+                    ((display_fn)FW_CTRL_REFRESH)((void *)FW_DISPLAY, grid);
                 pm_show_label();
             }
             return;
         }
     }
     ((jog_fn)mt_pm_next_jog)(delta, a1, a2, a3);
+}
+
+/* ---- the Pattern grid ------------------------------------------------------------- */
+
+/* The cell whose text is `text`: if its step is at or past its track's length and it has
+ * its column's normal color, the column's empty color; else 0 */
+static uint32_t pm_dim_color(const uint8_t *ctrl, const char *text)
+{
+    if (PM->magic != PM_MAGIC)
+        return 0;
+    uint32_t off = (uint32_t)((const uint8_t *)text - *(const uint8_t *const *)(ctrl + GRID_DATA));
+    if (off >= TRACKS * TRACK_ROWS)
+        return 0;
+    uint32_t track = off / TRACK_ROWS, row = off % TRACK_ROWS / ROW_SIZE, column;
+    switch (off % TRACK_ROWS % ROW_SIZE) {
+    case 0x0: column = 0; break;
+    case 0x5: column = 1; break;
+    case 0x9: column = 2; break;
+    case 0xE: column = 3; break;
+    default: return 0;
+    }
+    int32_t len = *(const uint16_t *)(ed() + ED_GRID_LENGTH);
+    if (row >= GRID_ROWS || len < 1)
+        return 0;
+    uint32_t e = pm_length(track, (uint32_t)len);
+    if (e >= (uint32_t)len)
+        return 0;
+    int32_t step = *(const uint16_t *)(ed() + ED_GRID_CENTRE) - GRID_CENTRE_ROW + (int32_t)row;
+    if (step < 0 || step >= len) {
+        if (*(const uint8_t *)(FW_SETTINGS + SET_ROW_WRAP))
+            return 0;                       /* a blank row */
+        step %= len;
+        if (step < 0)
+            step += len;
+    }
+    if ((uint32_t)step < e)
+        return 0;
+    const uint32_t *normal = *(const uint32_t *const *)(ctrl + GRID_COLORS) + (COLOR_NORMAL / 4 + column);
+    if (*(const uint32_t *)(ctrl + GRID_COLOR) != *normal)
+        return 0;
+    return normal[COLOR_EMPTY / 4];
+}
+
+static void pm_cell(uint32_t next, uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font,
+                    const char *text, uint32_t n, uint32_t w)
+{
+    uint32_t *color = (uint32_t *)(ctrl + GRID_COLOR);
+    uint32_t keep = *color, dim = pm_dim_color(ctrl, text);
+    if (dim)
+        *color = dim;
+    ((cell_fn)next)(ctrl, x, y, font, text, n, w);
+    *color = keep;
+}
+
+/* replace "bl patgrid_draw_cell(ctrl, x, y, font, text, n, w)" at 0x6010b3de (note),
+ * 0x6010b5ae (instrument, 3 characters), 0x6010b62c (instrument), 0x6010b7be (FX1),
+ * 0x6010b9c4 (FX2) */
+void mt_pm_cell_note(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
+{
+    pm_cell(mt_pm_next_cell_note, ctrl, x, y, font, text, n, w);
+}
+
+void mt_pm_cell_instr3(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
+{
+    pm_cell(mt_pm_next_cell_instr3, ctrl, x, y, font, text, n, w);
+}
+
+void mt_pm_cell_instr(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
+{
+    pm_cell(mt_pm_next_cell_instr, ctrl, x, y, font, text, n, w);
+}
+
+void mt_pm_cell_fx1(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
+{
+    pm_cell(mt_pm_next_cell_fx1, ctrl, x, y, font, text, n, w);
+}
+
+void mt_pm_cell_fx2(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
+{
+    pm_cell(mt_pm_next_cell_fx2, ctrl, x, y, font, text, n, w);
 }
 
 /* Config's version text: 1.2.0-pm1 */

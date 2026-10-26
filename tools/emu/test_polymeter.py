@@ -1,4 +1,4 @@
-"""Check the polymeter patch (a length per track): playback and the Trk Len button.
+"""Check the polymeter patch (a length per track): playback, the Trk Len button and the grid.
 
   python tools/emu/test_polymeter.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf>
 
@@ -63,6 +63,18 @@ manager, the stock page-3 bind and label code, and the display calls recorded:
 14. Without the hold the encoder is stock's: alone, cursor moves and edits (record off
    and on, each column) leave the same RAM as stock firmware, also after a press and
    release of Trk Len.
+15. The Pattern grid, drawn by stock code (the row texts, the grid control's constructor
+   with the Pattern screen's descriptor, its draw methods), each cell's text pointer and
+   color logged at patgrid_draw_cell. The oracle: stock firmware with the short tracks'
+   steps E.. left empty. Every cell must get the color stock gives that empty step (the
+   column's empty color), and every other cell stock's own color, in the same order, with
+   the same display list. Covers: the cursor and a muted track (their colors win), the
+   three row settings (rows outside the pattern wrapped round, blank, or none), a pattern of 4 steps
+   (rows wrap more than once), 128 steps, the grid scrolled to tracks 13-16, the
+   layouts with an overlay (8 rows) or a side panel (3 or 2 tracks), the single-column
+   views (8 tracks of one column), a 3-character instrument text (its own call site),
+   and a table without lengths, not set up, or set for another pattern (all stock).
+16. The encoder held on Trk Len also redraws the grid control.
 """
 from __future__ import annotations
 
@@ -72,8 +84,10 @@ import sys
 from pathlib import Path
 
 from unicorn import UC_HOOK_CODE
+from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_SP
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import machine as mach  # noqa: E402
 import seq_timing as st  # noqa: E402
 from layout import patch_code, patch_ram  # noqa: E402
 
@@ -112,6 +126,17 @@ STYLE_ACTIVE, STYLE_MORE = 0x44, 0x64
 NAME_DATA, MORE_DATA = PATVIEW + 0x12CC, PATVIEW + 0x12EC
 CTRL0 = 20                              # label control of button 0 in this rig; button b's is 20 + b
 TRK_LEN = 2                             # Trk Len's button: set in main() from the build (page3_buttons)
+FILL_ROWS = 0x600DF3A0                  # patview_fill_rows_q(patview): the grid's row texts
+GRID_CTOR = 0x6010A3D4                  # patgrid_ctor(ctrl, desc)
+DRAW_CELL = 0x6010B204                  # patgrid_draw_cell(ctrl, x, y, font, text, n, w)
+CELL_SITES = {0x6010B3DE: "note", 0x6010B5AE: "instrument (3 characters)", 0x6010B62C: "instrument",
+              0x6010B7BE: "FX1", 0x6010B9C4: "FX2"}
+STYLE = 0x6005A4C0                      # *(display + 8): the styles; the grid's colors at +0x2b8
+GRID_DATA = PATVIEW + 0x14              # row texts: 0x11d a track, 0x13 a row
+ED_HIGHLIGHT, ED_LAYOUT, ED_GRID_CTRL, ED_FIRST_TRACK = 0x1F4, 0x1FF, 0x29B, 0x1EC
+MUTES = PROJECT + 0x6E0
+
+
 failures: list[str] = []
 
 
@@ -706,6 +731,138 @@ def cost_checks(ptf: Path) -> None:
         check(per <= PER_TRACK_LIMIT, f"{label}: {per:.1f} instructions per track and step (at most {PER_TRACK_LIMIT})")
 
 
+class GridRig:
+    """The Pattern grid of one pattern: every step of every track filled (note, sample
+    instrument, FX1 and FX2), except the steps `empty` names, which stay empty."""
+
+    def __init__(self, ptf: Path, last: int, table: int | None = None, lengths=None, empty=None,
+                 cursor: int = 0, wrap: int = 0, highlight_track: int | None = None, first_track: int = 0,
+                 mutes=(), layout: int = 0, mask: int = 0, three=(), pattern: int = 1):
+        self.m = m = st.make(ptf)
+        m.w32(mach.FAKE_DISPLAY + 8, STYLE)
+        buf = st.pattern(m, last)
+        m.w32(SEQ + 0x14, buf)
+        m.w8(CUR_PATTERN, 1)
+        for t in range(16):
+            for s in range(last + 1):
+                if not (empty and s >= empty.get(t, 999)):
+                    st.set_step(m, buf, t, s, 24 + s % 96, 4 + t, (VOLUME, 10 + s % 50), (ROLL, 1 + s % 5))
+        if table is not None:
+            m.write(table, struct.pack("<I", MAGIC) + bytes(256 * 16))
+            for t, e in (lengths or {}).items():
+                m.w8(table + 4 + 16 * pattern + t, e)
+        m.w8(st.SETTINGS + 0xD2, wrap)
+        m.w16(ED + ED_CURSOR_ROW, cursor)
+        for t in mutes:
+            m.w8(MUTES + t, 1)
+        m.call(FILL_ROWS, PATVIEW)
+        m.w8(ED + ED_FIRST_TRACK, first_track)
+        m.w8(ED + ED_LAYOUT, layout)
+        if highlight_track is not None:
+            m.w8(ED + ED_CURSOR_TRACK, highlight_track)
+            m.w8(ED + ED_HIGHLIGHT, 1)
+        for t in three:                     # a 3-character instrument text on every filled row
+            for row in range(15):
+                at = GRID_DATA + 0x11D * t + 0x13 * row + 5
+                if m.uc.mem_read(at, 1) not in (b"-", b"\0"):
+                    m.write(at, b"100\0")
+        desc = m.alloc(0x20)
+        m.w32(desc + 4, 0)
+        m.w32(desc + 8, GRID_DATA)
+        m.w32(desc + 0xC, 0x1000400)
+        m.w32(desc + 0x10, STYLE + 0x2B8)
+        for i, v in enumerate((0, 0x1C, 0x320, 0x18B)):
+            m.w16(desc + 0x14 + 2 * i, v)
+        self.ctrl = m.alloc(0x50)
+        m.call(GRID_CTOR, self.ctrl, desc)
+        m.w8(self.ctrl + 0x18, mask)        # the single-column view's column bit (ed+0x4dc)
+
+    def draw(self):
+        """[(text pointer, color)] for each cell, the sites used, the display list"""
+        m, cells, sites = self.m, [], []
+
+        def hook(uc, addr, size, user):
+            sp = uc.reg_read(UC_ARM_REG_SP)
+            ctrl = uc.reg_read(UC_ARM_REG_R0)
+            cells.append((m.r32(sp), m.r32(ctrl + 0x44)))
+        h = m.uc.hook_add(UC_HOOK_CODE, hook, begin=DRAW_CELL, end=DRAW_CELL)
+        lr: list[int] = []
+        h2 = m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: lr.append(a), begin=min(CELL_SITES), end=max(CELL_SITES))
+        m.display_list.clear()
+        vt = m.r32(self.ctrl)
+        for k in range(5):
+            m.call(m.r32(vt + 4 * k), self.ctrl)
+        m.uc.hook_del(h)
+        m.uc.hook_del(h2)
+        return cells, {a for a in lr if a in CELL_SITES}, list(m.display_list)
+
+    def colors(self) -> tuple[int, ...]:
+        """note, instrument, FX1, FX2: normal, then empty"""
+        base = STYLE + 0x2B8
+        return tuple(self.m.r32(base + o) for o in (8, 0xC, 0x10, 0x14, 0x18, 0x1C, 0x20, 0x24))
+
+
+def grid_checks(ptf: Path, stock: Path) -> None:
+    print("The Pattern grid: steps past a track's length in the column's empty color")
+    table = patch_ram(ptf, "polymeter")
+    dim_sites: set[int] = set()
+
+    def case(what, last, lengths, **kw):
+        """the patched grid with lengths against stock's with those steps left empty"""
+        got = GridRig(ptf, last, table, lengths, **kw)
+        cells, sites, dl = got.draw()
+        want_cells, _, want_dl = GridRig(stock, last, empty=lengths, **kw).draw()
+        plain, _, _ = GridRig(stock, last, **kw).draw()
+        dimmed = sum(a != b for (_, a), (_, b) in zip(cells, plain))
+        pointers = [p for p, _ in cells] == [p for p, _ in want_cells]
+        same = [c for _, c in cells] == [c for _, c in want_cells]
+        diff = [(hex(p), hex(a), hex(b)) for (p, a), (_, b) in zip(cells, want_cells) if a != b][:3]
+        check(pointers and same and dl == want_dl and dimmed > 0,
+              f"{what}: {len(cells)} cells, {dimmed} dimmed, as stock's empty steps"
+              + ("" if same else f" (differ: {diff})") + ("" if dl == want_dl else " (display list differs)"))
+        if same:
+            for site in sites:
+                dim_sites.add(site)
+        return got
+
+    rig = case("16 steps, lengths 6, 1, 15 on tracks 1-3; cursor at step 10 of track 1, track 3 muted", 15,
+               {0: 6, 1: 1, 2: 15}, cursor=10, highlight_track=0, mutes=(2,))
+    for wrap, cursor in ((0, 0), (1, 2), (2, 1), (2, 14), (0, 15), (1, 15)):
+        case(f"row setting {wrap}, cursor at step {cursor}", 15, {0: 6, 1: 3, 3: 9}, cursor=cursor, wrap=wrap)
+    case("a 4-step pattern, lengths 1, 2, 3 (rows wrap round more than once)", 3, {0: 1, 1: 2, 2: 3}, cursor=1)
+    case("128 steps, length 100, cursor at step 98", 127, {0: 100, 2: 1, 3: 127}, cursor=98)
+    case("scrolled to tracks 13-16", 15, {12: 5, 13: 1, 15: 12}, cursor=8, first_track=12, highlight_track=15)
+    for layout, what in ((1, "an overlay open (8 rows)"), (2, "a side panel (3 tracks)"), (4, "a side panel (2 tracks)")):
+        case(f"layout: {what}", 15, {0: 6, 1: 3, 2: 2}, cursor=9, layout=layout)
+    for mask, what in ((1, "notes"), (2, "instruments"), (4, "FX1"), (8, "FX2")):
+        case(f"single-column view ({what}, 8 tracks)", 15, {0: 6, 3: 2, 6: 11, 7: 1}, cursor=4, mask=mask)
+    case("3-character instrument texts", 15, {0: 6, 1: 2}, cursor=3, three=(0, 1, 2))
+    check(dim_sites == set(CELL_SITES), "every call site dims a cell: "
+          + ", ".join(CELL_SITES[s] for s in sorted(dim_sites)))
+    n = rig.colors()
+    check(len(set(n)) == 8, "the 8 colors are distinct: " + " ".join(f"{c:06x}" for c in n))
+
+    for what, setup in (("no lengths", lambda m: None),
+                        ("table not set up", lambda m: m.write(table, bytes([0xA5]) * (4 + 256 * 16))),
+                        ("lengths for pattern 2 only", lambda m: [m.w8(table + 4 + 32 + t, 3) for t in range(16)]),
+                        ("lengths at or above the pattern's", lambda m: [m.w8(table + 4 + 16 + t, 16 + t) for t in range(16)])):
+        got = GridRig(ptf, 15, table, cursor=5, highlight_track=1, mutes=(3,))
+        setup(got.m)
+        cells, _, dl = got.draw()
+        want, _, want_dl = GridRig(stock, 15, cursor=5, highlight_track=1, mutes=(3,)).draw()
+        check(cells == want and dl == want_dl, f"{what}: every cell and the display list as stock ({len(cells)} cells)")
+
+    print("Trk Len redraws the grid")
+    r = UiRig(ptf, table=table)
+    r.m.w8(ED + ED_GRID_CTRL, 40)
+    r.bind()
+    r.button(1)
+    r.jog(-3)
+    check(("refresh", 40) in [(n, c) for n, c, _ in r.calls] and r.stored(0) == 13,
+          f"encoder -3 while held: track 1 length {r.stored(0)}, the grid (control 40) is refreshed")
+    r.button(0)
+
+
 def main() -> int:
     ptf, stock = Path(sys.argv[1]), Path(sys.argv[2])
     site_checks(ptf)
@@ -721,6 +878,7 @@ def main() -> int:
     button_checks(ptf, stock)
     hold_checks(ptf)
     stock_jog_checks(ptf, stock)
+    grid_checks(ptf, stock)
     print(f"{len(failures)} failure(s)")
     for f in failures:
         print("  " + f)
