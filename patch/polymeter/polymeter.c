@@ -64,6 +64,21 @@
  * rows; the fourth row covers the position moving on meanwhile; and a recording from
  * the interrupt, nested in this one, puts back exactly what it found.
  *
+ * The lengths are saved per project in <project folder>/polymeter.bin (PMT1: magic, the
+ * number of entries, one 17-byte entry per pattern that has a length: its number and
+ * the 16 lengths, a checksum), read and written from the Pattern and Config screens'
+ * update methods (chained), one file read or write per call, in pieces of at most 256
+ * bytes, only while the file manager is idle:
+ *  - another project: the lengths are cleared at once, then read from its file (checked
+ *    whole before any of it is used);
+ *  - a change: written a moment later; with no lengths left, the file is removed;
+ *  - Save As (and a new project's first save, which is one): the firmware copies only
+ *    its own files to the new folder, so the lengths go with the project to its new name
+ *    and are written there. The Save As request's name copy (0x60114eaa) marks it;
+ *  - a new project ("New Project", no path) has no folder yet: nothing is written until
+ *    its first save.
+ * Stock firmware never reads the file: there every track plays the whole pattern.
+ *
  * Shared hooks go through chain words (mt_pm_next_*) that tools/patch_ptf.py fills with
  * what the site pointed to before, so other patches can hook them too.
  */
@@ -148,6 +163,17 @@
 #define FW_NVIC_ICER0       ((volatile uint32_t *)0xE000E180u)
 #define AUDIO_IRQ           1u              /* NVIC bit 0: the audio block (audio_irq_disable 0x600303d4) */
 
+/* the file manager and the project */
+#define FW_FM               0x2001E488u     /* file manager object; *FW_FM = FS object */
+#define FM_STATE            0x13Du          /* file manager state; 0 or 0x0c when idle */
+#define FM_SUBSTATE         0x13Fu
+#define FW_PROJECT_PATH     ((const uint8_t *)(FW_FM + 0x241u))     /* 254 characters and a 0 */
+#define FW_PROJECT_NAME     ((const uint8_t *)(FW_FM + 0x340u))     /* 32 characters and a 0 */
+#define PATH_MAX_LEN        254u
+#define NAME_MAX_LEN        32u
+#define FW_SNPRINTF         0x6016712Du
+#define SAVE_DELAY          25u             /* screen updates between a change and the save */
+
 typedef void *(*copy_fn)(void *dst, const void *src, uint32_t size);
 typedef uint32_t (*distance_fn)(void *seq, uint32_t track, uint32_t step);
 typedef void (*void_fn)(void);
@@ -162,6 +188,9 @@ typedef uint32_t (*guard_fn)(uint32_t arg);
 typedef void (*cell_fn)(void *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text,
                         uint32_t n, uint32_t w);
 typedef uint32_t (*rec_fn)(void *seq, uint32_t source, uint32_t note, uint32_t velocity, uint32_t arg);
+typedef void (*update_fn)(void *screen, void *a1, void *a2, void *a3);
+typedef int (*snprintf_fn)(char *buf, uint32_t size, const char *fmt, ...);
+typedef char *(*strncpy_fn)(char *dst, const char *src, uint32_t n);
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
  * compiler must read them, not assume the 0 they are linked with. */
@@ -180,6 +209,9 @@ CHAIN_WORD(mt_pm_next_cell_instr3);         /* ... */
 CHAIN_WORD(mt_pm_next_cell_instr);
 CHAIN_WORD(mt_pm_next_cell_fx1);
 CHAIN_WORD(mt_pm_next_cell_fx2);
+CHAIN_WORD(mt_pm_next_pattern_update);      /* Pattern screen update 0x600e1f99 (or a patch's) */
+CHAIN_WORD(mt_pm_next_config_update);       /* Config screen update 0x600c6475 (or a patch's) */
+CHAIN_WORD(mt_pm_next_save_name);           /* strncpy, in the save request (or a patch's) */
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
@@ -188,6 +220,11 @@ CHAIN_WORD(mt_pm_next_cell_fx2);
 struct pm_state {
     uint32_t magic;
     uint8_t len[PATTERNS][TRACKS];          /* 0 = the pattern's length */
+    uint32_t session;                       /* project name + path the lengths belong to; 0: none yet */
+    uint32_t save_as;                       /* the session a Save As moves the lengths to; 0: none */
+    uint16_t wait;                          /* screen updates until the next save */
+    uint8_t load;                           /* read the project's file once the file manager is idle */
+    uint8_t changed;                        /* a length changed since the file was read or written */
     uint8_t held;                           /* Trk Len is held */
     char label[4];                          /* its second line while held: "1".."128", "--" */
 };
@@ -203,6 +240,9 @@ static void pm_init_if_needed(void)
     uint8_t *len = &PM->len[0][0];
     for (uint32_t i = 0; i < sizeof PM->len; i++)
         len[i] = 0;
+    PM->session = PM->save_as = 0;
+    PM->wait = SAVE_DELAY;
+    PM->load = PM->changed = PM->held = 0;
     __asm__ volatile("" ::: "memory");
     PM->magic = PM_MAGIC;
 }
@@ -420,7 +460,9 @@ void mt_pm_jog(int32_t delta, uint32_t a1, uint32_t a2, uint32_t a3)
                     e = 1;
                 if (e > len)
                     e = len;
-                PM->len[*FW_PROJECT_PATTERN][track] = (uint8_t)(e < len ? e : 0);
+                uint8_t *slot = &PM->len[*FW_PROJECT_PATTERN][track], was = *slot;
+                *slot = (uint8_t)(e < len ? e : 0);
+                PM->changed |= *slot != was;
                 int grid = *(const volatile int8_t *)(ed() + ED_GRID_CTRL);
                 if (grid >= 0)
                     ((display_fn)FW_CTRL_REFRESH)((void *)FW_DISPLAY, grid);
@@ -616,6 +658,264 @@ REC_HOOK(rec_off1) REC_HOOK(rec_off2) REC_HOOK(rec_off3) REC_HOOK(rec_off4) REC_
 REC_HOOK(rec_off6) REC_HOOK(rec_off7) REC_HOOK(rec_off8) REC_HOOK(rec_off9) REC_HOOK(rec_off10)
 REC_HOOK(rec_off11) REC_HOOK(rec_off12) REC_HOOK(rec_off13) REC_HOOK(rec_off14) REC_HOOK(rec_off15)
 REC_HOOK(rec_off16) REC_HOOK(rec_off17) REC_HOOK(rec_off18)
+
+/* ---- polymeter.bin (main loop: the screens' update methods) ------------------------ */
+
+struct fs_open_result { uint32_t handle; uint8_t ok; uint8_t pad[3]; };
+typedef void (*fs_open_fn)(struct fs_open_result *res, void *fs, const char *path, uint32_t mode, uint32_t x);
+typedef int (*fs_read_fn)(void *fs, void *buf, uint32_t size, uint32_t handle);
+typedef int (*fs_write_fn)(void *fs, const void *buf, uint32_t size, uint32_t handle);
+typedef void (*fs_close_fn)(void *fs, uint32_t handle, uint32_t x);
+typedef void (*fs_remove_fn)(void *fs, const char *path);
+#define FS_REMOVE           0x14u
+#define FS_OPEN             0x2Cu
+#define FS_READ             0x30u
+#define FS_WRITE            0x34u
+#define FS_CLOSE            0x40u
+#define FS_MODE_READ        0u
+#define FS_MODE_WRITE       3u              /* FatFs create-always + RW, as the pattern save */
+
+#define FILE_MAGIC          0x31544D50u     /* "PMT1" */
+#define FILE_HEADER         8u              /* magic, the number of entries */
+#define ENTRY_SIZE          (1u + TRACKS)   /* the pattern's number, its 16 lengths */
+#define CHUNK_ENTRIES       15u             /* 255 bytes a read or write */
+
+static uint32_t fnv1a(uint32_t h, uint32_t byte)
+{
+    return (h ^ byte) * 16777619u;
+}
+
+static uint32_t data_sum(uint32_t h, const uint8_t *v, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; i++)
+        h = fnv1a(h, v[i]);
+    return h;
+}
+
+static void put32(uint8_t *b, uint32_t v)
+{
+    b[0] = (uint8_t)v; b[1] = (uint8_t)(v >> 8); b[2] = (uint8_t)(v >> 16); b[3] = (uint8_t)(v >> 24);
+}
+
+static uint32_t get32(const uint8_t *b)
+{
+    return b[0] | b[1] << 8 | b[2] << 16 | (uint32_t)b[3] << 24;
+}
+
+/* At most the lengths the firmware keeps: the Save As request copies the name before it
+ * writes its terminating 0. */
+static uint32_t project_session(void)
+{
+    uint32_t h = 2166136261u;
+    for (uint32_t i = 0; i < NAME_MAX_LEN && FW_PROJECT_NAME[i]; i++)
+        h = fnv1a(h, FW_PROJECT_NAME[i]);
+    h = fnv1a(h, 0);
+    for (uint32_t i = 0; i < PATH_MAX_LEN && FW_PROJECT_PATH[i]; i++)
+        h = fnv1a(h, FW_PROJECT_PATH[i]);
+    return fnv1a(h, 0) | 1;                 /* never 0 */
+}
+
+/* A project with no folder yet: no name (while Workspace loads), or the new project
+ * 0x60117c8c makes, "New Project" with no path. */
+static int project_unsaved(void)
+{
+    static const char fresh[] = "New Project";
+    if (!FW_PROJECT_NAME[0])
+        return 1;
+    if (FW_PROJECT_PATH[0])
+        return 0;
+    for (uint32_t i = 0; i < sizeof fresh; i++)
+        if (FW_PROJECT_NAME[i] != (uint8_t)fresh[i])
+            return 0;
+    return 1;
+}
+
+static int lengths_path(char *path, uint32_t size)
+{
+    if (project_unsaved())
+        return 0;
+    int n = ((snprintf_fn)FW_SNPRINTF)(path, size, "%s/%s/polymeter.bin",
+                                       (const char *)FW_PROJECT_PATH, (const char *)FW_PROJECT_NAME);
+    return n > 0 && (uint32_t)n < size;
+}
+
+static int file_manager_idle(void)
+{
+    const volatile uint8_t *fm = (const volatile uint8_t *)FW_FM;
+    uint8_t state = fm[FM_STATE];
+    return (state == 0 || state == 0x0C) && (fm[FM_SUBSTATE] & 0xFD) == 0;
+}
+
+static void clear_lengths(void)
+{
+    uint8_t *len = &PM->len[0][0];
+    for (uint32_t i = 0; i < sizeof PM->len; i++)
+        len[i] = 0;
+}
+
+/* Read the file through once: check it (apply = 0), or take its lengths (apply = 1).
+ * 1: a whole, valid file. */
+static int read_lengths(void *fs, const char *path, int apply)
+{
+    void **vt = *(void ***)fs;
+    struct fs_open_result res = {0, 0, {0, 0, 0}};
+    ((fs_open_fn)vt[FS_OPEN / 4])(&res, fs, path, FS_MODE_READ, 0);
+    if (!res.ok)
+        return 0;
+    uint8_t buf[CHUNK_ENTRIES * ENTRY_SIZE];
+    int ok = ((fs_read_fn)vt[FS_READ / 4])(fs, buf, FILE_HEADER, res.handle) == (int)FILE_HEADER
+             && get32(buf) == FILE_MAGIC && get32(buf + 4) < PATTERNS;
+    uint32_t left = ok ? get32(buf + 4) : 0, sum = data_sum(2166136261u, buf + 4, 4);
+    while (ok && left) {
+        uint32_t n = left < CHUNK_ENTRIES ? left : CHUNK_ENTRIES;
+        ok = ((fs_read_fn)vt[FS_READ / 4])(fs, buf, n * ENTRY_SIZE, res.handle) == (int)(n * ENTRY_SIZE);
+        for (uint32_t i = 0; ok && i < n; i++) {
+            const uint8_t *entry = buf + ENTRY_SIZE * i;
+            ok = entry[0] != 0;             /* patterns 1..255 */
+            if (ok && apply)
+                for (uint32_t t = 0; t < TRACKS; t++)
+                    PM->len[entry[0]][t] = entry[1 + t];
+        }
+        sum = data_sum(sum, buf, n * ENTRY_SIZE);
+        left -= n;
+    }
+    ok = ok && ((fs_read_fn)vt[FS_READ / 4])(fs, buf, 4, res.handle) == 4 && get32(buf) == sum;
+    ((fs_close_fn)vt[FS_CLOSE / 4])(fs, res.handle, 1);
+    return ok;
+}
+
+/* The project's lengths into the table (cleared before). A missing, damaged or short
+ * file: none. The file is checked whole before any of it is used. */
+static void load_lengths(void)
+{
+    char path[256];
+    void *fs = *(void **)FW_FM;
+    if (!fs || !lengths_path(path, sizeof path))
+        return;
+    if (read_lengths(fs, path, 0) && !read_lengths(fs, path, 1))
+        clear_lengths();                    /* the second read failed */
+}
+
+static uint32_t has_lengths(uint32_t pattern)
+{
+    uint32_t any = 0;
+    for (uint32_t t = 0; t < TRACKS; t++)
+        any |= PM->len[pattern][t];
+    return any;
+}
+
+/* 1: written (or, with no lengths, removed) */
+static int save_lengths(void)
+{
+    char path[256];
+    void *fs = *(void **)FW_FM;
+    if (!fs || !lengths_path(path, sizeof path))
+        return 0;
+    void **vt = *(void ***)fs;
+    uint32_t count = 0;
+    for (uint32_t p = 1; p < PATTERNS; p++)
+        count += has_lengths(p) != 0;
+    ((fs_remove_fn)vt[FS_REMOVE / 4])(fs, path);
+    if (!count)
+        return 1;
+    struct fs_open_result res = {0, 0, {0, 0, 0}};
+    ((fs_open_fn)vt[FS_OPEN / 4])(&res, fs, path, FS_MODE_WRITE, 0);
+    if (!res.ok)
+        return 0;
+    uint8_t buf[CHUNK_ENTRIES * ENTRY_SIZE];
+    put32(buf, FILE_MAGIC);
+    put32(buf + 4, count);
+    uint32_t sum = data_sum(2166136261u, buf + 4, 4);
+    int ok = ((fs_write_fn)vt[FS_WRITE / 4])(fs, buf, FILE_HEADER, res.handle) == (int)FILE_HEADER;
+    uint32_t n = 0;
+    for (uint32_t p = 1; ok && p <= PATTERNS; p++) {
+        if (p < PATTERNS && has_lengths(p)) {
+            uint8_t *entry = buf + ENTRY_SIZE * n++;
+            entry[0] = (uint8_t)p;
+            for (uint32_t t = 0; t < TRACKS; t++)
+                entry[1 + t] = PM->len[p][t];
+        }
+        if (n && (n == CHUNK_ENTRIES || p == PATTERNS)) {
+            sum = data_sum(sum, buf, n * ENTRY_SIZE);
+            ok = ((fs_write_fn)vt[FS_WRITE / 4])(fs, buf, n * ENTRY_SIZE, res.handle) == (int)(n * ENTRY_SIZE);
+            n = 0;
+        }
+    }
+    put32(buf, sum);
+    ok = ok && ((fs_write_fn)vt[FS_WRITE / 4])(fs, buf, 4, res.handle) == 4;
+    ((fs_close_fn)vt[FS_CLOSE / 4])(fs, res.handle, 1);
+    return ok;
+}
+
+/* At most one file read or write per call. 1: the lengths were (re)loaded. */
+static int lengths_tick(void)
+{
+    pm_init_if_needed();
+    if (!*(void **)FW_FM)
+        return 0;
+    uint32_t session = project_session();
+    int unsaved = project_unsaved();
+    if (session != PM->session) {
+        int save_as = session == PM->save_as;   /* the same project under its new name */
+        PM->save_as = 0;
+        PM->session = session;
+        PM->wait = SAVE_DELAY;
+        PM->load = !(unsaved || save_as);
+        PM->changed = (uint8_t)save_as;     /* after a Save As: written to the new folder */
+        if (!save_as)                       /* nothing of the old project plays on */
+            clear_lengths();
+    }
+    if (!file_manager_idle())
+        return 0;
+    if (PM->load) {
+        PM->load = 0;
+        load_lengths();
+        PM->changed = 0;                    /* nothing to write until a length changes */
+        return 1;
+    }
+    if (unsaved || !PM->changed) {
+        PM->wait = SAVE_DELAY;
+        return 0;
+    }
+    if (PM->wait) {
+        PM->wait--;
+        return 0;
+    }
+    PM->wait = SAVE_DELAY;
+    if (save_lengths())
+        PM->changed = 0;
+    return 0;
+}
+
+/* Pattern screen vtable slot 0x600403dc (update method 0x600e1f99; chained). Lengths
+ * loaded while the screen is up redraw the grid. */
+void mt_pm_pattern_update(void *screen, void *a1, void *a2, void *a3)
+{
+    int loaded = lengths_tick();
+    ((update_fn)mt_pm_next_pattern_update)(screen, a1, a2, a3);
+    int grid = *(const volatile int8_t *)(ed() + ED_GRID_CTRL);
+    if (loaded && grid >= 0)
+        ((display_fn)FW_CTRL_REFRESH)((void *)FW_DISPLAY, grid);
+}
+
+/* Config screen vtable slot 0x6003b5f8 (update method 0x600c6475; chained): projects are
+ * opened and saved from there */
+void mt_pm_config_update(void *screen, void *a1, void *a2, void *a3)
+{
+    lengths_tick();
+    ((update_fn)mt_pm_next_config_update)(screen, a1, a2, a3);
+}
+
+/* 0x60114eaa in the save request 0x60114e34: "bl strncpy(fm + 0x340, name, 0x21)",
+ * run only for Save As, after the new path is copied. The next tick sees the new
+ * session and keeps the lengths for it. */
+char *mt_pm_save_name(char *dst, const char *src, uint32_t n)
+{
+    char *r = ((strncpy_fn)mt_pm_next_save_name)(dst, src, n);
+    pm_init_if_needed();
+    PM->save_as = project_session();
+    return r;
+}
 
 /* Config's version text: 1.2.0-pm1 */
 const char mt_version_fmt[] = "%d.%d.%d-" POLYMETER_VERSION;

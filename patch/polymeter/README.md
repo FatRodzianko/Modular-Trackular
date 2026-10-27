@@ -11,10 +11,9 @@ This is a re-implementation from its description; nothing of it was seen or used
 [docs/POLYMETER_PLAN.md](../../docs/POLYMETER_PLAN.md) has the investigation and the plan.
 
 **Status: in development.** This build plays the track lengths, sets them with the
-Trk Len button, dims the steps past them in the grid and records live notes onto a short
-track's own steps. It doesn't save the lengths yet: they are lost when the unit is
-switched off (the next phase of the plan). Emulator-tested, alone and in bundles with
-patch/all's patches in both orders. Not tested on hardware.
+Trk Len button, dims the steps past them in the grid, records live notes onto a short
+track's own steps and saves the lengths with the project. Emulator-tested, alone and in
+bundles with patch/all's patches in both orders. Not tested on hardware.
 
 ## Using it
 
@@ -33,6 +32,11 @@ and a selection keep their own colors.
 Recording while playing works as usual. On a short track a note (or note-off) lands on
 the step the track is playing, not on a dimmed step: with length 6, a hit during the
 pattern's step 11 goes to step 5.
+
+The lengths are saved with the project, in `polymeter.bin` in its folder, a moment after
+each change (and the file is removed when no length is left). Opening a project loads its
+lengths; Save As takes them to the new name. A new project keeps them until its first
+save. Stock firmware ignores the file: there every track plays the whole pattern.
 
 ## How it works
 
@@ -78,6 +82,16 @@ copying is done with the audio interrupt masked; the call itself runs as in stoc
 firmware, which masks and unmasks the interrupt itself. With no lengths set the call goes
 straight through.
 
+The file is read and written from the Pattern and Config screens' update methods
+(chained, as the other patches' files are), one read or write of the whole file per
+update, in pieces of at most 256 bytes, only while the file manager is idle. It holds a
+`PMT1` header, one 17-byte entry for each pattern that has a length (its number and the 16
+lengths) and a checksum; at most 4,347 bytes. When another project opens, the lengths are
+cleared at once and then read from its file, which is checked whole before any of it is
+used: a damaged file gives no lengths. Save As is recognised by the save request's name
+copy (`0x60114eaa`), as the other patches do, and the lengths are written to the new
+folder.
+
 ## Building and checking it
 
 ```bash
@@ -108,6 +122,11 @@ the short tracks' first steps written out to the end: early and late hits (also 
 last step), note-offs (also onto a step holding a note), length 1, 128 steps, two short
 tracks, a track without a length; every one of the 26 call sites; and that the patch's
 own writes happen with the audio interrupt masked.
+
+For the file it uses a fake SD card: a change written once a moment later, every pattern
+with lengths written and read back, damaged files of every kind ignored, the file removed
+when no length is left, nothing read while the file manager is busy, and Save As and new
+projects as for the other patches' files.
 
 ## Reverting
 

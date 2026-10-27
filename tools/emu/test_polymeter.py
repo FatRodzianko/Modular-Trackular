@@ -1,5 +1,5 @@
-"""Check the polymeter patch (a length per track): playback, the Trk Len button, the grid and
-live recording.
+"""Check the polymeter patch (a length per track): playback, the Trk Len button, the grid,
+live recording and the lengths' file.
 
   python tools/emu/test_polymeter.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf>
 
@@ -95,6 +95,17 @@ manager, the stock page-3 bind and label code, and the display calls recorded:
    result as the first. The patch's own writes to the pattern happen with the audio
    interrupt (NVIC bit 0) masked, and stock records with the interrupt as the caller
    left it (the recorders mask and enable it themselves).
+18. The lengths' file (polymeter.bin on the fake SD card of tools/emu/fakefs.py), through
+   the Pattern and Config screens' update hooks: nothing written while nothing changed;
+   a change written once, a moment later (PMT1, the entries, a checksum); every pattern
+   with lengths (4,347 bytes) written and read back, every read and write at most 256
+   bytes; another project clears them, coming back reads them; a damaged, short or
+   wrong file (checksum, magic, count, pattern 0, truncated, empty) gives none, none of
+   it used; every length cleared removes the file; nothing read while the file manager
+   is busy (the old project's lengths cleared at once), then read and the grid redrawn
+   once; a project without a name: nothing written; no pattern file written; Save As
+   and new projects as the other patches' files (project_save.save_as_checks). The
+   encoder marks a change for the file only when a length changes.
 """
 from __future__ import annotations
 
@@ -108,6 +119,8 @@ from unicorn.arm_const import UC_ARM_REG_PC, UC_ARM_REG_R0, UC_ARM_REG_SP
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import machine as mach  # noqa: E402
+from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
+from project_save import save_as_checks  # noqa: E402
 import seq_timing as st  # noqa: E402
 from layout import patch_code, patch_ram  # noqa: E402
 
@@ -164,6 +177,15 @@ REC_LIVE, REC_OFF = 0x15C8, 0x600AC700  # the stock recorders
 SCREEN_MANAGER = 0x200207C0             # +8: the current screen
 NVIC_ISER, NVIC_ICER = 0xE000E100, 0xE000E180
 PADS = 0x14                             # the recorders' source: the pads
+
+# the lengths' file
+PATTERN_UPDATE_SLOT, PATTERN_UPDATE = 0x600403DC, 0x600E1F98
+CONFIG_UPDATE_SLOT, CONFIG_UPDATE = 0x6003B5F8, 0x600C6474
+CTRL_REFRESH = 0x60101E84
+FM_STATE = 0x2001E488 + 0x13D
+SAVE_DELAY = 25
+PM_CHANGED = 0x100F                     # the patch's RAM: a length changed since the file
+PM_SIZE = 0x1018
 
 failures: list[str] = []
 
@@ -401,11 +423,12 @@ def hold_checks(ptf: Path) -> None:
     r = UiRig(ptf, table=None)
     r.table = table
     m = r.m
-    m.write(table, bytes([0xA5]) * (4 + 256 * 16))
+    m.write(table, bytes([0xA5]) * PM_SIZE)
     r.bind()
     r.button(1)
-    check(m.r32(table) == MAGIC and m.uc.mem_read(table + 4, 256 * 16) == bytes(256 * 16),
-          "the first press sets up the table from garbage (magic, all lengths 0)")
+    check(m.r32(table) == MAGIC and m.uc.mem_read(table + 4, 256 * 16) == bytes(256 * 16)
+          and r.r8(table + PM_CHANGED) == 0,
+          "the first press sets up the table from garbage (magic, all lengths 0, nothing to save)")
     check(r.text2() == "--" and any(n == "refresh" and c == CTRL0 + TRK_LEN for n, c, _ in r.calls),
           f"press: the second line reads {r.text2()!r} and is redrawn")
     steps = [(-1, 15, "15"), (-20, 1, "1"), (1, 2, "2"), (100, 0, "--"), (-10, 6, "6"), (0, 6, "6")]
@@ -413,6 +436,16 @@ def hold_checks(ptf: Path) -> None:
         r.jog(delta)
         check(r.stored(0) == want and r.text2() == label and not r.jogs,
               f"encoder {delta:+d}: track 1 length {r.stored(0)} ({r.text2()!r}), stock's encoder not called")
+    check(r.r8(table + PM_CHANGED) == 1, "a length changed: marked for the file")
+    m.w8(table + PM_CHANGED, 0)
+    for delta in (0, -10):                      # 6 stays 6; 1 - 10 clamps to 1
+        if delta < 0:
+            r.jog(-5)
+            m.w8(table + PM_CHANGED, 0)
+        r.jog(delta)
+        check(r.stored(0) == (6 if delta == 0 else 1) and r.r8(table + PM_CHANGED) == 0,
+              f"encoder {delta:+d} that leaves the length as it was ({r.stored(0)}): nothing marked")
+    r.jog(5)
     m.w8(ED + ED_CURSOR_TRACK, 3)
     m.w8(CUR_PATTERN, 5)
     r.jog(-3)
@@ -503,7 +536,7 @@ def jog_ram(ptf: Path, press: bool, scenario, deltas=(1, 1, -1, 3, -2, 5, -7, 1)
     skip = []
     try:
         lo = patch_ram(ptf, "polymeter")
-        skip = [(lo, lo + 0x1010)]
+        skip = [(lo, lo + PM_SIZE)]
     except SystemExit:
         pass
     dumps = []
@@ -1093,6 +1126,160 @@ def record_checks(ptf: Path, stock: Path) -> None:
           f"with the audio interrupt masked by the caller, stock is entered with it still masked ({r.irq})")
 
 
+def fnv1a(data: bytes) -> int:
+    h = 2166136261
+    for b in data:
+        h = (h ^ b) * 16777619 & 0xFFFFFFFF
+    return h
+
+
+def pmt1(lengths: dict[int, tuple]) -> bytes:
+    """polymeter.bin for {pattern: 16 lengths}: PMT1, the count, the entries, a checksum"""
+    entries = b"".join(bytes([p]) + bytes(v) for p, v in sorted(lengths.items()) if any(v))
+    count = struct.pack("<I", len(entries) // 17)
+    return b"PMT1" + count + entries + struct.pack("<I", fnv1a(count + entries))
+
+
+def file_checks(ptf: Path) -> None:
+    print("the lengths' file (polymeter.bin), through the screens' update hooks")
+    table = patch_ram(ptf, "polymeter")
+    m = mach.Machine(ptf)
+    fs = FakeFS(m, Path("."))
+    m.stub_function(PATTERN_UPDATE, lambda mm: 0)
+    m.stub_function(CONFIG_UPDATE, lambda mm: 0)
+    refreshed: list[int] = []
+    m.stub_function(CTRL_REFRESH, lambda mm: refreshed.append(mm.arg(1)))
+    m.w8(ED + ED_GRID_CTRL, 0xFF)               # no grid control: the Pattern screen not built
+    pat_hook, cfg_hook = m.r32(PATTERN_UPDATE_SLOT), m.r32(CONFIG_UPDATE_SLOT)
+    m.write(table, bytes([0xA5]) * PM_SIZE)     # RAM at power-on
+
+    def tick(n=1, hook=None):
+        for _ in range(n):
+            m.call(hook or pat_hook, PATVIEW, max_insns=50_000_000)
+
+    def get() -> dict[int, tuple]:
+        raw = bytes(m.uc.mem_read(table + 4, 256 * 16))
+        return {p: tuple(raw[16 * p:16 * p + 16]) for p in range(1, 256) if any(raw[16 * p:16 * p + 16])}
+
+    def put(lengths: dict[int, tuple]) -> None:     # as the Trk Len encoder does
+        raw = bytearray(256 * 16)
+        for p, v in lengths.items():
+            raw[16 * p:16 * p + 16] = bytes(v)
+        m.write(table + 4, bytes(raw))
+        m.w8(table + PM_CHANGED, 1)
+
+    def path(name):
+        return f"Projects/User/{name}/polymeter.bin"
+
+    def writes():
+        return len([x for x in fs.log if "polymeter.bin mode 3" in x])
+
+    def reopen(name="A", hook=None):
+        fs.set_project(Path("."), "B" if name != "B" else "C", "Projects/User")
+        tick(hook=hook)
+        fs.set_project(Path("."), name, "Projects/User")
+        tick(hook=hook)
+
+    def lens(**kw) -> tuple:
+        v = [0] * 16
+        for k, n in kw.items():
+            v[int(k[1:]) - 1] = n
+        return tuple(v)
+
+    fs.set_project(Path("."), "A", "Projects/User")
+    tick()
+    check(m.r32(table) == MAGIC and get() == {}, "power-on garbage, a project without polymeter.bin: no lengths")
+    tick(SAVE_DELAY + 5)
+    check(writes() == 0 and not fs.removed, "nothing written while nothing changed")
+    a = {1: lens(t1=6), 200: lens(t3=5, t16=100)}
+    put(a)
+    tick(SAVE_DELAY - 2)
+    check(writes() == 0, "no write right after a change")
+    tick(5)
+    check(writes() == 1 and fs.overlay.get(path("A")) == pmt1(a),
+          f"the change is written once, a moment later (PMT1, 2 entries: {len(pmt1(a))} bytes)")
+    tick(SAVE_DELAY * 2)
+    check(writes() == 1, "and not again while nothing changes")
+    reopen("B")
+    check(get() == {}, "another project without the file: no lengths")
+    reopen()
+    check(get() == a, "back to the first project: its lengths again")
+
+    full = {p: tuple((p + t) % 120 + 1 for t in range(16)) for p in range(1, 256)}
+    put(full)
+    tick(SAVE_DELAY + 5)
+    check(fs.overlay.get(path("A")) == pmt1(full) and len(pmt1(full)) == 8 + 255 * 17 + 4,
+          f"every pattern with lengths: {len(pmt1(full))} bytes written")
+    reopen()
+    check(get() == full, "and read back whole")
+    check(max(fs.read_sizes + fs.write_sizes) <= 256, f"every read and write is at most 256 bytes "
+          f"(largest {max(fs.read_sizes + fs.write_sizes)})")
+
+    good = pmt1(a)
+    body = good[4:-4]
+    count = struct.pack("<I", 3)
+    zero = struct.pack("<I", 1) + bytes(17)
+    for label, bad in (("a wrong checksum", good[:-1] + bytes([good[-1] ^ 1])),
+                       ("a wrong magic", b"X" + good[1:]),
+                       ("a count of 256", b"PMT1" + struct.pack("<I", 256) + good[8:]),
+                       ("more entries counted than there are", b"PMT1" + count + body[4:]
+                        + struct.pack("<I", fnv1a(count + body[4:]))),
+                       ("an entry for pattern 0", b"PMT1" + zero + struct.pack("<I", fnv1a(zero))),
+                       ("the checksum missing", good[:-4]),
+                       ("the header only", good[:8]),
+                       ("an empty file", b"")):
+        fs.overlay[path("A")] = bad
+        reopen()
+        check(get() == {}, f"{label}: no lengths (none of it used)")
+    fs.overlay[path("A")] = good
+    reopen()
+    check(get() == a, "the file put back: its lengths")
+
+    put({})
+    tick(SAVE_DELAY + 5)
+    check(path("A") not in fs.overlay and path("A") in fs.removed, "every length cleared: the file is removed")
+    n = writes()
+    reopen()
+    tick(SAVE_DELAY + 5)
+    check(get() == {} and writes() == n, "reopened: no lengths, nothing written")
+    put(a)
+    tick(SAVE_DELAY + 5, cfg_hook)
+    check(fs.overlay.get(path("A")) == good, "through the Config screen's update too")
+
+    print("the file manager busy, and the grid")
+    fs.set_project(Path("."), "B", "Projects/User")
+    tick()
+    m.w8(FM_STATE, 5)                           # the file manager busy (a project being opened)
+    fs.set_project(Path("."), "A", "Projects/User")
+    reads = len([x for x in fs.log if "polymeter.bin mode 0" in x])
+    tick(3)
+    check(len([x for x in fs.log if "polymeter.bin mode 0" in x]) == reads and get() == {},
+          "while the file manager is busy: the file isn't read yet (no lengths)")
+    m.w8(FM_STATE, 0)
+    m.w8(ED + ED_GRID_CTRL, 9)
+    refreshed.clear()
+    tick()
+    loaded = list(refreshed)
+    tick(3)
+    check(get() == a and loaded == [9] and refreshed == [9],
+          f"once it is idle: read, and the grid redrawn once ({refreshed})")
+    m.w8(ED + ED_GRID_CTRL, 0xFF)
+    m.w8(FM_STATE, 5)
+    fs.set_project(Path("."), "B", "Projects/User")
+    tick()
+    check(get() == {}, "another project opened while the file manager is busy: the lengths cleared at once")
+    m.w8(FM_STATE, 0)
+    m.write(PROJECT_NAME, b"\0")               # the name cleared while Workspace loads
+    tick()
+    put(a)
+    n = writes()
+    tick(SAVE_DELAY * 2)
+    check(writes() == n, "a project without a name: nothing written")
+    check(not any("mode 3" in x and ".mtp" in x for x in fs.log), "no pattern file is written")
+
+    save_as_checks(check, m, fs, tick, "polymeter.bin", get, put, {}, a, {7: lens(t2=3)}, pmt1, SAVE_DELAY)
+
+
 def main() -> int:
     ptf, stock = Path(sys.argv[1]), Path(sys.argv[2])
     site_checks(ptf)
@@ -1110,6 +1297,7 @@ def main() -> int:
     stock_jog_checks(ptf, stock)
     grid_checks(ptf, stock)
     record_checks(ptf, stock)
+    file_checks(ptf)
     print(f"{len(failures)} failure(s)")
     for f in failures:
         print("  " + f)

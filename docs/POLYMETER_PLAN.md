@@ -16,8 +16,8 @@ built unless asked. The web patcher choice (section 8) is still open. Phase 1 (R
 confirmations) is done: its results are in section 9, in FINDINGS section 29, and below.
 Phase 2 (the playback core, `patch/polymeter`, `pm1`) and phase 3 (the Trk Len button
 and the encoder) are built, emulator-tested and committed (section 9). Phase 4 (the
-grid) and phase 5 (live recording, with the patcher's tail calls) are built and
-emulator-tested (section 9). Not tested on hardware.
+grid), phase 5 (live recording, with the patcher's tail calls) and phase 6 (the file)
+are built and emulator-tested (section 9). Not tested on hardware.
 
 ## 1. Verdict
 
@@ -680,6 +680,34 @@ says go.
     them to the new folder;
   - writes only while the file manager is idle, in pieces of at most 256 bytes;
   - stock firmware with the file present opens and plays normally.
+
+**Phase 6 results (2026-10-26).**
+- **The file** as in section 4.6: `PMT1`, the count, one 17-byte entry per pattern with
+  a length, an FNV-1a checksum of the count and entries; 4,347 bytes at most. Written a
+  moment after a change (25 screen updates, as the other patches' files), in pieces of
+  255 bytes; with no length left the file is removed instead. Read twice on a project
+  change: once to check it whole, then to take its lengths, so a damaged file changes
+  nothing (the table was cleared when the project changed).
+- **Hooks** (all chained, the same sites swing, humanize and slicethru use): the Pattern
+  screen's update word `0x600403dc`, the Config screen's `0x6003b5f8` (projects are
+  opened and saved there), and the Save As name copy `0x60114eaa`. The Pattern screen's
+  hook redraws the grid after a load.
+- **A change** is marked by the Trk Len encoder only when the length really changes.
+- **Code** 5,057 bytes (1,496 more; the link region grew from 4 to 8 KB, a placeholder
+  only); RAM 4,128 bytes (16 more: the project, Save As, the delay and the change mark).
+- **Tests** (`test_polymeter.py` 18, and the change mark in 12): as listed in the
+  docstring, with the shared Save As checks (`tools/emu/project_save.py`). A variant that
+  takes the file's lengths while reading it, before the checksum, fails the
+  wrong-checksum and missing-checksum cases.
+- **Not covered:** stock firmware with the file present is not run in the emulator; it
+  opens only its own files by name, and `polymeter.bin` is not one of them. The pattern
+  files are never written by the patch (checked).
+- **Limit, as the other patches' files:** a length changed less than the save delay
+  (25 screen updates) before another project is opened is not written.
+- **Results:** pm1 0 failures (177 checks); the layout test 0 failures; the six page-3
+  combinations and patch/all + polymeter in both orders: 40 of 42 jobs pass, the two
+  failures legato's known cost check (2,416); the quick tier passes (27 jobs, 6.2 min).
+  The release tier (needed before committing the patcher change) hasn't been run.
 
 **Phase 7: `patch/all` and the web patcher.**
 - Gated by section 8: the harness-disk change and the naming change, each its own

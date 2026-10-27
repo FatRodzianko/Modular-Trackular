@@ -2,7 +2,7 @@
  * patches listed before it, and moves it there with build/polymeter.rel. */
 MEMORY
 {
-    PATCH (rx) : ORIGIN = 0x601D0000, LENGTH = 4K
+    PATCH (rx) : ORIGIN = 0x601D0000, LENGTH = 8K
     RAM (rw)   : ORIGIN = 0x20207FC0, LENGTH = 64K     /* link address only: the patcher assigns RAM */
 }
 

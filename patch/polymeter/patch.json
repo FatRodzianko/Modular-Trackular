@@ -207,6 +207,13 @@
       "next": "mt_pm_next_rec_off18",
       "tail": true,
       "note": "b.w seq_record_note_off_q 0x600ac700 (a tail call) -> live note-off recording onto a short track's steps"
+    },
+    {
+      "at": "0x60114EAA",
+      "old": "52f094fa",
+      "to": "mt_pm_save_name",
+      "next": "mt_pm_next_save_name",
+      "note": "save request 0x60114e34, Save As only: bl strncpy(fm+0x340, name, 0x21) -> mt_pm_save_name (the lengths go with the project to its new name)"
     }
   ],
   "itcm_branches": [
@@ -305,6 +312,22 @@
       "next": "mt_pm_next_rec_note8",
       "thumb": true,
       "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
+    },
+    {
+      "at": "0x600403DC",
+      "old": "991f0e60",
+      "to": "mt_pm_pattern_update",
+      "next": "mt_pm_next_pattern_update",
+      "thumb": true,
+      "note": "Pattern screen vtable: update method 0x600e1f99 -> mt_pm_pattern_update (polymeter.bin load/save)"
+    },
+    {
+      "at": "0x6003B5F8",
+      "old": "75640c60",
+      "to": "mt_pm_config_update",
+      "next": "mt_pm_next_config_update",
+      "thumb": true,
+      "note": "Config screen vtable: update method 0x600c6475 -> mt_pm_config_update (polymeter.bin load/save)"
     },
     {
       "at": "0x600CBF9C",
