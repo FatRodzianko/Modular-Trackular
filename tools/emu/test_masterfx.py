@@ -49,8 +49,9 @@ audio graph does, with the block helpers stubbed (tools/emu/reverb_rig.py).
    values, a damaged file and a file naming an unknown reverb (Stock, and the file is
    kept), a file naming an unknown delay, a project without a name; Save As and new
    projects through the firmware's save request (project_save.save_as_checks).
-6. Cost: instructions per block with Stock (against stock firmware) and for each reverb
-   and delay, and for a switch's clearing blocks.
+6. Cost: with Stock chosen, the patch's own instructions per block (what it adds to stock's
+   work: test_bundle_cost.py); for each reverb and delay, and for a switch's clearing
+   blocks, the whole block.
 7. WAV files (if a folder is given): the same test sounds through the stock reverb,
    Freeverb, Plate and Spring, default settings and a large room, 44.1 kHz stereo, return
    only; and through the stock delay, Tape and BBD (a few settings, a Time sweep and
@@ -105,6 +106,7 @@ GATED = 0                           # ... and the gated reverb's
 SHIMMER = 0                         # ... and the shimmer's
 RV_ACTIVE, DL_ACTIVE = 0x14, 0x24     # masterfx's state + these: the reverb and delay running
 CODE = (0, 0)                       # set in main(): the patch's code, start and end
+OWN_LIMIT = 3_800                   # own instructions per block: 1 % of a block at about 4 cycles each
 failures: list[str] = []
 
 
@@ -955,23 +957,24 @@ def file_checks(ptf: Path) -> None:
     check(calls["pattern"] > 0 and calls["config"] > 0, f"stock update methods ran ({calls})")
 
 
-def cost_checks(ptf: Path, stock: Path) -> None:
+def cost_checks(ptf: Path) -> None:
     print("cost")
 
-    def per_block(rig, blocks=60):
+    def per_block(rig, blocks=60, own=False):
         counts = []
         for _ in range(blocks):
             n = [0]
-            h = rig.m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: n.__setitem__(0, n[0] + 1))
+            where = {"begin": CODE[0], "end": CODE[1] - 1} if own else {}
+            h = rig.m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: n.__setitem__(0, n[0] + 1), **where)
             rig.run(tf.noise_burst(B, B, 2 * len(counts)), tf.noise_burst(B, B, 2 * len(counts) + 1))
             rig.m.uc.hook_del(h)
             counts.append(n[0])
         return max(counts)
 
-    r, s = Rig(ptf), tf.Rig(stock, booted=False)
+    r = Rig(ptf)
     r.pattern()
-    stock_cost, mine = per_block(s), per_block(r)
-    check(mine - stock_cost < 200, f"Stock chosen: {mine} instructions per block, stock firmware {stock_cost}")
+    mine = per_block(r, own=True)
+    check(0 < mine <= OWN_LIMIT, f"Stock chosen: at most {OWN_LIMIT} of its own instructions per block ({mine})")
     for which in (REVERB_FREEVERB, REVERB_PLATE, REVERB_SPRING, REVERB_SHIMMER):
         r.choose(which)
         r.run([0] * (B * 8), [0] * (B * 8))
@@ -1003,7 +1006,7 @@ def main() -> int:
     delay_checks(ptf, stock)
     menu_checks(ptf)
     file_checks(ptf)
-    cost_checks(ptf, stock)
+    cost_checks(ptf)
     if wav_dir:
         write_wavs(ptf, stock, wav_dir)
     print(f"{len(failures)} failure(s)")

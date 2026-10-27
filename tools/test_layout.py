@@ -33,6 +33,8 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
     them after it in reverse order; and with page 3's other buttons (humanize,
     copypattern, both) in both orders, and with a copy of it that hooks only its two
     tail calls (b.w sites, chained by both),
+  - headroom (a diagnostic) alone, listed last after patch/all's patches, and after
+    them and polymeter (its own bundle specs, patch/headroom/all_*.json),
   - a copy of slicethru with a non-BL site ("replaces": "insns", the two instructions
     at 0x60035522), alone and in patch/all's place for slicethru; the site's 4 bytes
     are a BL to the hook and the bytes around it are stock,
@@ -366,6 +368,8 @@ def main() -> int:
                       version="PMR")
     all_pm_rev_spec = outdir / "all-polymeter-reversed.json"
     all_pm_rev_spec.write_text(json.dumps(all_pm_rev, indent=2))
+    hr = ROOT / "patch" / "headroom" / "patch.json"
+    hr_all, hr_all_pm = (ROOT / "patch" / "headroom" / f"{n}.json" for n in ("all_headroom", "all_polymeter_headroom"))
     pm_page3 = {}                               # polymeter with page 3's other buttons
     for name, version, specs in (("humanize-polymeter", "HPM", [hz, pm]), ("polymeter-humanize", "PMH", [pm, hz]),
                                  ("copypattern-polymeter", "CPM", [cp, pm]),
@@ -471,10 +475,13 @@ def main() -> int:
               for version, (name, spec_path, specs) in pm_page3.items()],
             ("chained tail calls: polymeter, then a copy on its two b.w sites", pm_tail_chain,
              [pm, outdir / "polymeter-tails.json"], "PTC", None),
+            ("headroom alone", hr, [hr], None, None),
+            ("patch/all's patches, then headroom", hr_all, all_rs_list + [hr], "MH1", None),
+            ("patch/all's patches, polymeter, then headroom", hr_all_pm, all_pm_list + [hr], "MH2", None),
             ("a non-BL site: slicethru with the two instructions at 0x60035522", bt_ins, [bt_ins], None, None),
             ("a non-BL site in patch/all: the slicethru copy in slicethru's place", all_ins_spec, all_ins_list,
              "INS", None)):
-        out = outdir / f"{spec.stem if spec.parent == outdir else spec.parent.name}.ptf"
+        out = outdir / f"{spec.stem if spec.parent == outdir or spec.stem != "patch" else spec.parent.name}.ptf"
         if not build(stock, spec, out):
             check(False, f"{label}: patch_ptf failed")
             continue

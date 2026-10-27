@@ -1,0 +1,53 @@
+{
+  "name": "headroom",
+  "description": "Diagnostic: the worst audio block and the sequencer's share, in % of the measured block period, late blocks; on the .develop Config screen. List it last in a bundle",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "bin": "build/headroom.bin",
+  "sym": "build/headroom.sym",
+  "rel": "build/headroom.rel",
+  "prebuilt_bin": "prebuilt/headroom.bin",
+  "prebuilt_sym": "prebuilt/headroom.sym",
+  "prebuilt_rel": "prebuilt/headroom.rel",
+  "ram_startup": true,
+  "branches": [
+    {
+      "at": "0x600AA7F8",
+      "old": "00f02ef8",
+      "to": "mt_hr_seq_advance",
+      "next": "mt_hr_next_seq_advance",
+      "note": "app_audio_block: bl seq_advance (veneer 0x600aa858); the sequencer's cycles, with every hook listed before headroom"
+    },
+    {
+      "at": "0x600CB570",
+      "old": "9bf0dcfd",
+      "to": "mt_hr_line1",
+      "next": "mt_hr_next_line1",
+      "note": "cfg_debug_info: bl snprintf for \"min: %d%%, max: %d%%\" -> blk and seq line"
+    },
+    {
+      "at": "0x600CB590",
+      "old": "9bf0ccfd",
+      "to": "mt_hr_line2",
+      "next": "mt_hr_next_line2",
+      "note": "cfg_debug_info: bl snprintf for \"avg: %d%%, last: %d%%\" -> 1s and late line"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x60038724",
+      "old": "c9a70a60",
+      "to": "mt_hr_block",
+      "next": "mt_hr_next_block",
+      "thumb": true,
+      "note": "app vtable 0x6003871c +8: app_audio_block 0x600aa7c9 (called by audio_out_cb) -> mt_hr_block: the whole block and the period"
+    },
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "version": true,
+      "note": "version text 1.2.0-hr1"
+    }
+  ]
+}

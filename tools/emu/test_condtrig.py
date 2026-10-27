@@ -34,8 +34,8 @@ audio block runs it, with no time to add, so only its check for a new take runs.
    `8:8`, and stock firmware's text for everything else.
 9. Stock firmware with such patterns: values 101..137 always play, show as numbers, and
    an encoder edit makes them 100.
-10. Cost: instructions per tick with a condition on every track, against stock
-    firmware with Chance 50 on every track.
+10. Cost: the patch's own instructions per audio block at 800 BPM with a condition in
+    FX1 and FX2 of every track (what it adds to stock's work: test_bundle_cost.py).
 """
 from __future__ import annotations
 
@@ -50,6 +50,7 @@ from unicorn.arm_const import UC_ARM_REG_S0
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from patch_ptf import bl_target  # noqa: E402
+from layout import patch_code  # noqa: E402
 import seq_timing as st  # noqa: E402
 
 SEQ = st.SEQ
@@ -69,7 +70,8 @@ GRID_FX1_CALL, GRID_FX2_CALL = 0x600DF748, 0x600DF77C
 MICRO_MOVE_T, VOLUME, SWING, TEMPO = 2, 18, 17, 15
 STEP = 576                          # ticks per step
 FIRST_MICRO = 12                    # the tick of a take's first micro-step
-PER_TRACK_LIMIT = 150               # instructions the patch may add per track and step
+OWN_LIMIT = 3_800                   # own instructions per block: 1 % of a block at about 4 cycles each
+TICKS_PER_BLOCK = 90                # at 800 BPM (30,720 ticks a second, 344.5 blocks)
 NAMES = {101: "1st", 102: "!1s"}
 for _b in range(2, 9):
     for _a in range(1, _b + 1):
@@ -378,31 +380,27 @@ def song_checks(ptf: Path) -> None:
           f"(patterns heard {''.join('AB'[n - 1] for n in patterns)})")
 
 
-def cost_checks(ptf: Path, stock: Path) -> None:
-    print("Cost (instructions per tick over two steps, 16 tracks with Chance in FX1 and FX2)")
-    counts = {}
-    for label, path, patched, value in (("stock, Chance 50", stock, False, 50),
-                                        ("patched, Chance 50", ptf, True, 50),
-                                        ("patched, 8:8", ptf, True, 137)):
-        rig = Rig(path, patched=patched)
+def cost_checks(ptf: Path) -> None:
+    print("Cost (the patch's own instructions per block at 800 BPM, 16 tracks with a condition in FX1 and FX2)")
+    lo, hi = patch_code(ptf, "condtrig")
+    for label, value in (("Chance 50", 50), ("1:2", 103), ("8:8", 137)):
+        rig = Rig(ptf, patched=True)
         for t in range(16):
             rig.step(t, 0, (CHANCE, value), (CHANCE, value))
         rig.start()
         n = [0]
-        h = rig.m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: n.__setitem__(0, n[0] + 1))
-        worst = 0
-        for _ in range(STEP * 2):
-            before = n[0]
+        h = rig.m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: n.__setitem__(0, n[0] + 1), begin=lo, end=hi - 1)
+        blocks = []
+        for tick in range(STEP * 2):
+            if tick % TICKS_PER_BLOCK == 0:
+                blocks.append(n[0])
             rig.m.ticks += 1
             rig.m.call(st.SEQ_TICK, SEQ, max_insns=2_000_000)
-            worst = max(worst, n[0] - before)
+        blocks.append(n[0])
         rig.m.uc.hook_del(h)
-        counts[label] = (n[0], worst)
-    text = "; ".join(f"{k}: worst {w}, total {t}" for k, (t, w) in counts.items())
-    stock_worst = counts["stock, Chance 50"][1]
-    extra = max(w for t, w in counts.values()) - stock_worst
-    check(extra <= 16 * PER_TRACK_LIMIT,
-          f"at most {PER_TRACK_LIMIT} more per track at the worst tick ({extra} in all: {text})")
+        worst = max(b - a for a, b in zip(blocks, blocks[1:]))
+        check(worst <= OWN_LIMIT, f"{label}: at most {OWN_LIMIT} of its own per block ({worst} at worst, "
+                                  f"{n[0]} over two steps)")
 
 
 def cell(m, buf, track: int, step: int, column: int) -> tuple[int, int]:
@@ -495,7 +493,7 @@ def main() -> int:
     counting_checks(ptf)
     reset_checks(ptf)
     ui_checks(ptf, stock)
-    cost_checks(ptf, stock)
+    cost_checks(ptf)
     print(f"{len(failures)} failure(s)")
     return 1 if failures else 0
 

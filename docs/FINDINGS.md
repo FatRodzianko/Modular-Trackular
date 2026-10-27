@@ -3199,3 +3199,227 @@ Found while planning a per-track length (polymeter) patch (`docs/POLYMETER_PLAN.
 - **The encoder**: `pat_jog(delta)` has r0 = the signed delta. Its word `0x600df2f0` is
   the literal loaded at `0x600df292`. It does nothing while `0x6010e0f8(0x200209ac)` is
   nonzero or an overlay is open (`ed+0x398`). Then it acts by `ed+0x354`.
+
+## 31. Audio block timing: the cycle counter, the stock CPU meter and the deadline (static)
+
+Found while planning the timing diagnostic ([TIMING_HEADROOM_PLAN.md](TIMING_HEADROOM_PLAN.md)).
+
+### The cycle counter and the time functions
+
+- **The core clock.** `SystemCoreClock` (`0x200000c8`) starts as 528,000,000 in `.data`.
+  The clock setup writes the same value (`0x60093c36`, literal `0x1f78a400`). So the
+  firmware works with 528 cycles per µs.
+- **Timer setup.** `timer_init_q` (`0x600a24a4`) is called from `main` at `0x600a1f20`
+  with `r0 = 0x2000c630`, before audio starts. It:
+  - sets SysTick to 1 ms (reload = `SystemCoreClock` / 1000 − 1). It writes SysTick's
+    priority byte (SHPR3 top byte) as `0xf0` and then as 0;
+  - sets `DEMCR.TRCENA` (bit 24) and `DWT_CTRL.CYCCNTENA` (bit 0). The **DWT cycle
+    counter runs from boot**;
+  - stores `CYCCNT` at `0x2000c63c`;
+  - stores `0xffffffff / (cycles per µs)` at `0x2000c630` and the cycles per µs (528)
+    at `0x2000c634`.
+- **SysTick handler** (`0x600a277c`): `millis` (`0x2000c640`) + 1, and the `CYCCNT` of
+  that tick → `0x2000c63c`.
+- **The time functions.** `micros` (`0x600a2668`) is millis × 1000 plus the cycles
+  since the last tick (capped at 1000), read under a `ldrex`/`strex` retry on
+  `0x2000c644`. Also `millis` (`0x600a2654`), raw `CYCCNT` (`0x600a2648`), busy waits in
+  ms (`0x600a26b8`, `0x600a25a4`) and cycles per µs (`0x600a279c`).
+- **The timer object's vtable** (`0x6003845c`):
+
+  | Offset | Function |
+  |---|---|
+  | `+0` | millis |
+  | `+4` | micros |
+  | `+8` | delay ms |
+  | `+0xc` | cycles (`0x600a27b8` → `0x600a2648`) |
+  | `+0x10` | cycles per µs |
+
+  The app reaches it as `app+4` (`0x600aa370`, app vtable `+0x14`), then that object's
+  vtable `+0x30`.
+
+### The stock CPU meter
+
+The meter is an object of 0x1c bytes at `*(0x20027f1c)`. It is allocated on first use
+(`0x600a3584(0x1c)`).
+
+| Offset | Meaning |
+|---|---|
+| `+0` | `CYCCNT` at the block's start |
+| `+4` | last block, µs |
+| `+8` / `+0xc` | sum of µs / block count (average = sum / count; int32, so the sum overflows after about 2,147 s of busy time, roughly an hour of play at 50 %) |
+| `+0x10` / `+0x14` | minimum / maximum since boot, µs (min starts at `0x7fffffff`) |
+| `+0x18` | maximum of the current window, µs; a read with reset clears it |
+
+- `cpu_meter_start` (`0x6010c2c0`) stores `CYCCNT`, read through the timer object.
+- `cpu_meter_stop` (`0x6010c2ec`) computes µs = (now − start) / cycles per µs as a
+  float, clamps negatives to 0, and updates the fields.
+- `cpu_meter_read` (`0x6010c388`, `(meter, int out[5], reset)`) gives percentages,
+  µs × 100 / 2902 (multiply by `0x5a550a0f`, shift 42):
+
+  | `out` | Field |
+  |---|---|
+  | `[0]` | min |
+  | `[1]` | max since boot |
+  | `[2]` | window max (cleared when `reset` ≠ 0) |
+  | `[3]` | average |
+  | `[4]` | last |
+
+  2,902 µs is 128 / 44,100. One step is 1 % ≈ 29 µs ≈ 15,300 cycles.
+
+**What it times.** `app_audio_block` (`0x600aa7c8`), in order:
+
+1. It returns at once while the byte `0x20026e44` is set, before the meter.
+2. `cpu_meter_start`.
+3. `midi_poll_input`.
+4. `seq_advance` (`bl` at `0x600aa7f8`) with frames / 44,122.65 s.
+5. `0x600aa848` → ITCM `0x41c8` `engine_block_update(engine)`.
+6. `0x600aa850` → ITCM `0x3bac` `engine_render(engine, r1, r2, frames)`.
+7. `b.w cpu_meter_stop` (`0x600aa816`).
+
+So the meter covers the whole block's work: the sequencer, every patch hook on the
+`0x600aa7f8` chain, the ITCM sequencer hooks, the synths and the effects. It leaves out
+the eDMA handler, `audio_dma_cb`, and the object `audio_out_cb` gets from
+`0x600a1cbc(0x2000bedc)`, whose vtable `+0` runs before the block and `+8` after (what
+that object is: unknown).
+
+**The app vtable.** `0x6003871c` `+8` (the word at `0x60038724`) holds
+`app_audio_block`. `audio_out_cb` (`0x600a1e48`) calls it through that word with 128
+frames. No patch hooks the word.
+
+**Who reads the meter:**
+
+- **Config, with `/.develop` on the card.** `cfg_debug_info` (`0x600cb548`) formats
+  four lines with `snprintf` (`0x6016712c`, size 30), into the Config screen object at
+  `+0x118`, `+0x136`, `+0x154` and `+0x172`:
+
+  | Line | Format | `bl snprintf` |
+  |---|---|---|
+  | 1 | "min: %d%%, max: %d%%" (`0x6003b694`; literal word `0x600cb638`) | `0x600cb570` |
+  | 2 | "avg: %d%%, last: %d%%" (`0x6003b6ac`; literal word `0x600cb640`) | `0x600cb590` |
+  | 3 | free heap | |
+  | 4 | max stack | |
+
+  It reads without reset, so its max is since boot.
+- **An overload warning.** `cpu_overload_ind_update` (`0x600d0048`, object
+  `0x20020a68`) is called from `0x600cc9f4` while the byte `0x200209fc` is 0. Every
+  300 ms (millis through `*(0x20027d18)`) it reads the meter with reset, so it gets the
+  worst block of the last 300 ms:
+  - above 84 % it sets object `+0x70` = 0 and colours a display control (id `+5`) with
+    a colour from the display's table: `+0x434` for 85–92 %, `+0x430` for 93–98 %,
+    `+0x42c` above 98 %;
+  - at 84 % or less it counts `+0x70` up, and on the fourth calm reading it clears the
+    control's flag 0 (`disp_ctrl_clear_flag0`) and the stored colour.
+
+  Which control this is on screen: unchecked.
+
+### The deadline
+
+- One block = 128 frames. At the firmware's 44,122.65 Hz that is **2,901.0 µs**, or
+  **about 1,531,700 cycles at 528 MHz**. The meter's 2,902 µs is the same to 0.03 %.
+- The whole block runs inside the audio DMA interrupt. A block that overruns its
+  period delays the next interrupt, so the half-buffer it should fill is already
+  playing. The result is a dropout, not tempo drift (section 12).
+- The stock warning starts at 84 %. Measured stock maxima (section 15): 61 % with
+  synths, and 88 % in the session that included rendering. That 88 % can't have come
+  from the export itself (next part).
+
+### Export, the block's other callers, and Config (phase 1, static and emulator)
+
+**Export bypasses the audio block.**
+- `render_start_q` (`0x600bb81c`) sets the byte `0x20026e44`. While it is set:
+  - `app_audio_block` returns at once, before the meter;
+  - the graph's update-all (`0x6003061c`) does nothing.
+- The export renders from the main loop instead. The render loop (`0x600bc220`, section
+  12) calls `seq_advance` through its own veneer (`bl` at `0x600bc27a`), with
+  2,901.33 µs per block (float `0x600bc2c0`), and then `engine_block_update` through
+  `0x600bc2e0`.
+- The render's end (`0x600bb890`) clears the flag.
+- `0x20026e44` has no other writers (literal pool references at `0x600bb874`,
+  `0x600bb900`, `0x600aa830` and `0x60030640` only).
+- So the stock meter, and anything hooked on `0x600aa7f8` alone, never sees an export.
+  Section 15's 88 % came from another part of that session.
+
+**The app vtable `+8` has one caller.**
+- The only reference to `0x600aa7c9` is the vtable word `0x60038724`.
+- The only code that loads the app pointer `0x2000c638` and calls its `+8` is
+  `audio_out_cb`.
+- `main` (`0x600a1edc`) registers `audio_out_cb` (`0x600a1e49`) and an input callback
+  (`0x600a1e8d`) with the platform object `0x2000bedc` through `0x600a35e0`. The input
+  callback copies 128 frames into `0x2000bcd4`, then calls the app's vtable `+0xc`
+  with them.
+- The main loop then calls the platform's `+0x750` object's vtable `+8`; that is not
+  the app's audio method.
+
+**The bracket around the block is USB audio bookkeeping.**
+- `audio_out_cb` gets an object from `0x600a1cbc(0x2000bedc)`: the platform object
+  `+0x31c` = `0x2000c1f8`, vtable `0x600384b4` (emulator, after the static
+  constructors).
+- Its `+0` (`0x600a3e28`) runs before the block and its `+8` (`0x600a3e90`) after.
+- Both work on a ring buffer with the USB interrupt masked:
+  - `0x600a4738` writes bit 17 of NVIC ICER3, disabling IRQ 113, USB_OTG1 on the
+    RT1050;
+  - `0x600a4724` sets that IRQ's priority byte to 0 and enables it again.
+- The buffer: fill counter `0x200129b8` (+ 0x80 frames per block); write offset
+  `0x200129b4` (+ 0xe00 bytes per block, modulo 0x2a00, so three blocks); flags
+  `0x200129ec` and `0x2000d1b1`.
+- It is a few dozen instructions. Since USB_OTG1 runs at priority 0, USB interrupts
+  can preempt the audio interrupt. Their time then counts inside any measurement of
+  the block.
+
+**The Config debug lines refresh while playing.**
+- `scr_config_update` (`0x600c6474`) tail-calls `cfg_debug_info` (`b.w` at
+  `0x600c652a`) when the developer byte `*(0x2001fa58 + 0xb99)` is set and at least
+  1,000 ms (millis through `*(0x20027d18)`) have passed since the last refresh (time
+  at screen `+0x114`).
+- Nothing in that path checks whether the sequencer is playing. So the lines stay live
+  whenever the Config screen is up.
+- The two CPU lines are the two text lines of one display control (id at screen
+  `+0xa7`); heap and stack are the control at `+0xa8`.
+
+**The emulator and the cycle counter.**
+- `seq_timing.make()` already maps the PPB (`0xE0000000`, 1 MB) as plain RAM.
+- A `UC_HOOK_MEM_READ` on `0xE0001000`–`0xE0001FFF` that writes a value into
+  `0xE0001004` before the read completes works as a fake `CYCCNT`. With it set to the
+  running instruction count, two calls of `cycles_q` 3 instructions apart read 3
+  apart. No DWT writes happen in that path.
+- One `seq_timing.make()` takes 0.2 s.
+
+**Emulator cost of whole blocks** (`SynthRig`):
+- The setup:
+  - Synth 1–3 sounding (VAP ×2, ACD ×3, WTFM ×3 voices, 2 notes each);
+  - 16 tracks with a note on every step, FX1 = Micro-move and FX2 = CC 8;
+  - stock meter and `midi_poll_input` stubbed;
+  - every instruction counted.
+- The results:
+
+  | Firmware | Sequencer side only (engine stubbed), worst / average instructions per block | Whole block, worst / average | Wall time per whole block |
+  |---|---|---|---|
+  | stock | 30,602 / 5,543 | 778,392 / 744,287 | 0.9 s |
+  | `patch/all` (MTW) | 31,956 / 5,830 | 779,166 / 744,674 | 0.7 s |
+
+  The sequencer-side runs take 9–12 ms per block.
+- The engine render is about 96 % of the whole block's instructions, and nearly the same
+  in both firmwares: masterfx's default is Stock and the synths are stock models here.
+- At one cycle per instruction, 744,000 instructions would be about 49 % of a
+  1,531,700-cycle block. The device's stock meter read 61 % for a similar synth load.
+
+### On the device (timing headroom runs, 2026-10-27)
+
+The runs, figures and method are in [TIMING_HEADROOM_PLAN.md](TIMING_HEADROOM_PLAN.md)
+section 14. What they say about the firmware:
+
+- **The output has about one block of slack.** A single block over its 2,902.5 µs
+  doesn't drop out; overruns close together do.
+- **Allocated synth voices are rendered whether they sound or not.** Idle, nothing
+  playing, Shimmer and "Gated" chosen: about 80 % with 8 voices, 37 % with none (Config's
+  headroom line). With 8 voices, a 16-track project at 800 BPM overloads stock firmware.
+- **Patch code costs about 4 cycles per instruction** (3.7 on the sequencer side, 4.5 for
+  masterfx's effects), from the difference between two firmwares on the same project.
+  Code in flash and data in OCRAM or SDRAM miss the caches: the render pushes them out
+  every block.
+- **Stock's own sequencer work costs more than that per instruction**, or the device's
+  worst block holds work the emulator doesn't run (interrupts during it, the song's
+  pattern loads): hr1's worst `seq` block was about 277,000 cycles against 27,700
+  emulated instructions.
+- **The stock reverb at Size 100 with the stock delay at Time 3500 ms makes one-sample
+  spikes** in both outputs, about one per second, at 46 % load with no late blocks.

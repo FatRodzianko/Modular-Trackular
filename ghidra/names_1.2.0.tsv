@@ -449,3 +449,19 @@
 6010b204	patgrid_draw_cell	(ctrl, x, y, ?, text, ...): one cell's text in the color at ctrl+0x44 (eve_color_rgb only when it changed)
 600cff24	instr_label_q	(ctrl desc): the current instrument's label from project+0x6c5: "%d. %s" (sample), "%d. MIDI Channel %d", or synth_slot_title_q (64+); called after a jog edit of the instrument column
 6010e0f8	pat_jog_guard_q	(0x200209ac): pat_jog returns at once while nonzero
+# Audio block timing (FINDINGS section 31)
+600a24a4	timer_init_q	(0x2000c630): SysTick 1 ms, DEMCR.TRCENA, DWT_CTRL.CYCCNTENA; scale and cycles/us at 0x2000c630/+4
+600a277c	systick_handler_q	millis 0x2000c640 + 1, CYCCNT of the tick -> 0x2000c63c
+600a2668	micros_q	millis*1000 + cycles since the tick (capped 1000)
+600a2654	millis_q	returns 0x2000c640
+600a2648	cycles_q	returns DWT CYCCNT (0xE0001004)
+600a279c	cycles_per_us_q	returns *(0x2000c634) (528)
+6010c2c0	cpu_meter_start	meter +0 = CYCCNT (through app+4 -> +0x30 timer object vtable +0xc)
+6010c2ec	cpu_meter_stop	us = cycles / cycles-per-us; last, sum, count, min, max, window max
+6010c388	cpu_meter_read	(meter, int out[5], reset): min, max, window max, avg, last in % of 2902 us
+600d0048	cpu_overload_ind_update	(0x20020a68): every 300 ms, window max > 84 % colours a control
+600bb890	render_end_q	export end: clears 0x20026e44 and the render flags, restores the seq callbacks
+600a3e28	usbaudio_ring_begin_q	audio_out_cb bracket (+0x31c object vt +0): ring fill > 0x100 -> reset, USB IRQ 113 masked
+600a3e90	usbaudio_ring_end_q	bracket vt +8: + 0x80 frames, + 0xe00 bytes mod 0x2a00, USB IRQ 113 masked
+600a4738	usb_irq_disable_q	NVIC ICER3 bit 17 (IRQ 113, USB_OTG1), dsb, isb
+600a4724	usb_irq_enable_q	IRQ 113 priority 0, ISER3 bit 17

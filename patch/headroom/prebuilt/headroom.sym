@@ -1,0 +1,11 @@
+601d0260 t hr_ready
+601d0248 t hr_reset
+601d0000 T mt_hr_block
+601d0120 T mt_hr_line1
+601d01c0 T mt_hr_line2
+601d02d8 T mt_hr_next_block
+601d02e0 T mt_hr_next_line1
+601d02e4 T mt_hr_next_line2
+601d02dc T mt_hr_next_seq_advance
+601d00f8 T mt_hr_seq_advance
+601d02e8 T mt_version_fmt

@@ -249,7 +249,8 @@ python tools/run_tests.py path/to/TrackerPlus_1.2.0.ptf --tier release    # befo
 mix of two or more of the named mods, for a change to a hook they all share.
 
 - **quick:** `test_layout.py`, then every patch's emulator test on each patch alone and
-  on `patch/all`.
+  on `patch/all`, and `test_bundle_cost.py` (what the firmware adds to the audio block's
+  work over stock, sequencer side) on each of them.
 - **release:** quick, plus `test_web_patcher.py` (every web patcher selection
   byte-identical to `patch_ptf.py`'s), plus every patch's test on a *cover set* of web
   patcher mixes and on the bundles `test_layout.py` builds in other orders.
@@ -261,7 +262,8 @@ mix of two or more of the named mods, for a change to a hook they all share.
   - masterfx and synths run in `--quick` mode, which leaves out their sound, cost and
     long stress checks (these depend only on their own code), except on `patch/all`,
     where they run in full when their own files (`patch.json`, `prebuilt/`, `build/`)
-    changed since their last full pass.
+    changed since their last full pass. `test_bundle_cost.py` runs in full (the whole
+    block, with the real render) on `patch/all`.
 - **deep:** release with masterfx and synths in full everywhere; only when their audio
   code changes.
 
@@ -293,6 +295,7 @@ python tools/emu/test_legato.py build/TrackerPlus_lg2.ptf path/to/TrackerPlus_1.
 python tools/emu/test_copypattern.py build/TrackerPlus_cp4.ptf
 python tools/emu/test_slicethru.py build/TrackerPlus_bt5.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_resample.py build/TrackerPlus_rs4.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/emu/test_bundle_cost.py build/TrackerPlus_all.ptf path/to/TrackerPlus_1.2.0.ptf [--quick]
 ```
 
 `tools/run_tests.py` runs the tests of the mods the web patcher offers. resample isn't

@@ -27,7 +27,8 @@ blocks come at 120 BPM, so only the patch's own end-of-block work runs there.
 6. No stuck notes: stop after a legato note ends it as stock does; a kept note planted
    in the patch's RAM is ended by the end of the audio block and by the next note.
 7. Two tracks on one channel: as stock firmware.
-8. Cost: instructions per tick with G on every step of 16 MIDI tracks, against stock.
+8. Cost: the patch's own instructions per audio block at 800 BPM with G on every step of
+   16 MIDI tracks (what it adds to stock's work: test_bundle_cost.py).
 9. Synth slots (the real synth system, tools/emu/synth_rig.py): with G on a synth note the
    host gets the new note-on before the old note-off; the stock order when the notes are
    on different slots, a MIDI and a synth note, the same pitch, or after a gate; without
@@ -52,7 +53,7 @@ from unicorn.arm_const import UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_R3, UC_AR
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from patch_ptf import bl_target  # noqa: E402
-from layout import patch_ram  # noqa: E402
+from layout import patch_code, patch_ram  # noqa: E402
 import seq_timing as st  # noqa: E402
 import synth_rig as sr  # noqa: E402
 
@@ -68,7 +69,8 @@ FM_REQUEST_PATTERN_LOAD = 0x600BC938
 ENGINE_CLICK = 0x42E4
 STEP = 576
 BLOCK = 13                          # ticks per audio block at 120 BPM
-PER_TRACK_LIMIT = 150               # instructions the patch may add per track and step
+OWN_LIMIT = 3_800                   # own instructions per block: 1 % of a block at about 4 cycles each
+TICKS_PER_BLOCK = 90                # at 800 BPM (30,720 ticks a second, 344.5 blocks)
 G = (GLIDE, 0)
 failures: list[str] = []
 
@@ -372,28 +374,26 @@ def two_track_checks(ptf: Path, stock: Path) -> None:
           "the same messages as stock; on track 9 the legato note starts before its old note ends")
 
 
-def cost_checks(ptf: Path, stock: Path) -> None:
-    print("Cost (instructions per tick over three steps, 16 MIDI tracks with G on every note)")
-    counts = {}
-    for label, path, patched in (("stock", stock, False), ("patched", ptf, True)):
-        rig = Rig(path, patched=patched)
-        for t in range(16):
-            for s in range(3):
-                rig.steps([(t, s, 60 + 2 * s, 48 + t, G)])
-        rig.start()
-        n = [0]
-        h = rig.m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: n.__setitem__(0, n[0] + 1))
-        worst = 0
-        for _ in range(STEP * 3):
-            before = n[0]
-            rig.m.ticks += 1
-            rig.m.call(st.SEQ_TICK, SEQ, max_insns=2_000_000)
-            worst = max(worst, n[0] - before)
-        rig.m.uc.hook_del(h)
-        counts[label] = (n[0], worst)
-    extra = counts["patched"][1] - counts["stock"][1]
-    text = "; ".join(f"{k}: worst {w}, total {t}" for k, (t, w) in counts.items())
-    check(extra <= 16 * PER_TRACK_LIMIT, f"at most {PER_TRACK_LIMIT} more per track at the worst tick ({extra} in all: {text})")
+def cost_checks(ptf: Path) -> None:
+    print("Cost (the patch's own instructions per block at 800 BPM, 16 MIDI tracks with G on every note)")
+    lo, hi = patch_code(ptf, "legato")
+    rig = Rig(ptf, patched=True)
+    for t in range(16):
+        for s in range(3):
+            rig.steps([(t, s, 60 + 2 * s, 48 + t, G)])
+    rig.start()
+    n = [0]
+    h = rig.m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: n.__setitem__(0, n[0] + 1), begin=lo, end=hi - 1)
+    blocks = []
+    for tick in range(STEP * 3):
+        if tick % TICKS_PER_BLOCK == 0:
+            blocks.append(n[0])
+        rig.m.ticks += 1
+        rig.m.call(st.SEQ_TICK, SEQ, max_insns=2_000_000)
+    blocks.append(n[0])
+    rig.m.uc.hook_del(h)
+    worst = max(b - a for a, b in zip(blocks, blocks[1:]))
+    check(0 < worst <= OWN_LIMIT, f"at most {OWN_LIMIT} of its own per block ({worst} at worst, {n[0]} over three steps)")
 
 
 # ---- synth slots -----------------------------------------------------------------------
@@ -535,7 +535,7 @@ def main() -> int:
     fx_checks(PTF)
     stuck_checks(PTF)
     two_track_checks(PTF, STOCK)
-    cost_checks(PTF, STOCK)
+    cost_checks(PTF)
     synth_checks(PTF, STOCK)
     print(f"{len(failures)} failure(s)")
     return 1 if failures else 0

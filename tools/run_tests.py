@@ -6,13 +6,16 @@
 
 Tiers (times with an empty cache on an 8-core PC; with the cache, only what changed runs):
   quick    (about 2 min) tools/test_layout.py, plus every patch's emulator test on each patch alone
-           and on patch/all (masterfx and synths in their --quick mode). For a change
-           to one patch, while working on it.
+           and on patch/all (masterfx and synths in their --quick mode), and on the
+           diagnostic builds (DIAGNOSTICS: headroom alone and listed last in patch/all
+           and in patch/all + polymeter); test_bundle_cost.py's sequencer side on each of
+           them. For a change to one patch, while working on it.
   release  (about 40 min) quick, plus tools/test_web_patcher.py (every web patcher selection
            byte-identical to patch_ptf.py's, and its layout checks), plus every patch's
            emulator test on a cover set of web patcher mixes and on the bundles
-           test_layout.py builds in other orders; masterfx and synths in full mode on
-           patch/all. Before a commit that changes what users get. (synths' tests are
+           test_layout.py builds in other orders; masterfx, synths and test_bundle_cost.py
+           (its whole block) in full mode on patch/all. Before a commit that changes what
+           users get. (synths' tests are
            test_synths.py and test_phase.py, PHASE's: EXTRA_TESTS.)
   deep     (hours) release with masterfx and synths in full mode on every mix. Overnight, and
            only when their audio code changes.
@@ -30,7 +33,8 @@ Each mix runs the emulator test of every patch it contains.
 
 The cache (build/test_cache.json, local only): a job's key is the SHA-256 of the
 firmware file it tests, the test and its mode, and a digest of every file under
-tools/emu/ and of the stock firmware. A key that passed before is not run again, so a
+tools/emu/ (and tools/make_headroom_project.py, whose project test_bundle_cost.py plays)
+and of the stock firmware. A key that passed before is not run again, so a
 rerun after a change only runs what the change touched. --no-cache runs everything.
 The cache also keeps each test's measured duration, for the time estimate.
 
@@ -79,15 +83,21 @@ PY = sys.executable
 CACHE = ROOT / "build" / "test_cache.json"
 EDGE = 64                                  # bytes from a region's start or end that count as "at the edge"
 FLASH_SECTOR, FLASH_PAGE = 0x1000, 0x100
-STOCK_ARG = {"masterfx", "swing", "condtrig", "synths", "phase", "legato", "slicethru", "resample"}   # tests that take the stock .ptf too
-QUICK_MODE = {"masterfx", "synths", "phase"}   # tests with a --quick mode
+STOCK_ARG = {"masterfx", "swing", "condtrig", "synths", "phase", "legato", "slicethru", "resample", "polymeter",
+             "bundle_cost"}                # tests that take the stock .ptf too
+QUICK_MODE = {"masterfx", "synths", "phase", "bundle_cost"}   # tests with a --quick mode
 EXTRA_TESTS = {"synths": ["phase"]}        # a patch's tests besides test_<patch>.py (PHASE: test_phase.py)
+DIAGNOSTICS = [                            # specs outside the web patcher, tested in every tier
+    ("headroom", "patch/headroom/patch.json"),
+    ("all-headroom", "patch/headroom/all_headroom.json"),
+    ("all-polymeter-headroom", "patch/headroom/all_polymeter_headroom.json"),
+]
 DEFAULT_SECONDS = 60.0                     # estimate for a test not timed yet, unless below
 MEASURED_SECONDS = {                       # alone, on an 8-core PC (the cache keeps its own, measured under load)
     "layout": 45, "web harness": 800, "colorsong": 1, "copypattern": 3, "humanize": 6, "visualizer": 8,
-    "swing": 16, "interpolate": 25, "condtrig": 36, "legato": 130, "slicethru": 12, "resample": 245, "masterfx (quick)": 15,
+    "swing": 16, "headroom": 7, "interpolate": 25, "condtrig": 36, "legato": 130, "slicethru": 12, "resample": 245, "masterfx (quick)": 15,
     "masterfx (full)": 385, "synths (quick)": 127, "synths (full)": 1400, "phase (quick)": 150,
-    "phase (full)": 660,
+    "phase (full)": 660, "bundle_cost (quick)": 25, "bundle_cost (full)": 95,
 }
 
 
@@ -207,7 +217,7 @@ class Runner:
         self.cache = load_cache()
         self.cache.setdefault("passed", {})
         self.cache.setdefault("seconds", {})
-        self.emu_digest = digest_files([p for p in EMU.rglob("*.py")])
+        self.emu_digest = digest_files([*EMU.rglob("*.py"), TOOLS / "make_headroom_project.py"])
         self.stock_sha = sha256_file(stock)
         self.lock = threading.Lock()
         self.results: list[tuple[str, str, bool, str]] = []   # (what, test, ok, note)
@@ -366,6 +376,7 @@ def main() -> int:
             contained = [p["name"] for p in json.loads(ptf.with_suffix(".map.json").read_text())["patches"]]
             tests = [t for p in contained for t in [p] + EXTRA_TESTS.get(p, [])]
             jobs += [r.emu_job(ptf, t, full) for t in tests if (EMU / f"test_{t}.py").exists()]
+            jobs.append(r.emu_job(ptf, "bundle_cost", full))     # the whole firmware against stock
         return jobs
 
     # 2. each patch alone and patch/all, built here, so their emulator tests (the full
@@ -374,6 +385,7 @@ def main() -> int:
     builds.mkdir(exist_ok=True)
     first = [(build(stock, spec, builds / f"{name}.ptf"), tier == "deep") for name, spec in patches]
     first.append((build(stock, ROOT / "patch" / "all" / "patch.json", builds / "all.ptf"), tier != "quick"))
+    first += [(build(stock, ROOT / spec, builds / f"{name}.ptf"), False) for name, spec in DIAGNOSTICS]
     jobs = pre + emu_jobs(first)
     if "--dry-run" in opts:
         for j in jobs:

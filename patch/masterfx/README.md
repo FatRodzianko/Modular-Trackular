@@ -33,6 +33,15 @@ its return is silent for a moment while the switch clears its memory, so a tail 
 still ringing stops: about 23 ms for the reverb, and 0.1 s (to Tape, BBD or "Gated") or
 0.14 s (to Stock) for the delay. The dry sound isn't affected.
 
+The effects other than Stock take more of the processor than the stock ones. Measured
+on a Tracker+, in % of each audio block: Shimmer about 7 more than the stock reverb,
+"Gated" about 10 more than the stock delay (both together about 14 to 18). From the
+emulator, scaled the same way: Freeverb about 6, Plate 4, Spring 2, Tape 4, BBD 5.
+That only matters in a project that already loads the processor heavily, mostly through
+synth voices: each allocated voice costs about 5 % even when silent. If Config's CPU
+reading gets near stock firmware's 84 % warning, or you hear clicks, choose a lighter
+effect or Stock, or lower the synths' Polyphony.
+
 Projects are otherwise unchanged: the knob values are the stock ones, and stock
 firmware ignores `masterfx.bin`, so a project opens in stock firmware with the stock
 effects at the same settings.

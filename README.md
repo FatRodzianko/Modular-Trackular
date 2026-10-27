@@ -85,6 +85,10 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
   future patches. See [patch/ramdiag/README.md](patch/ramdiag/README.md).
+- **headroom**: a diagnostic that measures on the device how much of each audio block's
+  time the firmware uses, and the sequencer's share, on Config's developer lines. On its
+  own, or listed last after patch/all's patches (with or without polymeter). See
+  [patch/headroom/README.md](patch/headroom/README.md).
 - **versiontest**: the smallest possible mod (version text `1.2.0-MT0`), a harmless
   first check that your unit installs patched firmware. See
   [patch/versiontest/README.md](patch/versiontest/README.md).
@@ -145,6 +149,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/resample/` | Live resampling: the pattern plays during a Sample Recorder recording (Play, or Shift+Rec); recordings after the loaded samples |
 | `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
+| `patch/headroom/` | Timing diagnostic: worst audio block and sequencer share in % of the measured block length, late blocks; its bundle specs (`all_headroom.json`, `all_polymeter_headroom.json`) |
 | `patch/versiontest/` | Version-text test patch |
 | `patch/itcmtest/` | No-op test of ITCM hooks (stubs in the ITCM tail, loaded by the startup copy table) |
 | `tools/ptf.py` | Read / convert / re-encode `.ptf` (Intel HEX), with a byte-exact round-trip check |
@@ -165,6 +170,9 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/song_grid.py`, `render_project.py` | Render a project's Song grid with the firmware's own drawing code |
 | `tools/emu/test_colorsong.py`, `test_rescan.py` | colorsong rule and scenario tests on the patched firmware |
 | `tools/emu/test_ramdiag.py` | ramdiag menu, fill, scan and report tests on the patched firmware |
+| `tools/emu/test_headroom.py` | headroom order, transparency, measurement against instruction counts (fake cycle counter), statistics, cost and Config line tests |
+| `tools/emu/test_bundle_cost.py` | What a bundle adds to the audio block's work over stock, in the timing runs' worst-case project with every mod switched on: sequencer side (every bundle) and whole block with the real render (patch/all), against limits from the hardware runs |
+| `tools/make_headroom_project.py` | Write the timing runs' worst-case project into a copy of a project made on the device, through the firmware's own writers in the emulator |
 | `tools/emu/test_humanize.py` | humanize button, edit-rule, Config menu and settings-file tests on the patched firmware |
 | `tools/emu/test_copypattern.py` | copypattern button, the search for an empty pattern, the copy (stopped and playing in song mode) against the stock writer and loader, failure cases and file rules |
 | `tools/emu/reverb_rig.py` | The master reverb and delay objects driven block by block through their update(), for the masterfx tools |
