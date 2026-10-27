@@ -1,5 +1,8 @@
 # polymeter: a length per track
 
+> **In development: not released.** It hasn't been tested on hardware yet, and it isn't
+> in patch/all or the web patcher. How it works and how it saves lengths may still change.
+
 A patch for Polyend Tracker+ firmware 1.2.0 that lets each track of a pattern have its
 own length. A track shorter than the pattern plays its own steps over and over, and every
 track starts again together when the pattern ends: in a 16-step pattern a track of
@@ -10,7 +13,7 @@ The idea comes from a custom firmware for the Tracker Mini shown on r/PolyendTra
 This is a re-implementation from its description; nothing of it was seen or used.
 [docs/POLYMETER_PLAN.md](../../docs/POLYMETER_PLAN.md) has the investigation and the plan.
 
-**Status: in development.** This build plays the track lengths, sets them with the
+**What this build does so far.** It plays the track lengths, sets them with the
 Trk Len button, dims the steps past them in the grid, records live notes onto a short
 track's own steps and saves the lengths with the project. Emulator-tested, alone and in
 bundles with patch/all's patches in both orders. Not tested on hardware.
