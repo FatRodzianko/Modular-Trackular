@@ -4,7 +4,7 @@ A patch for Polyend Tracker+ firmware 1.2.0. While a pattern plays, the 48 pads 
 an animation driven by the music: dim smoke drifting slowly across the pads, with soft
 ripples swelling and spreading out from the notes that play. It uses brightness only, as the pads
 are single colour. Installed on its own, Config shows the firmware version as
-`1.2.0-vz5`.
+`1.2.0-vz6`.
 
 **Status:** tested on hardware.
 
@@ -50,14 +50,15 @@ follows only the music and the sequencer's own clock. So a fresh play of a patte
 looks the same each time, to within a level on a few pads, as a step can land one audio
 block (2 ms) apart. The smoke and the drift keep their history, so the second pass of a
 loop looks different from the first, and so does a pattern played after other ones in
-song mode.
+song mode. That history builds only while the visualizer shows: hidden, only its clock
+runs.
 
 ## How it works
 
 | Hook | Where | What |
 |---|---|---|
-| `mt_vz_seq_advance` | `bl seq_advance` in `app_audio_block` (`0x600aa7f8`, chained) | Once per audio block: at a take's start, resets the animation. While playing, advances its clock by the block's length and eases the smoke |
-| `mt_vz_advance_step` | the word at `0x601acf00` (chained): the ITCM image's jump to `seq_advance_step`, copied to ITCM `0x1f81c` at boot | When a track moves to a step: reads the step from the playing pattern (muted tracks skipped) and turns its note into a ripple, and its note, instrument and FX into a nudge of the smoke |
+| `mt_vz_seq_advance` | `bl seq_advance` in `app_audio_block` (`0x600aa7f8`, chained) | Once per audio block: at a take's start, resets the animation. While playing, advances its clock by the block's length and, while it shows, eases the smoke |
+| `mt_vz_advance_step` | the word at `0x601acf00` (chained): the ITCM image's jump to `seq_advance_step`, copied to ITCM `0x1f81c` at boot | When a track moves to a step, while the visualizer shows: reads the step from the playing pattern (muted tracks skipped) and turns its note into a ripple, and its note, instrument and FX into a nudge of the smoke |
 | `mt_vz_set_pad` | the pad LED object's one vtable entry, setPad (`0x60038298`, chained) | While the visualizer shows, drops the firmware's own pad writes. The firmware's pad manager still keeps its levels, so the stock pads come back exactly as they should |
 | `mt_vz_pattern_update` | Pattern screen vtable slot `0x600403dc` (chained) | Shows or hides it (it hides while the screen's pad mode at +`0x1354`, set while Pattern or another bottom-row button is held, isn't −1), and draws a frame every 30 ms while it shows |
 | `mt_vz_flush` | the pad LED driver's one vtable entry, its flush (`0x600373b8`, chained) | While the visualizer shows, sends only the brightness bytes that changed (see below) |
@@ -88,8 +89,9 @@ song mode.
 - **Leaving the screen:** if the Pattern screen stops updating for 200 ms, the next
   firmware pad write gives the pads back first.
 - **Memory:** 560 bytes of RAM, on-chip (the animation, 12 ripples, the button state,
-  which pad bytes changed); 3,620 bytes of code.
-- **CPU:** a few dozen instructions per audio block and per step. Each 20 ms frame
+  which pad bytes changed); 3,644 bytes of code.
+- **CPU:** a few dozen instructions per audio block and per step while it shows; hidden
+  or switched off, only the clock advance (a handful per block). Each 20 ms frame
   draws 48 pads from three sine waves and up to 12 ripples, which is well under 0.1 ms.
 
 ## Build
@@ -98,7 +100,7 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/visualizer/patch.json build/TrackerPlus_vz5.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/visualizer/patch.json build/TrackerPlus_vz6.ptf
 ```
 
 To combine it with other patches, list `../visualizer/patch.json` in a bundle (see
@@ -117,7 +119,7 @@ patch/visualizer/build.sh
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_visualizer.py build/TrackerPlus_vz5.ptf
+python tools/emu/test_visualizer.py build/TrackerPlus_vz6.ptf
 ```
 
 It runs the sequencer as the audio engine does (the patched `seq_advance` call, 2 ms at
@@ -144,7 +146,7 @@ the pads show back from the real LED driver's PWM frame. It checks:
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-vz5 Build 1504`.
+Config → Firmware → the patched file. Config should show `1.2.0-vz6 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. The visualizer keeps nothing on
 the card.

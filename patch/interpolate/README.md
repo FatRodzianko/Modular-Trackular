@@ -5,8 +5,8 @@ at the start of its step: on a MIDI track it sends a MIDI CC, on a synth track (
 it sets that Macro. So the value changes in jumps. With this patch it ramps smoothly
 to the next step on that track with the same letter. CC A 0 on step 1 and CC A 127 on
 step 17 becomes a 16-step sweep; the steps in between need no FX.
-Installed on its own, Config shows the firmware version as `1.2.0-ip6`. Together with
-all the other mods ([`patch/all`](../all/patch.json)) it shows `1.2.0-MTY`.
+Installed on its own, Config shows the firmware version as `1.2.0-ip7`. Together with
+all the other mods ([`patch/all`](../all/patch.json)) it shows `1.2.0-MTZ`.
 
 **Status:** tested on hardware (in a firmware with colorsong and humanize), MIDI and synths.
 
@@ -87,10 +87,10 @@ the same menu and update sites.
 The ramp pass runs once per audio block. Per track it keeps, for each CC letter, the
 start step, the target step, both values, the CC number and channel, and the last value
 sent. When a track moves to the next step, its ramps move along with it. The full
-search (backwards and forwards through the pattern) runs again for at most 2 tracks per
-block. With 16 MIDI tracks of 128 steps the patch runs under 24,000 instructions in its
-worst block and about 7,000 on average (emulator counts; the stock sequencer's busiest
-step start is about 9,100). CCs go out through the stock `midi_send_cc` (ITCM `0xacc`),
+look-up (one pass through the track's steps, two table reads per step) runs again for at
+most 2 tracks per block. With 16 MIDI tracks of 128 steps the patch runs under 9,400
+instructions in its worst block and about 3,400 on average (emulator counts; the stock
+sequencer's busiest step start is about 9,100). CCs go out through the stock `midi_send_cc` (ITCM `0xacc`),
 so the MIDI out setting applies and nothing is sent while rendering. Mutes are checked
 with the stock code (`seq_track_muted_q`, ITCM `0x3994`). On synths the patch calls the stock
 `synth_apply_fx_q` (ITCM `0x5070`) with the ramp value and the step's FX column, as the
@@ -161,8 +161,8 @@ runs on `TrackerPlus_MTE.ptf`.
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-ip6 Build 1504` (or
-`1.2.0-MTY Build 1504` for all mods).
+Config → Firmware → the patched file. Config should show `1.2.0-ip7 Build 1504` (or
+`1.2.0-MTZ Build 1504` for all mods).
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Patterns are unchanged (the
 patch writes nothing into them), so they play as before, with stepped CCs. Stock

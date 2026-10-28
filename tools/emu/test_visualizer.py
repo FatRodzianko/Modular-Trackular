@@ -208,6 +208,23 @@ LAST_FRAME = 4 + 4 + 12 + 12 + 4 + 4 + 4 + 4 + 12 * 36 + 4
 SHOWING = LAST_FRAME + 4 + 4 + 1
 
 
+def hidden_checks(r: Rig) -> None:
+    """Hidden (not switched on), the audio side keeps the take's clock and nothing else:
+    no ripples, no smoke nudges (a pattern read per track step)."""
+    print("hidden: no animation work")
+    m = r.m
+    r.start()
+    r.run(1.0)
+    clock = struct.unpack("<f", bytes(m.uc.mem_read(VZ + 4, 4)))[0]
+    targets = struct.unpack("<4f", bytes(m.uc.mem_read(VZ + 20, 16)))   # target[3], wind
+    h = m.r32(VZ + 36)
+    check(not r.showing() and 0.9 < clock < 1.1, f"1 s hidden: the take clock runs ({clock:.2f} s)")
+    check(h == 0x9E3779B9 and targets == (0.0,) * 4,
+          "... and the history, the smoke and the wind stay at the take's start")
+    r.stop()
+    r.run(0.1)
+
+
 def enter(r: Rig) -> None:
     for c in range(4):
         r.press(c)
@@ -395,6 +412,7 @@ def main() -> int:
     ptf = Path(sys.argv[1])
     VZ = patch_ram(ptf, "visualizer")
     r = Rig(ptf)
+    hidden_checks(r)
     button_checks(r)
     hide_checks(r)
     r.start()

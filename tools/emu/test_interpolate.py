@@ -582,7 +582,7 @@ def cost_checks(ptf: Path) -> None:
             p.run(1)
             worst = max(worst, count[0])
             total += count[0]
-        check(worst < 40_000, f"{label}: worst block {worst} instructions, average {total // blocks}")
+        check(worst < 12_000, f"{label}: worst block {worst} instructions, average {total // blocks}")
 
 
 def menu_checks(ptf: Path) -> None:

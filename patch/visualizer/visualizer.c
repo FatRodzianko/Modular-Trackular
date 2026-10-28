@@ -17,6 +17,8 @@
  *    of the smoke. So the animation follows the music and the audio clock only: a
  *    fresh play of a pattern looks the same every time, and a later pass of a loop
  *    (or the next pattern in song mode) differs, as the smoke keeps the history.
+ *    While the visualizer is hidden only the take's clock advances: the ripples and
+ *    the smoke (a pattern read per track step) cost the audio interrupt nothing then.
  *  - The pads: the pad LED object's one virtual method, setPad (0x600a1bf1, the word
  *    at 0x60038298, chained), is replaced by mt_vz_set_pad. While the visualizer shows,
  *    the firmware's own pad writes are dropped (its pad manager at 0x200171d0 still
@@ -52,7 +54,7 @@
 #include <stdint.h>
 
 #ifndef VIS_VERSION
-#define VIS_VERSION "vz5"
+#define VIS_VERSION "vz6"
 #endif
 
 /* ---- firmware addresses (1.2.0) -------------------------------------------------- */
@@ -352,6 +354,8 @@ void mt_vz_seq_advance(void *seq, float seconds)
     if (!playing || !(seconds > 0.0f && seconds < 0.1f))
         return;
     VZ->clock += seconds;
+    if (!*(volatile uint8_t *)&VZ->showing)  /* hidden: the clock only, no animation work */
+        return;
     float k = SMOKE_EASE * seconds;
     for (int i = 0; i < 3; i++)
         VZ->phase[i] += (VZ->target[i] - VZ->phase[i]) * k;
@@ -363,7 +367,8 @@ uint32_t mt_vz_advance_step(void *seq, uint32_t track)
 {
     uint32_t r = ((advance_step_fn)mt_vz_next_advance_step)(seq, track);
     const uint8_t *s = (const uint8_t *)seq;
-    if (VZ->magic == VZ_MAGIC && track < TRACKS && s[SEQ_PLAYING] && !s[SEQ_PERFORMANCE])
+    if (VZ->magic == VZ_MAGIC && *(volatile uint8_t *)&VZ->showing && track < TRACKS
+        && s[SEQ_PLAYING] && !s[SEQ_PERFORMANCE])
         vz_step(s, track);
     return r;
 }

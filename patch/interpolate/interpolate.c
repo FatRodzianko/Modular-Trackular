@@ -13,8 +13,8 @@
  * keeps, for each CC letter, the step the ramp starts from (k, the last step at or
  * before the current one with that letter) and the step it goes to (j, the next one
  * after it). When the track moves on, its ramps move on with it; the full look-up
- * (both ways through the pattern) runs again for at most 2 tracks per block, so a
- * pattern of 16 tracks stays cheap. A ramp needs:
+ * (one pass through the track's steps) runs again for at most 2 tracks per block, so
+ * a pattern of 16 tracks stays cheap. A ramp needs:
  *  - both steps on the same MIDI channel instrument (48..63) or the same synth
  *    (64..66); sample instruments get no ramps;
  *  - on a MIDI channel, a CC number for that letter (not program change or pressure);
@@ -69,7 +69,7 @@
 #include <stdint.h>
 
 #ifndef INTERPOLATE_VERSION
-#define INTERPOLATE_VERSION "ip6"
+#define INTERPOLATE_VERSION "ip7"
 #endif
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */
@@ -155,10 +155,11 @@ CHAIN_WORD(mt_ip_next_pattern_update);      /* Pattern screen update 0x600e1f99 
 CHAIN_WORD(mt_ip_next_config_update);       /* Config screen update 0x600c6475 */
 CHAIN_WORD(mt_ip_next_save_name);           /* strncpy 0x601673d7 (Save As: the new name) */
 
-/* CC FX types for the letters a..f, and the other way round: FX type -> letter + 1 */
+/* CC FX types for the letters a..f, and the other way round: FX type -> its letter as a
+ * bit (0..5), for every byte value, as the look-up reads every step of a track and a
+ * step then costs two table reads */
 static const uint8_t cc_type[LETTERS] = {8, 9, 10, 11, 12, 37};
-#define FX_TYPES            38u
-static const uint8_t cc_letter[FX_TYPES] = {[8] = 1, [9] = 2, [10] = 3, [11] = 4, [12] = 5, [37] = 6};
+static const uint8_t cc_bit[256] = {[8] = 1, [9] = 2, [10] = 4, [11] = 8, [12] = 16, [37] = 32};
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
@@ -277,14 +278,9 @@ static int cc_value(const uint8_t *step, uint32_t l)
 }
 
 /* The CC letters on this step, as bits 0..5. */
-static uint32_t cc_letters(const uint8_t *step)
+static inline __attribute__((always_inline)) uint32_t cc_letters(const uint8_t *step)
 {
-    uint32_t mask = 0;
-    if (step[2] < FX_TYPES && cc_letter[step[2]])
-        mask |= 1u << (cc_letter[step[2]] - 1);
-    if (step[4] < FX_TYPES && cc_letter[step[4]])
-        mask |= 1u << (cc_letter[step[4]] - 1);
-    return mask;
+    return cc_bit[step[2]] | cc_bit[step[4]];
 }
 
 /* Look up track t's ramps for its current step `cur` (0..last). */
@@ -293,28 +289,36 @@ static void find_ramps(const uint8_t *pattern, uint32_t t, uint32_t cur, uint32_
     struct track_state *ts = &IP->track[t];
     uint32_t n = last + 1;
     int16_t back[LETTERS], fwd[LETTERS];    /* distance to k (0..n-1) and to j (1..n), -1 none */
-    uint32_t want = (1u << LETTERS) - 1;
     for (uint32_t l = 0; l < LETTERS; l++)
         back[l] = fwd[l] = -1;
-    for (uint32_t d = 0; d < n && want; d++) {
-        if (d > cur && !wrap)
-            break;
-        uint32_t s = d <= cur ? cur - d : cur + n - d;
-        for (uint32_t m = cc_letters(step_at(pattern, t, s)) & want; m; m &= m - 1) {
-            uint32_t l = (uint32_t)__builtin_ctz(m);
-            back[l] = (int16_t)d;
-            want &= ~(1u << l);
+    /* One pass over the steps, each read once: a track rarely has all six letters, so
+     * searching each way until every letter turns up would read the whole pattern twice.
+     * Wrapping, the pass runs from the step after `cur` round to `cur` itself (distance
+     * d = 1..n): a letter's first step is j (fwd = d), its last is k (back = n - d).
+     * Not wrapping, it runs from the first step to the last: k is the last step at or
+     * before `cur`, j the first after it. */
+    if (wrap) {
+        const uint8_t *p = step_at(pattern, t, cur);
+        const uint8_t *first = step_at(pattern, t, 0), *end = step_at(pattern, t, last);
+        for (uint32_t d = 1; d <= n; d++) {
+            p = p == end ? first : p + 6;
+            for (uint32_t m = cc_letters(p); m; m &= m - 1) {
+                uint32_t l = (uint32_t)__builtin_ctz(m);
+                if (fwd[l] < 0)
+                    fwd[l] = (int16_t)d;
+                back[l] = (int16_t)(n - d);
+            }
         }
-    }
-    want = (1u << LETTERS) - 1;
-    for (uint32_t d = 1; d <= n && want; d++) {
-        if (cur + d > last && !wrap)
-            break;
-        uint32_t s = cur + d <= last ? cur + d : cur + d - n;
-        for (uint32_t m = cc_letters(step_at(pattern, t, s)) & want; m; m &= m - 1) {
-            uint32_t l = (uint32_t)__builtin_ctz(m);
-            fwd[l] = (int16_t)d;
-            want &= ~(1u << l);
+    } else {
+        const uint8_t *p = step_at(pattern, t, 0);
+        for (uint32_t s = 0; s <= last; s++, p += 6) {
+            for (uint32_t m = cc_letters(p); m; m &= m - 1) {
+                uint32_t l = (uint32_t)__builtin_ctz(m);
+                if (s <= cur)
+                    back[l] = (int16_t)(cur - s);
+                else if (fwd[l] < 0)
+                    fwd[l] = (int16_t)(s - cur);
+            }
         }
     }
     for (uint32_t l = 0; l < LETTERS; l++) {
@@ -521,8 +525,11 @@ static void ramp_block(uint8_t *seq)
 #endif
     uint32_t total = PAT_TRACKS * LETTERS;
     uint32_t start = IP->next_ramp < total ? IP->next_ramp : 0;
-    for (uint32_t i = 0; i < total && (budget || synth_budget); i++) {
-        uint32_t n = (start + i) % total, t = n / LETTERS, l = n % LETTERS;
+    /* (track, letter) counted up rather than divided out of the index: this loop runs
+     * over all 96 ramps in every block */
+    for (uint32_t i = 0, t = start / LETTERS, l = start % LETTERS; i < total && (budget || synth_budget);
+         i++, l = l + 1 < LETTERS ? l + 1 : 0, t = l ? t : (t + 1) % PAT_TRACKS) {
+        uint32_t n = t * LETTERS + l;
         struct ramp *r = &IP->track[t].ramp[l];
         if (!r->active || !(r->synth ? synth_budget : budget))
             continue;
