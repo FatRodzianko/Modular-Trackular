@@ -279,19 +279,39 @@ static float fv_process(uint8_t *obj, int16_t *left, int16_t *right, int muted)
     float in_gain = FIXED_GAIN * LINE_GAIN * (gain / 0.1f);
     float wet_gain = SCALE_WET * OUTPUT_TRIM / LINE_GAIN;
 
-    /* the mono send through the predelay (a ring of PRE_RING samples) */
+    /* the mono send through the predelay (a ring of PRE_RING samples), in integers
+     * ((l + r) / 2 cuts the half toward zero, as the old float write's sat16 did); the
+     * walks split at the ring's buffer seam and its end instead of branching per sample */
     float mono[BLOCK];
-    uint32_t wr = FV->pre_pos;
-    for (uint32_t n = 0; n < BLOCK; n++) {
-        *pre_at(wr) = sat16(((float)left[n] + (float)right[n]) * 0.5f);
+    {
+        uint32_t wr = FV->pre_pos;
         uint32_t rd = wr + PRE_RING - (uint32_t)predelay;
         if (rd >= PRE_RING)
             rd -= PRE_RING;
-        mono[n] = (float)*pre_at(rd) * 2.0f * in_gain;
-        if (++wr == PRE_RING)
-            wr = 0;
+        float g2 = 2.0f * in_gain;
+        for (uint32_t n = 0; n < BLOCK;) {
+            uint32_t run = BLOCK - n;
+            uint32_t wb = (wr < FV->pre_split ? FV->pre_split : PRE_RING) - wr;
+            uint32_t rb = (rd < FV->pre_split ? FV->pre_split : PRE_RING) - rd;
+            if (wb < run)
+                run = wb;
+            if (rb < run)
+                run = rb;
+            int16_t *pw = pre_at(wr), *pr = pre_at(rd);
+            for (uint32_t i = 0; i < run; i++) {
+                *pw++ = (int16_t)(((int32_t)left[n + i] + (int32_t)right[n + i]) / 2);
+                mono[n + i] = (float)*pr++ * g2;
+            }
+            wr += run;
+            if (wr == PRE_RING)
+                wr = 0;
+            rd += run;
+            if (rd == PRE_RING)
+                rd = 0;
+            n += run;
+        }
+        FV->pre_pos = (uint16_t)wr;
     }
-    FV->pre_pos = (uint16_t)wr;
 
     float level = 0.0f;
     for (uint32_t ch = 0; ch < 2; ch++) {

@@ -82,9 +82,10 @@ B = tf.BLOCK
 REVERB = tf.REVERB
 MX_MAGIC = 0x3558464D
 REVERB_STOCK, REVERB_FREEVERB, REVERB_PLATE, REVERB_SPRING, REVERB_SHIMMER = 0, 1, 2, 3, 4
-REVERB_NAMES = ["Stock", "Freeverb", "Plate", "Spring", "Shimmer"]
-DELAY_STOCK, DELAY_TAPE, DELAY_BBD, DELAY_GATED = 0, 1, 2, 3
-DELAY_NAMES = ["Stock", "Tape", "BBD", '"Gated"']
+REVERB_GATED, REVERB_REVERSE = 5, 6     # the gated burst moved here from the delays (mf7)
+REVERB_NAMES = ["Stock", "Freeverb", "Plate", "Spring", "Shimmer", '"Gated"', "Reverse"]
+DELAY_STOCK, DELAY_TAPE, DELAY_BBD = 0, 1, 2
+DELAY_NAMES = ["Stock", "Tape", "BBD"]
 FILTERS = (0x60, 0x64, 0x68)        # the stock reverb's filter states
 CFG_MENU_ITEM, CFG_MENU_FOLDER = 0x601183E8, 0x60118394
 MENU_CTOR, ATEXIT = 0x60118ACC, 0x600A3594
@@ -332,6 +333,11 @@ def reverb_checks(ptf: Path, stock: Path, which: int, name: str, pre_tol: int) -
     check(abs(tf.db(tail_f, tail_s)) <= 6.0, f"tail loudness, {name} vs stock: {tf.db(tail_f, tail_s):+.1f} dB")
 
 
+def gate_size(ms: float) -> float:
+    """The Size knob for a gate of `ms` (the engine: length = 441 + size * 15815 samples)."""
+    return (ms / 1000.0 * tf.RATE - 441.0) / 15815.0
+
+
 def reverb_cycle(ptf: Path) -> None:
     print("reverb: switching between all of them")
     r = Rig(ptf)
@@ -341,8 +347,8 @@ def reverb_cycle(ptf: Path) -> None:
     r.run(*sig.blocks(20))
     seen = {}
     burst = tf.noise_burst(B * 30, B * 10, 12)
-    for target in (REVERB_PLATE, REVERB_SPRING, REVERB_SHIMMER, REVERB_FREEVERB, REVERB_SPRING, REVERB_SHIMMER,
-                   REVERB_PLATE, REVERB_STOCK):
+    for target in (REVERB_PLATE, REVERB_SPRING, REVERB_SHIMMER, REVERB_GATED, REVERB_FREEVERB, REVERB_REVERSE,
+                   REVERB_SPRING, REVERB_SHIMMER, REVERB_PLATE, REVERB_STOCK):
         r.run(*sig.blocks(10))
         r.choose(target)
         _, _, sent = r.run_counted(*sig.blocks(8))
@@ -450,14 +456,14 @@ def write_wavs(ptf: Path, stock: Path, wav_dir: Path) -> None:
                 drums[start + i] += int(16000 * math.exp(-i / 1500) * math.sin(2 * math.pi * (55 + 90 * math.exp(-i / 300)) * i / tf.RATE))
     drums = [max(-32767, min(32767, v)) for v in drums]
     tf.write_wav(wav_dir / "gated_send_dry.wav", drums, drums)
-    for name, kw in (("300ms", {"time_ms": 300.0, "feedback": 0.0}),
-                     ("300ms_release", {"time_ms": 300.0, "feedback": 0.6}),
-                     ("150ms", {"time_ms": 150.0, "feedback": 0.0}),
-                     ("reverse", {"time_ms": 400.0, "feedback": 0.0, "pingpong": 1})):
-        rr = DRig(ptf, delay=DELAY_GATED)
-        rr.settings(**kw)
-        rr.run([0] * (B * 20))
-        out_l, out_r = rr.run(drums)
+    for name, which, kw in (("300ms", REVERB_GATED, {"size": gate_size(300.0), "diffusion": 0.0}),
+                            ("300ms_release", REVERB_GATED, {"size": gate_size(300.0), "diffusion": 0.51}),
+                            ("150ms", REVERB_GATED, {"size": gate_size(150.0), "diffusion": 0.0}),
+                            ("reverse", REVERB_REVERSE, {"size": gate_size(360.0), "diffusion": 0.0})):
+        rr = tf.Rig(ptf, reverb=which)
+        rr.settings(amount=1.0, gain=0.5, damping=0.0, **kw)
+        rr.run([0] * (B * 20), [0] * (B * 20))
+        out_l, out_r = rr.run(drums, drums)
         mix_l = [max(-32768, min(32767, d + w)) for d, w in zip(drums, out_l)]
         mix_r = [max(-32768, min(32767, d + w)) for d, w in zip(drums, out_r)]
         tf.write_wav(wav_dir / f"gated_{name}.wav", mix_l, mix_r)
@@ -650,80 +656,88 @@ def delay_effect_checks(ptf: Path, stock: Path, which: int, name: str, state: in
           "otherwise: left to output 0, right to output 1, every block released")
 
 
-def gated_checks(ptf: Path, stock: Path) -> None:
-    print('delay: switching to "Gated"')
-    r = DRig(ptf)
-    r.m.write(r.bufs[0], bytes(range(256)) * 64)
-    r.settings(time_ms=300.0, feedback=0.0)
-    r.choose(DELAY_GATED)
-    _, _, sent = r.run_counted([3000] * (B * tf.DL_CLEAR_BLOCKS))
-    clear = all(bytes(r.m.uc.mem_read(b, tf.DL_BUF_BYTES)) == bytes(tf.DL_BUF_BYTES) for b in r.bufs[:2])
-    check(sent == 0 and clear and r.active() == DELAY_GATED and r.m.r32(GATED) == GATED_MAGIC,
-          f"{tf.DL_CLEAR_BLOCKS} silent blocks ({sent} sent) clear the two lines, then \"Gated\"")
+def gated_checks(ptf: Path) -> None:
+    print('reverb: "Gated" and Reverse')
     rate = tf.RATE
+    r = tf.Rig(ptf, reverb=REVERB_GATED)
+    check(r.m.r32(GATED) == GATED_MAGIC, '"Gated" chosen: laid out in the reverb buffers')
+    r.settings(bypass=1)
+    r.received = 0
+    r.run([0] * B, [0] * B)
+    check(r.received == 0 and not r.sent, "bypass set: nothing received or sent")
+    r.settings()
+    r.give = [True, False]
+    r.released.clear()
+    r.run([0] * B, [0] * B)
+    check(not r.sent and r.released == [r.blocks[0]], "no right block: nothing sent, the left block released")
+    r.give = [True, True]
+    r.released.clear()
+    r.run([0] * B, [0] * B)
+    check([o for _, o in r.sent] == [0, 1] and sorted(r.released) == sorted(r.blocks),
+          "both blocks: left to output 0, right to output 1, both released")
+    r.settings(amount=0.0)
+    sig = tf.noise_burst(B * 8, B * 8)
+    out_l, out_r = r.run(sig, sig)
+    check(out_l == sig and out_r == sig, "amount 0: the send comes back unchanged")
+
     hit = [int(12000 * math.exp(-i / 600) * math.sin(i * 0.9)) for i in range(2000)]
 
-    def burst(time_ms=300.0, feedback=0.0, pingpong=0, filter_hz=20000.0, seconds=1.0):
-        q = DRig(ptf, delay=DELAY_GATED)
-        q.settings(time_ms=time_ms, feedback=feedback, pingpong=pingpong, filter_hz=filter_hz)
-        q.run([0] * (B * 20))
+    def burst(ms=300.0, diffusion=0.0, which=REVERB_GATED, damping=0.0, predelay=0.0, seconds=1.0):
+        q = tf.Rig(ptf, reverb=which)
+        q.settings(size=gate_size(ms), diffusion=diffusion, damping=damping, predelay=predelay,
+                   amount=1.0, gain=0.5)
+        q.run([0] * (B * 20), [0] * (B * 20))
         n = int(seconds * rate) // B * B
-        return q.run(hit + [0] * (n - len(hit)))
+        pad = hit + [0] * (n - len(hit))
+        return q.run(pad, pad)
 
     def thirds(x, length):
         return [tf.rms(x[int(length * k / 3):int(length * (k + 1) / 3)]) for k in range(3)]
 
     def end(x):
         return max((i for i, v in enumerate(x) if abs(v) > 30), default=0) / rate
-    for ms in (150.0, 600.0):
-        left, right = burst(time_ms=ms, seconds=ms / 1000 + 0.5)
+    for ms in (150.0, 300.0):
+        left, right = burst(ms=ms, seconds=ms / 1000 + 0.5)
         e = end(left + [0])
         check(ms / 1000 <= e <= ms / 1000 + 0.12 and left != right,
-              f"Time {ms:.0f} ms: the burst lasts {e * 1000:.0f} ms, then nothing; the two sides differ")
+              f"Size for {ms:.0f} ms: the burst lasts {e * 1000:.0f} ms, then nothing; the two sides differ")
     length = int(0.3 * rate)
     left, _ = burst()
     after = max(abs(v) for v in left[length + int(0.12 * rate):])
     check(after <= 2, f"silence after the burst (peak {after})")
-    hard, fade = thirds(burst(feedback=0.0)[0], length), thirds(burst(feedback=0.99)[0], length)
+    hard, fade = thirds(burst(diffusion=0.0)[0], length), thirds(burst(diffusion=0.85)[0], length)
     check(fade[2] < hard[2] * 0.6 and fade[0] > hard[0] * 0.8,
-          f"Feedback at the top: the end fades out ({hard[2]:.0f} -> {fade[2]:.0f} in the last third)")
-    fwd, rev = thirds(burst()[0], length), thirds(burst(pingpong=1)[0], length)
+          f"Diffusion at the top: the end fades out ({hard[2]:.0f} -> {fade[2]:.0f} in the last third)")
+    fwd, rev = thirds(burst()[0], length), thirds(burst(which=REVERB_REVERSE)[0], length)
     check(rev[0] < rev[2] * 0.5 and fwd[0] > rev[0] * 2,
-          f"PingPong: reversed, it swells up ({rev[0]:.0f} -> {rev[2]:.0f} from the first third to the last)")
-    def noise_burst(filter_hz):
-        q = DRig(ptf, delay=DELAY_GATED)
-        q.settings(time_ms=300.0, feedback=0.0, filter_hz=filter_hz)
-        q.run([0] * (B * 20))
-        left, _ = q.run(tf.noise_burst(B * 120, 2000, 5))
+          f"Reverse: the burst swells up ({rev[0]:.0f} -> {rev[2]:.0f} from the first third to the last)")
+
+    def noise_hf(damping):
+        q = tf.Rig(ptf, reverb=REVERB_GATED)
+        q.settings(size=gate_size(300.0), damping=damping, amount=1.0, gain=0.5)
+        q.run([0] * (B * 20), [0] * (B * 20))
+        sig = tf.noise_burst(B * 120, 2000, 5)
+        left, _ = q.run(sig, sig)
         return tf.hf_ratio(left[:length])
-    bright, dark = noise_burst(20000.0), noise_burst(1000.0)
-    check(dark < bright * 0.6, f"Filter 1 kHz: a duller burst ({bright:.3f} -> {dark:.3f})")
+    bright, dark = noise_hf(0.0), noise_hf(1.0)
+    check(dark < bright * 0.6, f"Damping at the top: a duller burst ({bright:.3f} -> {dark:.3f})")
+    on = []
+    for pre in (0.0, 0.5):
+        left, _ = burst(predelay=pre)
+        on.append(next(i for i, v in enumerate(left) if abs(v) > 20))
+    check(abs((on[1] - on[0]) - 2500) <= 2,
+          f"Predelay 0.5 moves the burst {on[1] - on[0]} samples later (2500 expected)")
     tone = [int(8000 * math.sin(2 * math.pi * 440 * i / rate)) if i < length else 0 for i in range(B * 200)]
-    s = tf.DelayRig(stock)
-    s.settings(time_ms=300.0, feedback=0.5)
-    sl, _ = s.run(tone)
-    q = DRig(ptf, delay=DELAY_GATED)
-    q.settings(time_ms=300.0, feedback=0.0)
-    q.run([0] * (B * 20))
-    gl, _ = q.run(tone)
-    lv = tf.db(tf.rms(gl[:length]), tf.rms(sl[length:2 * length]))
-    check(abs(lv) < 6.0, f"a 440 Hz tone: the burst against the stock delay's first echo, {lv:+.1f} dB")
-    q.run(hit)
-    q.give_input = False
-    left, _ = q.run([0] * (B * 40))
-    check(max(abs(v) for v in left[:B * 20]) > 300, "no send block: the burst still plays out")
-    q.give_input = True
-    q.settings(bypass=1)
-    q.run([1000] * B)
-    check(not q.sent and sorted(q.released) == sorted(q.handed), "bypass set: nothing sent, every block released")
-    q.settings(bypass=0)
-    q.give_outputs = 1
-    q.run([1000] * B)
-    check(not q.sent and sorted(q.released) == sorted(q.handed), "an output block missing: nothing sent, every block released")
-    q.give_outputs = 2
-    q.run([1000] * B)
-    check([o for _, o in q.sent] == [0, 1] and sorted(q.released) == sorted(q.handed),
-          "otherwise: left to output 0, right to output 1, every block released")
+    q = tf.Rig(ptf, reverb=REVERB_GATED)
+    q.settings(size=gate_size(300.0), amount=1.0, gain=0.5)
+    q.run([0] * (B * 20), [0] * (B * 20))
+    gl, _ = q.run(tone, tone)
+    lv = tf.db(tf.rms(gl[:length]), tf.rms(tone[:length]))
+    check(abs(lv) < 8.0, f"a 440 Hz tone: the burst against the send, {lv:+.1f} dB")
+    rr = tf.Rig(ptf, reverb=REVERB_GATED)
+    rr.settings(size=gate_size(300.0), amount=1.0, gain=0.5)
+    rr.run(tf.noise_burst(B * 32, B * 32), tf.noise_burst(B * 32, B * 32, 2))
+    check(rr.level() > 100, f"the level field follows the output ({rr.level():.0f})")
 
 
 def delay_checks(ptf: Path, stock: Path) -> None:
@@ -748,7 +762,6 @@ def delay_checks(ptf: Path, stock: Path) -> None:
 
     delay_effect_checks(ptf, stock, DELAY_TAPE, "Tape", TAPE, TAPE_MAGIC)
     delay_effect_checks(ptf, stock, DELAY_BBD, "BBD", BBD, BBD_MAGIC)
-    gated_checks(ptf, stock)
 
     print("delay: back to Stock, and the start-up reset")
     r = DRig(ptf, delay=1)
@@ -778,9 +791,9 @@ def delay_checks(ptf: Path, stock: Path) -> None:
     r.choose(9)
     _, _, sent = r.run_counted([0] * (B * (tf.DL_STOCK_CLEAR_BLOCKS + 2)))
     check(r.active() == 0, "a value out of range counts as Stock")
-    for target, blocks in ((DELAY_BBD, tf.DL_CLEAR_BLOCKS), (DELAY_GATED, tf.DL_CLEAR_BLOCKS),
-                           (DELAY_TAPE, tf.DL_CLEAR_BLOCKS), (DELAY_GATED, tf.DL_CLEAR_BLOCKS),
-                           (DELAY_BBD, tf.DL_CLEAR_BLOCKS), (DELAY_STOCK, tf.DL_STOCK_CLEAR_BLOCKS)):
+    for target, blocks in ((DELAY_BBD, tf.DL_CLEAR_BLOCKS), (DELAY_TAPE, tf.DL_CLEAR_BLOCKS),
+                           (DELAY_BBD, tf.DL_CLEAR_BLOCKS), (DELAY_TAPE, tf.DL_CLEAR_BLOCKS),
+                           (DELAY_STOCK, tf.DL_STOCK_CLEAR_BLOCKS)):
         r.run(tf.noise_burst(B * 20, B * 20, target))
         r.choose(target)
         _, _, sent = r.run_counted([1500] * (B * blocks))
@@ -801,13 +814,13 @@ def delay_checks(ptf: Path, stock: Path) -> None:
         return worst
     s = tf.DelayRig(stock)
     c_stock = per_block(s)
-    for which in (DELAY_TAPE, DELAY_BBD, DELAY_GATED):
+    for which in (DELAY_TAPE, DELAY_BBD):
         q = DRig(ptf, delay=which)
         q2 = DRig(ptf, delay=which)
         q2.settings(pingpong=1)
         c_mono, c_pp = per_block(q), per_block(q2)
-        check(c_mono < 60_000 and c_pp < 60_000, f"{DELAY_NAMES[which]}: {c_mono} instructions per block, {c_pp} "
-              f"with PingPong (stock delay {c_stock}; under 60,000)")
+        check(c_mono < 45_000 and c_pp < 45_000, f"{DELAY_NAMES[which]}: {c_mono} instructions per block, {c_pp} "
+              f"with PingPong (stock delay {c_stock}; under 45,000)")
     q.choose(0)
     c_clear = per_block(q, blocks=tf.DL_STOCK_CLEAR_BLOCKS)
     check(c_clear < 100_000, f"a switch's clearing blocks: at most {c_clear} instructions per block (under 100,000)")
@@ -925,11 +938,11 @@ def file_checks(ptf: Path) -> None:
     tick()
     check(value() == 0 and delay() == 0, "damaged file: Stock")
     fs.overlay[path("A")] = good
-    fs.overlay[path("E")] = hmf1(5)
+    fs.overlay[path("E")] = hmf1(7)
     fs.set_project(Path("."), "E", "Projects/User")
     n = writes()
     tick(SAVE_DELAY * 2)
-    check(value() == 0 and writes() == n and fs.overlay[path("E")] == hmf1(5),
+    check(value() == 0 and writes() == n and fs.overlay[path("E")] == hmf1(7),
           "a file naming an unknown reverb: Stock, and the file is kept")
     fs.overlay[path("F")] = hmf1(1, 7)
     fs.set_project(Path("."), "F", "Projects/User")
@@ -941,6 +954,12 @@ def file_checks(ptf: Path) -> None:
     fs.set_project(Path("."), "G", "Projects/User")
     tick()
     check(value() == 0 and delay() == 1, "a file with Tape only: Stock reverb, Tape")
+    fs.overlay[path("H")] = hmf1(2, 3)
+    fs.set_project(Path("."), "H", "Projects/User")
+    n = writes()
+    tick(SAVE_DELAY * 2)
+    check(value() == 2 and delay() == 0 and writes() == n and fs.overlay[path("H")] == hmf1(2, 3),
+          'an mf6 file whose Delay was "Gated" (3): the reverb kept, the Stock delay, the file kept')
     m.write(PROJECT_NAME, b"\0")
     tick()
     m.w8(MX + 8, 1)
@@ -975,11 +994,11 @@ def cost_checks(ptf: Path) -> None:
     r.pattern()
     mine = per_block(r, own=True)
     check(0 < mine <= OWN_LIMIT, f"Stock chosen: at most {OWN_LIMIT} of its own instructions per block ({mine})")
-    for which in (REVERB_FREEVERB, REVERB_PLATE, REVERB_SPRING, REVERB_SHIMMER):
+    for which in (REVERB_FREEVERB, REVERB_PLATE, REVERB_SPRING, REVERB_SHIMMER, REVERB_GATED):
         r.choose(which)
         r.run([0] * (B * 8), [0] * (B * 8))
         c = per_block(r)
-        check(c < 90_000, f"{REVERB_NAMES[which]} chosen: {c} instructions per block (under 90,000)")
+        check(c < 55_000, f"{REVERB_NAMES[which]} chosen: {c} instructions per block (under 55,000)")
 
 
 def main() -> int:
@@ -1003,6 +1022,7 @@ def main() -> int:
                              (REVERB_SHIMMER, "Shimmer", 2)):
         reverb_checks(ptf, stock, which, name, tol)
     shimmer_checks(ptf)
+    gated_checks(ptf)
     delay_checks(ptf, stock)
     menu_checks(ptf)
     file_checks(ptf)

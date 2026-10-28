@@ -1,6 +1,8 @@
 /*
  * plate_dsp.h: a plate reverb on the master reverb object (Polyend Tracker+ firmware
- * 1.2.0), for masterfx.c. Include it once, in one .c file, after freeverb_dsp.h.
+ * 1.2.0), for masterfx.c. Include it once, in one .c file, after freeverb_dsp.h and
+ * shimmer_dsp.h (the output taps run through shimmer's block-pass helpers; the two
+ * effects' rings are the same size, so SH_MASK is PL_MASK).
  *
  * The algorithm is the plate reverb Jon Dattorro published in "Effect Design, Part 1:
  * Reverberator and Other Filters" (J. Audio Eng. Soc., 1997), written from the paper:
@@ -166,26 +168,40 @@ static float plate_process(uint8_t *obj, int16_t *left, int16_t *right)
 
     float bw = PL->bw, lp_a = PL->damp[0], lp_b = PL->damp[1];
     uint32_t wp = PL->wp;
+
+    /* the output taps for the whole block (the paper's table, x 1.2: line, samples
+     * back): every one at least a block back, so none sees this block's writes. They
+     * run as integer block passes (shimmer_dsp.h's helpers); the gains are the taps'
+     * signs, and the integer sums convert exactly (7 x 32767 fits a float). */
+    int32_t tapl[BLOCK], tapr[BLOCK];
+    sh_pass4(tapl, 1,
+             q1, (wp + B_D1_B + 319u) & PL_MASK, 1, q1, (wp + B_D1_B + 3569u) & PL_MASK, 1,
+             q1, (wp + B_AP2_B + 2296u) & PL_MASK, -1, q1, (wp + B_D2_B + 2395u) & PL_MASK, 1);
+    sh_pass3(tapl,
+             q0, (wp + B_D1_A + 2388u) & PL_MASK, -1, q0, (wp + B_AP2_A + 224u) & PL_MASK, -1,
+             q0, (wp + B_D2_A + 1279u) & PL_MASK, -1);
+    sh_pass4(tapr, 1,
+             q0, (wp + B_D1_A + 424u) & PL_MASK, 1, q0, (wp + B_D1_A + 4352u) & PL_MASK, 1,
+             q0, (wp + B_AP2_A + 1474u) & PL_MASK, -1, q0, (wp + B_D2_A + 3208u) & PL_MASK, 1);
+    sh_pass3(tapr,
+             q1, (wp + B_D1_B + 2533u) & PL_MASK, -1, q1, (wp + B_AP2_B + 402u) & PL_MASK, -1,
+             q1, (wp + B_D2_B + 145u) & PL_MASK, -1);
+
     float level = 0.0f;
     for (uint32_t n = 0; n < BLOCK; n++) {
-        /* predelay */
-        float x = ((float)left[n] + (float)right[n]) * 0.5f;
-        PL_WR0(B_PRE0, x);
+        /* the predelay, in integers (the lines hold int16; / 2 cuts the half toward
+         * zero, as the old float write's sat16 did) */
+        int32_t xi = ((int32_t)left[n] + (int32_t)right[n]) / 2;
+        q0[(wp + B_PRE0) & PL_MASK] = (int16_t)xi;
         if (pre0)
-            x = PL_RD0(B_PRE0 + pre0);
-        PL_WR1(B_PRE1, x);
+            xi = q0[(wp + B_PRE0 + pre0) & PL_MASK];
+        q1[(wp + B_PRE1) & PL_MASK] = (int16_t)xi;
         if (pre1)
-            x = PL_RD1(B_PRE1 + pre1);
-        x *= in_gain;
+            xi = q1[(wp + B_PRE1 + pre1) & PL_MASK];
+        float x = (float)xi * in_gain;
 
-        /* the outputs: taps into the tank as it is before this sample (the paper's
-         * table, x 1.2: line, samples back) */
-        float out_l = PL_RD1(B_D1_B + 319u) + PL_RD1(B_D1_B + 3569u) - PL_RD1(B_AP2_B + 2296u)
-                      + PL_RD1(B_D2_B + 2395u) - PL_RD0(B_D1_A + 2388u) - PL_RD0(B_AP2_A + 224u)
-                      - PL_RD0(B_D2_A + 1279u);
-        float out_r = PL_RD0(B_D1_A + 424u) + PL_RD0(B_D1_A + 4352u) - PL_RD0(B_AP2_A + 1474u)
-                      + PL_RD0(B_D2_A + 3208u) - PL_RD1(B_D1_B + 2533u) - PL_RD1(B_AP2_B + 402u)
-                      - PL_RD1(B_D2_B + 145u);
+        float out_l = (float)tapl[n];
+        float out_r = (float)tapr[n];
         float end_a = PL_RD0(B_D2_A + L_D2_A), end_b = PL_RD1(B_D2_B + L_D2_B);
 
         /* input: bandwidth, then the four diffusers (allpass: y = d - g x, the line gets x + g y) */

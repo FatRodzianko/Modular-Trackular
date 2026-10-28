@@ -27,9 +27,10 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   default). Tested on hardware. See [patch/interpolate/README.md](patch/interpolate/README.md).
 - **masterfx**: each project chooses its master effects under Config → Project Settings →
   Master FX: Reverb, Stock (default), Freeverb (public domain), Plate (Dattorro's plate),
-  Spring or Shimmer, and Delay, Stock (default), Tape (a Space Echo style tape echo), BBD
-  (an analog bucket-brigade delay) or "Gated" (a gated reverb whose length follows the
-  delay time), driven by the same Master Reverb and Master Delay knobs. The README says
+  Spring, Shimmer, "Gated" (a gated reverb burst) or Reverse (the burst swelling up
+  instead), and Delay, Stock (default), Tape (a Space Echo style tape echo) or BBD
+  (an analog bucket-brigade delay), driven by the same Master Reverb and Master Delay
+  knobs. The README says
   what each knob does for each effect, with sound samples. Tested on hardware. See
   [patch/masterfx/README.md](patch/masterfx/README.md).
 - **swing**: Global Swing. Under Config → Project Settings → Global Swing, each project
@@ -80,7 +81,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   input. Recordings go into the free part of the sample memory, so the loaded samples
   stay intact; the longest recording is that free part. Otherwise the recorder is
   stock. Tested on hardware. See [patch/resample/README.md](patch/resample/README.md).
-- **all**: all twelve mods above in one firmware (version text `1.2.0-MTW`), from
+- **all**: all twelve mods above in one firmware (version text `1.2.0-MTY`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
@@ -138,7 +139,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/colorsong/` | Colored Song blocks: C + assembly shim, linker script, build script, patch spec, prebuilt binary |
 | `patch/humanize/` | Humanize button: C, linker script, build script, patch spec, prebuilt binary |
 | `patch/interpolate/` | CC and Macro ramps between steps |
-| `patch/masterfx/` | Master reverb and delay per project: Stock, Freeverb, Plate, Spring or Shimmer; Stock, Tape, BBD or "Gated"; sound samples in `samples/` |
+| `patch/masterfx/` | Master reverb and delay per project: Stock, Freeverb, Plate, Spring, Shimmer, "Gated" or Reverse; Stock, Tape or BBD; sound samples in `samples/` |
 | `patch/swing/` | Global Swing per project |
 | `patch/visualizer/` | Pad visualizer during playback |
 | `patch/condtrig/` | Conditional trigs: Chance FX values above 100 as conditions on the pass count |

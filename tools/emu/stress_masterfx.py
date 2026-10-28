@@ -36,13 +36,12 @@ DelayRig), with the Master Delay set through the stock setters to random values 
 mostly up to 800 ms, sometimes up to 4 s, Feedback, Filter, PingPong) and its fields to
 garbage (Time 0 or huge, Feedback 255, any Filter coefficient), the bypass flag toggled,
 a missing send block or output blocks, the three buffers moved to other memory and back,
-the Pattern-screen start, the start-up reset and the delay choice (Stock, Tape, BBD,
-"Gated", or a
+the Pattern-screen start, the start-up reset and the delay choice (Stock, Tape, BBD, or a
 value out of range) at random. After every block: no fault and a bounded instruction
 count; every write by the patch's code went to its own RAM, the three delay buffers in
 use, the output blocks, the stock delay's filter states or the stack; every block handed
-to it was released exactly once and only those were transmitted; the Tape's, the
-BBD's and "Gated"'s states are consistent (record position on the line, delay within its range, finite
+to it was released exactly once and only those were transmitted; the Tape's and the
+BBD's states are consistent (record position on the line, delay within its range, finite
 filter states). After garbage, once normal settings are back and the chosen delay has
 glided to the new Time, an impulse gives an echo again.
 """
@@ -83,6 +82,8 @@ class Session:
                     if q["name"] == "masterfx")
         self.lo, self.hi = (int(x, 16) for x in code["code"])
         self.ram = int(code["ram"]["start"], 16), int(code["ram"]["end"], 16)
+        lr = code.get("late_ram")           # the gated tap-table cache lives here
+        self.late = (int(lr["start"], 16), int(lr["end"], 16)) if lr else (0, 0)
         self.bufs = [m.r32(REVERB + tf.BUF_L), m.r32(REVERB + tf.BUF_R)]
         self.alt_bufs = [m.alloc(BUF_BYTES, 4), m.alloc(BUF_BYTES, 4)]
         self.errors: list[str] = []
@@ -108,6 +109,8 @@ class Session:
                 self.deepest = min(self.deepest, address)
                 return
             if self.ram[0] <= address < self.ram[1]:
+                return
+            if self.late[0] <= address < self.late[1]:
                 return
             if REVERB + tf.LEVEL <= address < REVERB + tf.LEVEL + 4:
                 return
@@ -191,6 +194,12 @@ class Session:
             floats = struct.unpack_from("<10f", raw, 20)
             if wp >= 16384 or not (1 <= h0 <= 2048 and 1 <= h1 <= 2048) or not all(math.isfinite(v) for v in floats):
                 self.errors.append(f"block {self.block}: Shimmer position {wp}, heads {h0} {h1}, states {floats}")
+        raw = bytes(m.uc.mem_read(self.where["gated"], 36))
+        if struct.unpack_from("<I", raw, 0)[0] == 0x45544147:
+            wpos, wp = struct.unpack_from("<II", raw, 12)
+            floats = struct.unpack_from("<4f", raw, 20)
+            if wpos >= 16384 or wp >= 2048 or not all(math.isfinite(v) for v in floats):
+                self.errors.append(f"block {self.block}: \"Gated\" positions {wpos} {wp}, states {floats}")
 
     def note(self, what: str) -> None:
         self.events[what] = self.events.get(what, 0) + 1
@@ -231,7 +240,7 @@ class Session:
                 m.call(self.restart_hook | 1, 0, 0, 0, 0, 0, 0)          # a new start
                 self.note("restart")
             elif ev < 0.0205:
-                self.rig.choose(r.choice([0, 1, 2, 3, 4, 1, 2, 3, 4, 5, 0xFF]))
+                self.rig.choose(r.choice([0, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 7, 0xFF]))
                 self.note("reverb choice")
             elif ev < 0.0225 and garbage_until >= 0:
                 self.normal_settings()                                  # back to normal knobs
@@ -283,7 +292,7 @@ class Session:
         m.w32(REVERB + tf.BUF_L, self.bufs[0])
         m.w32(REVERB + tf.BUF_R, self.bufs[1])
         n = tf.BLOCK
-        self.rig.choose(self.rnd.choice([1, 2, 3, 4]))              # Freeverb, Plate, Spring or Shimmer
+        self.rig.choose(self.rnd.choice([1, 2, 3, 4, 5]))           # any swapped reverb that returns sound
         self.rig.run([0] * (n * 20), [0] * (n * 20))                 # any clear or switch finishes
         burst = tf.noise_burst(n * 8, n * 8, self.seed)
         self.rig.run(burst, burst)
@@ -309,6 +318,8 @@ class DelaySession:
                     if q["name"] == "masterfx")
         self.lo, self.hi = (int(x, 16) for x in code["code"])
         self.ram = int(code["ram"]["start"], 16), int(code["ram"]["end"], 16)
+        lr = code.get("late_ram")           # the gated tap-table cache lives here
+        self.late = (int(lr["start"], 16), int(lr["end"], 16)) if lr else (0, 0)
         where = tf.ram_map(m, ptf)
         self.tape, self.bbd, self.gated = where["tape"], where["bbd"], where["gated"]
         self.bufs = list(self.rig.bufs)
@@ -331,6 +342,8 @@ class DelaySession:
                 self.deepest = min(self.deepest, address)
                 return
             if self.ram[0] <= address < self.ram[1]:
+                return
+            if self.late[0] <= address < self.late[1]:
                 return
             if DL + DL_STATES[0] <= address < DL + DL_STATES[1]:
                 return
@@ -392,12 +405,6 @@ class DelaySession:
             if not (wpos < (1 << 18) and 4 <= dint <= (1 << 18) - 511 and 0.0 <= dfrac < 1.0
                     and all(math.isfinite(v) for v in floats)):
                 self.errors.append(f"block {self.block}: {label} state wpos {wpos} dint {dint} dfrac {dfrac} {floats[1:]}")
-        raw = bytes(self.m.uc.mem_read(self.gated, 36))
-        if struct.unpack_from("<I", raw, 0)[0] == 0x45544147:
-            wpos, wp = struct.unpack_from("<II", raw, 12)
-            floats = struct.unpack_from("<4f", raw, 20)
-            if wpos >= (1 << 18) or wp >= (1 << 18) or not all(math.isfinite(v) for v in floats):
-                self.errors.append(f"block {self.block}: \"Gated\" positions {wpos} {wp}, states {floats}")
 
     def run_block(self, sig: list[int]) -> None:
         m = self.m
@@ -463,7 +470,7 @@ class DelaySession:
                 m.call(self.restart_hook | 1, 0, 0, 0, 0, 0, 0)
                 self.note("restart")
             elif ev < 0.0187:
-                self.rig.choose(r.choice([0, 1, 2, 3, 1, 2, 3, 4, 0xFF]))
+                self.rig.choose(r.choice([0, 1, 2, 1, 2, 3, 0xFF]))
                 self.note("delay choice")
             elif ev < 0.0197 and garbage_until >= 0 and probe_at < 0:
                 probe_at = self.block

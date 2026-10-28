@@ -65,7 +65,7 @@ FX_MICRO, FX_ROLL, FX_CHANCE, FX_CHORD, FX_GLIDE, FX_ARP = 2, 3, 4, 14, 19, 21
 FX_CC_A, FX_CC_B, FX_DELAY_SEND, FX_REVERB_SEND = 8, 9, 30, 32
 COND_FIRST = 103                    # condtrig: 103.. = 1:2, 2:2, 1:3 ... 8:8 (up to 137)
 
-REVERB_SHIMMER, DELAY_GATED = 4, 3  # masterfx's lists
+REVERB_GATED, DELAY_BBD = 5, 2      # masterfx's lists: the worst pair since mf7
 SWING = 66                          # Global Swing amount, on
 
 
@@ -278,7 +278,7 @@ def main() -> int:
     changed = [i for i in range(MT_SIZE) if new_mt[i] != mt[i]]
     files["project.mt"] = new_mt
 
-    files["masterfx.bin"] = settings_file(b"HMF1", bytes([REVERB_SHIMMER, DELAY_GATED, 0, 0]))
+    files["masterfx.bin"] = settings_file(b"HMF1", bytes([REVERB_GATED, DELAY_BBD, 0, 0]))
     files["swing.bin"] = settings_file(b"HSW1", bytes([1, SWING - 25, 0, 0]))
     files["interpolate.bin"] = settings_file(b"HIP1", bytes([1, 1, 0, 0]))
     lengths = [POLY_LENGTHS.get(t, 0) for t in range(16)]

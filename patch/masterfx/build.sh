@@ -23,7 +23,11 @@ if [ -z "${PYTHON:-}" ]; then
 fi
 OUT="$HERE/build"
 mkdir -p "$OUT"
+# -ffp-contract=fast: -std=c11 turns FMA fusion off, leaving every a*b+c as separate
+# vmul/vadd; fused vfma halves those (the stock effects fuse). The fused result is
+# singly rounded (slightly more precise), so renders shift by at most an LSB.
 CFLAGS=(-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -O2 -std=c11
+        -ffp-contract=fast
         -mno-unaligned-access -ffreestanding -fno-builtin -fno-tree-loop-distribute-patterns -fno-common
         -ffunction-sections -Wall -Wextra -Werror ${MFX_DEFS:-})
 "$ARM_GCC_BIN/arm-none-eabi-gcc" "${CFLAGS[@]}" -c "$HERE/masterfx.c" -o "$OUT/masterfx.o"

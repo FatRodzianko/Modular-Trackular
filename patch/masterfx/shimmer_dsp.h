@@ -129,10 +129,96 @@ __attribute__((unused)) static void shimmer_init(uint32_t buf_l, uint32_t buf_r)
     SH->magic = SH_MAGIC;
 }
 
-static inline float sh_window(uint32_t head)    /* a triangle: 0 at the ends, 1 in the middle */
+/* the shifter's triangle window, Q15: 0 at the line's ends, 1 in the middle (the
+ * exact value the float 1 - |head * 2 / SH_WINDOW - 1| gave) */
+static inline int32_t sh_window_q15(uint32_t head)
 {
-    float t = (float)head * (2.0f / SH_WINDOW) - 1.0f;
-    return 1.0f - (t < 0 ? -t : t);
+    int32_t t = (int32_t)head * (int32_t)(65536u / SH_WINDOW) - 32768;
+    return 32768 - (t < 0 ? -t : t);
+}
+
+#define SH_TANK_Q           9830            /* into the shifter: 0.5 x SH_TAP_GAIN, Q15 */
+
+/* ---- the output taps, as block passes ----------------------------------------------
+ * Every output tap but one, and the tank-end reads, look at least a whole block back,
+ * so they never see the current block's writes and can run before the sample loop: a
+ * few streams at a time, each a backward walk through its ring, split where one would
+ * walk below the ring's start (the shape of gated's burst passes), in integers since
+ * the lines hold int16. The gains are the taps' signs. */
+static void sh_pass4(int32_t *acc, int first,
+                     const int16_t *qa, uint32_t sa, int32_t ga,
+                     const int16_t *qb, uint32_t sb, int32_t gb,
+                     const int16_t *qc, uint32_t sc, int32_t gc,
+                     const int16_t *qd, uint32_t sd, int32_t gd)
+{
+    for (uint32_t n = 0; n < BLOCK;) {
+        uint32_t run = BLOCK - n;
+        if (sa + 1u < run)
+            run = sa + 1u;
+        if (sb + 1u < run)
+            run = sb + 1u;
+        if (sc + 1u < run)
+            run = sc + 1u;
+        if (sd + 1u < run)
+            run = sd + 1u;
+        const int16_t *pa = qa + sa, *pb = qb + sb, *pc = qc + sc, *pd = qd + sd;
+        int32_t *o = acc + n;
+        if (first)
+            for (uint32_t i = 0; i < run; i++)
+                *o++ = ga * *pa-- + gb * *pb-- + gc * *pc-- + gd * *pd--;
+        else
+            for (uint32_t i = 0; i < run; i++)
+                *o++ += ga * *pa-- + gb * *pb-- + gc * *pc-- + gd * *pd--;
+        sa = (sa - run) & SH_MASK;
+        sb = (sb - run) & SH_MASK;
+        sc = (sc - run) & SH_MASK;
+        sd = (sd - run) & SH_MASK;
+        n += run;
+    }
+}
+
+static void sh_pass3(int32_t *acc,          /* three more streams, added on */
+                     const int16_t *qa, uint32_t sa, int32_t ga,
+                     const int16_t *qb, uint32_t sb, int32_t gb,
+                     const int16_t *qc, uint32_t sc, int32_t gc)
+{
+    for (uint32_t n = 0; n < BLOCK;) {
+        uint32_t run = BLOCK - n;
+        if (sa + 1u < run)
+            run = sa + 1u;
+        if (sb + 1u < run)
+            run = sb + 1u;
+        if (sc + 1u < run)
+            run = sc + 1u;
+        const int16_t *pa = qa + sa, *pb = qb + sb, *pc = qc + sc;
+        int32_t *o = acc + n;
+        for (uint32_t i = 0; i < run; i++)
+            *o++ += ga * *pa-- + gb * *pb-- + gc * *pc--;
+        sa = (sa - run) & SH_MASK;
+        sb = (sb - run) & SH_MASK;
+        sc = (sc - run) & SH_MASK;
+        n += run;
+    }
+}
+
+static void sh_pass2(int32_t *acc,          /* two more streams, added on */
+                     const int16_t *qa, uint32_t sa, int32_t ga,
+                     const int16_t *qb, uint32_t sb, int32_t gb)
+{
+    for (uint32_t n = 0; n < BLOCK;) {
+        uint32_t run = BLOCK - n;
+        if (sa + 1u < run)
+            run = sa + 1u;
+        if (sb + 1u < run)
+            run = sb + 1u;
+        const int16_t *pa = qa + sa, *pb = qb + sb;
+        int32_t *o = acc + n;
+        for (uint32_t i = 0; i < run; i++)
+            *o++ += ga * *pa-- + gb * *pb--;
+        sa = (sa - run) & SH_MASK;
+        sb = (sb - run) & SH_MASK;
+        n += run;
+    }
 }
 
 /* Process one block of the stereo send in place; returns the average output level. */
@@ -174,23 +260,38 @@ static float shimmer_process(uint8_t *obj, int16_t *left, int16_t *right)
     float hp_x = SH->hp_x, hp_y = SH->hp_y, flp = SH->lp, env = SH->env, feed = SH->feed;
     uint32_t h0 = SH->head[0], h1 = SH->head[1];
     uint32_t wp = SH->wp;
+
+    /* the output taps for the whole block (every one at least a block back, except the
+     * 121-sample tap, which stays in the loop below); the signs are the taps' signs */
+    int32_t tapl[BLOCK], tapr[BLOCK];
+    sh_pass4(tapl, 1,
+             q1, (wp + SB_D1_B + 266u) & SH_MASK, 1, q1, (wp + SB_D1_B + 2974u) & SH_MASK, 1,
+             q1, (wp + SB_AP2_B + 1913u) & SH_MASK, -1, q1, (wp + SB_D2_B + 1996u) & SH_MASK, 1);
+    sh_pass3(tapl,
+             q0, (wp + SB_D1_A + 1990u) & SH_MASK, -1, q0, (wp + SB_AP2_A + 187u) & SH_MASK, -1,
+             q0, (wp + SB_D2_A + 1066u) & SH_MASK, -1);
+    sh_pass4(tapr, 1,
+             q0, (wp + SB_D1_A + 353u) & SH_MASK, 1, q0, (wp + SB_D1_A + 3627u) & SH_MASK, 1,
+             q0, (wp + SB_AP2_A + 1228u) & SH_MASK, -1, q0, (wp + SB_D2_A + 2673u) & SH_MASK, 1);
+    sh_pass2(tapr,
+             q1, (wp + SB_D1_B + 2111u) & SH_MASK, -1, q1, (wp + SB_AP2_B + 335u) & SH_MASK, -1);
+
     float level = 0.0f;
     for (uint32_t n = 0; n < BLOCK; n++) {
-        float x = ((float)left[n] + (float)right[n]) * 0.5f;
-        SH_WR0(SB_PRE0, x);
+        /* the predelay, in integers (the lines hold int16; / 2 cuts the half toward
+         * zero, as the old float write did) */
+        int32_t xi = ((int32_t)left[n] + (int32_t)right[n]) / 2;
+        q0[(wp + SB_PRE0) & SH_MASK] = (int16_t)xi;
         if (pre0)
-            x = SH_RD0(SB_PRE0 + pre0);
-        SH_WR1(SB_PRE1, x);
+            xi = q0[(wp + SB_PRE0 + pre0) & SH_MASK];
+        q1[(wp + SB_PRE1) & SH_MASK] = (int16_t)xi;
         if (pre1)
-            x = SH_RD1(SB_PRE1 + pre1);
-        x = x * in_gain + feed;             /* the send, and the shifted tail */
+            xi = q1[(wp + SB_PRE1 + pre1) & SH_MASK];
+        float x = (float)xi * in_gain + feed;   /* the send, and the shifted tail */
 
-        float out_l = SH_RD1(SB_D1_B + 266u) + SH_RD1(SB_D1_B + 2974u) - SH_RD1(SB_AP2_B + 1913u)
-                      + SH_RD1(SB_D2_B + 1996u) - SH_RD0(SB_D1_A + 1990u) - SH_RD0(SB_AP2_A + 187u)
-                      - SH_RD0(SB_D2_A + 1066u);
-        float out_r = SH_RD0(SB_D1_A + 353u) + SH_RD0(SB_D1_A + 3627u) - SH_RD0(SB_AP2_A + 1228u)
-                      + SH_RD0(SB_D2_A + 2673u) - SH_RD1(SB_D1_B + 2111u) - SH_RD1(SB_AP2_B + 335u)
-                      - SH_RD1(SB_D2_B + 121u);
+        int32_t ol = tapl[n];
+        int32_t orr = tapr[n] - (int32_t)q1[(wp + SB_D2_B + 121u) & SH_MASK];
+        float out_l = (float)ol, out_r = (float)orr;
         float end_a = SH_RD0(SB_D2_A + S_D2_A), end_b = SH_RD1(SB_D2_B + S_D2_B);
 
         bw = SH_BANDWIDTH * x + (1.0f - SH_BANDWIDTH) * bw;
@@ -229,10 +330,13 @@ static float shimmer_process(uint8_t *obj, int16_t *left, int16_t *right)
         SH_WR1(SB_D2_B, y);
 
         /* the octave up: the plate's output into the shifter's line, two heads reading it
-         * at twice the speed (each one sample closer every sample), cross-faded */
-        float tank = (out_l + out_r) * (0.5f * SH_TAP_GAIN);
-        SH_WR1(SB_SHIFT, tank);
-        float shifted = SH_RD1(SB_SHIFT + h0) * sh_window(h0) + SH_RD1(SB_SHIFT + h1) * sh_window(h1);
+         * at twice the speed (each one sample closer every sample), cross-faded; in
+         * integers up to the filters (feedforward, so plain truncation is fine) */
+        int32_t tsum = __ssat(ol + orr, 18);    /* +-131071 x SH_TANK_Q still fits 32 bits */
+        q1[(wp + SB_SHIFT) & SH_MASK] = (int16_t)__ssat((tsum * SH_TANK_Q) / 32768, 16);
+        int32_t sh_i = (int32_t)q1[(wp + SB_SHIFT + h0) & SH_MASK] * sh_window_q15(h0)
+                       + (int32_t)q1[(wp + SB_SHIFT + h1) & SH_MASK] * sh_window_q15(h1);
+        float shifted = (float)sh_i * (1.0f / 32768.0f);
         h0 = h0 > 1u ? h0 - 1u : SH_WINDOW;
         h1 = h1 > 1u ? h1 - 1u : SH_WINDOW;
         hp_y = SH_HP * (hp_y + shifted - hp_x);

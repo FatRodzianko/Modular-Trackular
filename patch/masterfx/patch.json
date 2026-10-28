@@ -8,6 +8,7 @@
     "ocram_tail",
     "dtcm_above_heap"
   ],
+  "late_ram": "mt_mfx_late_ram",
   "bin": "build/masterfx.bin",
   "sym": "build/masterfx.sym",
   "rel": "build/masterfx.rel",
@@ -73,7 +74,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-mf5"
+      "note": "version text 1.2.0-mf7"
     }
   ]
 }

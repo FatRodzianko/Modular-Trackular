@@ -55,7 +55,7 @@ from reverb_rig import ram_map  # noqa: E402
 K = 4
 BLOCK_CYCLES = 1_532_500
 SEQ_LIMIT = 20_000                  # about 5 % of a block
-BLOCK_LIMIT = 120_000               # about 31 %: with stock's 46 %, under 80 %
+BLOCK_LIMIT = 60_000                # about 16 %: with stock's 46 %, under 65 %
 
 APP, APP_AUDIO_BLOCK = 0x200170E0, 0x600AA7C9
 SEQ_CALL = 0x600AA7F8               # app_audio_block: bl seq_advance
@@ -70,7 +70,7 @@ IP_MAGIC = 0x36504D4D               # interpolate.c: +8 MIDI CC, +16 synths
 PM_MAGIC = 0x314D504D               # polymeter.c: +4 len[pattern][track]
 MX_MAGIC, MX_READY = 0x3558464D, 0x59444552    # masterfx.c struct mfx_state (test_masterfx.py):
 MX_REVERB, MX_LOAD, MX_DELAY, MX_ON, MX_ACTIVE, MX_DL_ACTIVE = 8, 11, 13, 16, 20, 36
-REVERB_SHIMMER, DELAY_GATED = 4, 3
+REVERB_GATED, DELAY_BBD = 5, 2      # the worst pair since mf7 ("Gated" moved to the reverbs)
 STOCK_CACHE = Path(__file__).resolve().parent.parent.parent / "build" / "bundle_cost_stock.json"
 failures: list[str] = []
 
@@ -174,19 +174,19 @@ class Scenario:
             return ""
         mx = ram_map(m, ptf)["mx"]              # masterfx's state isn't at the start of its RAM
         m.w32(mx, MX_MAGIC)
-        m.w8(mx + MX_REVERB, REVERB_SHIMMER)
-        m.w8(mx + MX_DELAY, DELAY_GATED)
+        m.w8(mx + MX_REVERB, REVERB_GATED)
+        m.w8(mx + MX_DELAY, DELAY_BBD)
         m.w8(mx + MX_LOAD, 0)
         m.w32(mx + MX_ON, MX_READY)             # as after the Pattern screen's first update
         self.engine = True
         for blocks in range(1, CLEAR_MAX + 1):  # stopped: the switch clears the buffers
             self.block()
-            if self.active(mx) == (REVERB_SHIMMER, DELAY_GATED):
+            if self.active(mx) == (REVERB_GATED, DELAY_BBD):
                 break
         self.engine = False
-        ok = self.active(mx) == (REVERB_SHIMMER, DELAY_GATED)
-        check(ok, f"masterfx runs Shimmer and \"Gated\" after {blocks} blocks of clearing")
-        return " with Shimmer and \"Gated\""
+        ok = self.active(mx) == (REVERB_GATED, DELAY_BBD)
+        check(ok, f"masterfx runs \"Gated\" and BBD after {blocks} blocks of clearing")
+        return " with \"Gated\" and BBD"
 
     def active(self, mx: int) -> tuple[int, int]:
         """The reverb and the delay masterfx runs."""

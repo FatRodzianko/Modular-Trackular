@@ -3,13 +3,19 @@
 A patch for Polyend Tracker+ firmware 1.2.0. Each project chooses its own master reverb
 and master delay:
 
-- **Reverb:** Stock (the default), Freeverb, Plate, Spring or Shimmer.
-- **Delay:** Stock (the default), Tape, BBD or "Gated" (a gated reverb that runs on the
-  delay, so its length can follow the tempo).
+- **Reverb:** Stock (the default), Freeverb, Plate, Spring, Shimmer, "Gated" (a gated
+  reverb burst) or Reverse (the same burst, swelling up instead of cutting in).
+- **Delay:** Stock (the default), Tape or BBD.
+
+(Before mf7, "Gated" sat in the Delay list. In the Reverb list it and Shimmer, the two
+heaviest effects, can no longer run at once, which caps the worst-case processor load;
+the gate now spans 10-368 ms - the classic units' range - set by Size instead of Time.
+A project whose file still says Delay "Gated" plays the Stock delay; choose "Gated" as
+the Reverb to get the burst back.)
 
 The sends work as always, and the Master Reverb and Master Delay pages set the chosen
 effect. Each effect gives the knobs its own meaning, described below. Installed on its
-own, Config shows the firmware version as `1.2.0-mf5`.
+own, Config shows the firmware version as `1.2.0-mf7`.
 
 **Status:** tested on hardware, on its own and together with colorsong, humanize and
 interpolate (in both orders): every reverb and delay, switching, also during playback,
@@ -30,13 +36,14 @@ and the choices saved per project.
 
 When an effect changes (from the menu, or by loading a project with another choice),
 its return is silent for a moment while the switch clears its memory, so a tail that is
-still ringing stops: about 23 ms for the reverb, and 0.1 s (to Tape, BBD or "Gated") or
+still ringing stops: about 23 ms for the reverb, and 0.1 s (to Tape or BBD) or
 0.14 s (to Stock) for the delay. The dry sound isn't affected.
 
 The effects other than Stock take more of the processor than the stock ones. Measured
 on a Tracker+, in % of each audio block: Shimmer about 7 more than the stock reverb,
-"Gated" about 10 more than the stock delay (both together about 14 to 18). From the
-emulator, scaled the same way: Freeverb about 6, Plate 4, Spring 2, Tape 4, BBD 5.
+"Gated" (and Reverse) about 10. From the
+emulator, scaled the same way: Freeverb about 6, Plate 4, Spring 2, Tape 4, BBD 5 -
+so with "Gated" in the Reverb list the heaviest possible pair is about 11 over stock.
 That only matters in a project that already loads the processor heavily, mostly through
 synth voices: each allocated voice costs about 5 % even when silent. If Config's CPU
 reading gets near stock firmware's 84 % warning, or you hear clicks, choose a lighter
@@ -103,6 +110,36 @@ a layer an octave higher, so the tail rises into a bright, organ-like wash.
 | Predelay | Time before the reverb starts, 0–113 ms |
 | Diffusion | **The shimmer amount**: 0 is a plain plate, and turning it up adds more and higher octaves (at the default, about a third of the tail is an octave up; at the top, most of it is one or two octaves up) |
 
+**"Gated"**: a gated reverb, in quotes because it isn't a reverb behind a noise gate but
+what the classic digital units did (the AMS RMX16's "non-linear" programs): a dense
+burst of reverb that lasts exactly as long as Size sets and then stops. There is no
+tail beyond the gate: each hit gives one burst.
+[Listen at 300 ms](samples/gated-300ms.wav), with a release (Diffusion 60 % of the way up):
+[listen](samples/gated-300ms-release.wav).
+
+| Knob | What it does |
+|---|---|
+| Size | **The gate length**: how long each burst lasts, 10 ms at 0 to 368 ms at the top |
+| Damping | Tone: a lowpass on the burst; higher is darker |
+| Predelay | Time before the burst starts, 0-113 ms (at the top of Size and Predelay together, the gate shortens so both fit the line) |
+| Diffusion | **The release**: 0 cuts the burst off hard at the end; turning it up fades the end out, over the whole length at the top |
+
+Each burst fades in over 50 ms (or a quarter of the length, if that is shorter).
+
+**Reverse**: the same burst, with the gate's shape reversed: each hit's cloud of
+echoes swells up from almost nothing to full level over the gate length and then cuts
+off - reverb sucked in backwards before the cut (the audio itself is not reversed).
+Tune Size so the cut lands on the next beat. The knobs are "Gated"'s.
+[Listen at 360 ms](samples/gated-360ms-reverse.wav).
+
+Both are at their most classic on one or two hits, such as a snare, or a kick and a
+snare: each hit gets its own burst that cuts off. Send many instruments at once and the
+bursts overlap into a denser, rhythmic texture instead, less like a gated reverb but
+interesting in its own right. Recorded from a Tracker+ (while "Gated" ran on the
+delay, where its length could follow the tempo), a drum loop played four times:
+dry; then kick, snare and hats sent to "Gated"; then
+kick and snare only; then the snare only. [Listen](samples/gated-drum-loop-hardware.wav).
+
 ### Delays (Master → Delay)
 
 For every delay, **Time** (in milliseconds) or **Sync** with **Rate** (in note values
@@ -134,29 +171,6 @@ time, the darker and grittier the echoes (as the chip's clock slows down).
 | Feedback | How many repeats. Near the top the echoes build up and sustain, held back by the chip's clipping |
 | Filter | Tone: a lowpass on every echo, on top of the BBD's own darkening |
 | PingPong | Off: the same echo on both sides. On: the repeats alternate right and left |
-
-**"Gated"**: a gated reverb, in quotes because it isn't a reverb behind a noise gate but
-what the classic digital units did (the AMS RMX16's "non-linear" programs): a dense
-burst of reverb that lasts exactly the set time and then stops. It runs on the delay, so its length can follow the tempo. There is no feedback:
-each hit gives one burst. [Listen at 300 ms](samples/gated-300ms.wav), with a release
-(Feedback 0.6): [listen](samples/gated-300ms-release.wav), reversed at 400 ms:
-[listen](samples/gated-400ms-reverse.wav).
-
-| Knob | What it does |
-|---|---|
-| Time, or Sync and Rate | **The gate length**: how long each burst lasts, 10 ms to 2 s (for example Sync on and a Rate of an eighth note for a burst an eighth note long) |
-| Feedback | **The release**: 0 cuts the burst off hard at the end; turning it up fades the end out, over the whole length at the top |
-| Filter | Tone: a lowpass on the burst; lower is darker |
-| PingPong | **Reverse**: off, the burst starts at full level; on, it swells up over the length and then cuts off |
-
-Each burst fades in over 50 ms (or a quarter of the length, if that is shorter).
-
-"Gated" is at its most classic on one or two hits, such as a snare, or a kick and a
-snare: each hit gets its own burst that cuts off. Send many instruments at once and the
-bursts overlap into a denser, rhythmic texture instead, less like a gated reverb but
-interesting in its own right. Recorded from a Tracker+, a drum loop played four times:
-dry; then kick, snare and hats sent to "Gated" (Sync on, Rate 3/2, at 130 BPM); then
-kick and snare only; then the snare only. [Listen](samples/gated-drum-loop-hardware.wav).
 
 ## How it works
 
@@ -248,26 +262,29 @@ sends it on as the reverb return. The master delay is another (`0x20018fc0`): it
     45 ms; at most 0.9 samples per sample longer and 8 shorter); a slow drift (0.3 Hz)
     keeps it alive. The chip's input clips softly (driven 1.2 times), Feedback goes up
     to a loop gain of 1.02, and a 40 Hz low cut keeps the feedback from drifting.
-  - **"Gated"** (`gated_dsp.h`): the send goes through three short allpass diffusers
-    (37, 53, 71 samples) onto a delay line; 20 taps per side, spread unevenly over the
-    gate length (different on each side), add up the burst, each at the gate's level
-    at its place in the length (the attack, the hold and the release, or the swell when
-    reversed); each side is smeared by three more short allpasses (89, 131, 173 samples
-    left; 97, 149, 197 right) into a dense wash. The diffusers are short and light so
-    the burst still stops sharply (it rings on for about 50–60 ms). The taps are
-    summed in integers, five at a time over the block.
+  - **"Gated" and Reverse** (`gated_dsp.h`): the mono send goes through three short
+    allpass diffusers (37, 53, 71 samples) onto a delay line (the reverb's first
+    buffer); 20 taps per side, spread unevenly over the gate length (different on each
+    side), add up the burst, each at the gate's level at its place in the length (the
+    attack, the hold and the release, or the swell for Reverse); each side is smeared
+    by three more short allpasses (89, 131, 173 samples left; 97, 149, 197 right) into
+    a dense wash. The diffusers are short and light so the burst still stops sharply
+    (it rings on for about 50-60 ms). The taps are summed in integers, five at a time
+    over the block.
 - **Switching:** each effect keeps its memory in the stock effect's buffers, so a switch
   first clears them a piece per block (silent meanwhile); otherwise each one would play
   back what the other left there. Reverb: the two 32 KB buffers over 8 blocks, and a
-  switch to the stock reverb also zeroes its three filter states. Delay: to Tape, BBD
-  or "Gated", the two lines (1 MB) over 32 blocks; to Stock, all three of the stock
+  switch to the stock reverb also zeroes its three filter states. Delay: to Tape or
+  BBD, the two lines (1 MB) over 32 blocks; to Stock, all three of the stock
   delay's 512 KB buffers over 48 blocks, and its filter states are zeroed.
 - **Start-up:** whatever the project chose, the stock effects run until the Pattern
   screen first appears, because running Freeverb while the unit boots hangs the boot
   (the other effects are held to the same rule); then the project's choices switch in.
 - **`masterfx.bin`:** 12 bytes in the project's folder: `HMF1`, the reverb (0 Stock,
-  1 Freeverb, 2 Plate, 3 Spring, 4 Shimmer), the delay (0 Stock, 1 Tape, 2 BBD,
-  3 "Gated"), two zero bytes and a checksum. A missing or damaged file, or one naming an
+  1 Freeverb, 2 Plate, 3 Spring, 4 Shimmer, 5 "Gated", 6 Reverse), the delay (0 Stock,
+  1 Tape, 2 BBD), two zero bytes and a checksum. A file from before mf7 whose delay
+  byte is 3 ("Gated" when it was a delay) keeps its reverb and plays the Stock delay.
+  A missing or damaged file, or one naming an
   effect this firmware doesn't have, means Stock for both (and the file is left as it
   is). It is read and written only while the file manager is idle. A project with no
   folder yet (the new project "New Project", which has no path) writes no file; it gets
@@ -285,8 +302,8 @@ emulator, per block (128 samples):
 
 | | Stock | masterfx |
 |---|---|---|
-| Reverb | about 34,000 | Freeverb 54,000; Plate 49,000; Spring 42,000; Shimmer 59,000 |
-| Delay | about 8,000 | Tape 20,000 (31,000 with PingPong); BBD 25,000 (39,000 with PingPong); "Gated" 44,000 |
+| Reverb | about 34,000 | Freeverb 47,000; Plate 39,000; Spring 36,000; Shimmer 49,000; "Gated"/Reverse 42,000 |
+| Delay | about 8,000 | Tape 19,000 (29,000 with PingPong); BBD 24,000 (37,000 with PingPong) |
 
 The reverb and the delay run side by side, so a project's cost is its reverb's plus its
 delay's. On the device, a deliberately heavy pattern (every drum hit and all three
@@ -350,10 +367,10 @@ is (`mt_mfx_ram_map`), which the tests read. It checks:
   send block, and the block handling (bypass, a missing output block); the Tape's wow
   and flutter on a steady tone, the BBD's steady pitch and its duller echoes at longer
   Times.
-- **"Gated":** the burst lasts the set Time and then stops (at 150 and 600 ms), silence
-  after it, Feedback fading the end, PingPong swelling it up, the Filter darkening it,
-  its level against a stock echo (within 6 dB), the burst finishing without a send
-  block, and the block handling.
+- **"Gated" and Reverse:** the burst lasts as long as Size sets and then stops (at 150
+  and 300 ms), silence after it, Diffusion fading the end, Reverse swelling it up,
+  Damping darkening it, Predelay moving it later, its level against the send (within
+  8 dB), Amount 0 passing the send through, and the block handling.
 - **Menu:** the stock menu constructor builds the folder and its two items, and the
   stock Apply stores every choice.
 - **File:** `masterfx.bin` through the screens' update hooks with a fake SD card:
@@ -393,7 +410,7 @@ python tools/emu/compare_masterfx.py build/TrackerPlus_a.ptf build/TrackerPlus_b
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-mf5 Build 1504`.
+Config → Firmware → the patched file. Config should show `1.2.0-mf7 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Projects play with the stock
 effects again; their `masterfx.bin` files stay in their folders and do nothing in stock

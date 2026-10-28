@@ -3,8 +3,11 @@
  * 1.2.0).
  *
  * Project Settings gets a "Master FX" folder with two items: "Reverb", Stock (the
- * default), Freeverb, Plate, Spring or Shimmer, and "Delay", Stock (the default), Tape,
- * BBD or "Gated".
+ * default), Freeverb, Plate, Spring, Shimmer, "Gated" or Reverse (the gated burst,
+ * swelling instead of cutting in), and "Delay", Stock (the default), Tape or BBD.
+ * "Gated" sat in the Delay list before mf7; in the Reverb list it and Shimmer, the two
+ * heaviest effects, can no longer run at once, which caps the master-FX worst case
+ * (docs/MASTERFX_EFFICIENCY_PLAN.md section 9).
  * Each saved project keeps its choices in <project folder>/masterfx.bin; a project
  * without the file, a new project ("New Project", no path: nothing written until it
  * has a folder), and every project in stock firmware, play the stock reverb and delay.
@@ -18,8 +21,8 @@
  * 0x60031e5d) processes the stereo send in place and transmits it as the return.
  * mt_mfx_reverb_update replaces that update(): with Stock chosen it calls the stock
  * update(), so the stock reverb runs exactly as without the patch; otherwise it runs the
- * chosen reverb (freeverb_dsp.h, plate_dsp.h, spring_dsp.h, shimmer_dsp.h) on the same blocks, with
- * the same Master Reverb knobs.
+ * chosen reverb (freeverb_dsp.h, plate_dsp.h, spring_dsp.h, shimmer_dsp.h,
+ * gated_dsp.h) on the same blocks, with the same Master Reverb knobs.
  *
  * Switching. All the reverbs keep their delay lines in the reverb object's two 32 KB
  * buffers (object +0x24, +0x28), so a switch clears them first, a piece per block over
@@ -32,9 +35,9 @@
  * The delay. The master delay (0x20018fc0) works the same way: its update() (vtable
  * 0x60042fec, 0x60032405) takes the mono delay send and transmits a stereo return.
  * mt_mfx_delay_update calls the stock update() with Stock chosen, and runs the tape
- * echo (tape_dsp.h), the bucket-brigade delay (bbd_dsp.h) or the gated reverb burst
- * (gated_dsp.h) otherwise. They live in the stock delay's own buffers (three of 512 KB at
- * object +0x14, +0x18, +0x1c), so a switch to any of them clears the two it uses and
+ * echo (tape_dsp.h) or the bucket-brigade delay (bbd_dsp.h) otherwise. They live in the
+ * stock delay's own buffers (three of 512 KB at
+ * object +0x14, +0x18, +0x1c), so a switch to either clears the two it uses and
  * a switch to Stock clears all three and zeroes the stock delay's filter states
  * (+0x3c..+0x50), 32 KB per block (about 0.1 s, then 0.14 s, with no delay return).
  *
@@ -53,7 +56,7 @@
 #include <stdint.h>
 
 #ifndef MASTERFX_VERSION
-#define MASTERFX_VERSION "mf5"
+#define MASTERFX_VERSION "mf7"
 #endif
 
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
@@ -66,9 +69,9 @@ CHAIN_WORD(mt_mfx_next_config_update);      /* Config screen update 0x600c6475 *
 CHAIN_WORD(mt_mfx_next_save_name);          /* strncpy 0x601673d7 (Save As: the new name) */
 
 #include "freeverb_dsp.h"
+#include "shimmer_dsp.h"
 #include "plate_dsp.h"
 #include "spring_dsp.h"
-#include "shimmer_dsp.h"
 #include "tape_dsp.h"
 #include "bbd_dsp.h"
 #include "gated_dsp.h"
@@ -108,12 +111,14 @@ typedef char *(*strncpy_fn)(char *dst, const char *src, uint32_t n);
 #define REVERB_PLATE        2u
 #define REVERB_SPRING       3u
 #define REVERB_SHIMMER      4u
-#define REVERBS             5u
+#define REVERB_GATED        5u
+#define REVERB_REVERSE      6u              /* the same burst, reversed */
+#define REVERBS             7u
 #define DELAY_STOCK         0u
 #define DELAY_TAPE          1u
 #define DELAY_BBD           2u
-#define DELAY_GATED         3u
-#define DELAYS              4u
+#define DELAYS              3u
+#define OLD_DELAYS          4u              /* older files: 3 was "Gated", now in the reverbs */
 #define DL_CLEAR_WORDS      8192u           /* words of the delay buffers cleared per block (32 KB) */
 #define DL_BUFFERS          3u
 #define DL_BUFFER_WORDS     (TAPE_LEN / 2u)
@@ -176,6 +181,7 @@ static void switch_to(uint32_t target, uint32_t buf_l, uint32_t buf_r)
     PL->magic = 0;
     SP->magic = 0;
     SH->magic = 0;
+    GT->magic = 0;
     MX->rv_buf[0] = buf_l;
     MX->rv_buf[1] = buf_r;
     MX->rv_cleared = 0;
@@ -209,6 +215,8 @@ static int rv_ready(uint32_t which, uint32_t buf_l, uint32_t buf_r)
         return SP->magic == SP_MAGIC && SP->buf_l == buf_l && SP->buf_r == buf_r;
     if (which == REVERB_SHIMMER)
         return SH->magic == SH_MAGIC && SH->buf_l == buf_l && SH->buf_r == buf_r;
+    if (which == REVERB_GATED || which == REVERB_REVERSE)
+        return GT->magic == GT_MAGIC && GT->buf[0] == buf_l && GT->buf[1] == buf_r;
     return 0;
 }
 
@@ -224,6 +232,8 @@ static void rv_init(uint8_t *obj, uint32_t which, uint32_t buf_l, uint32_t buf_r
         spring_init(buf_l, buf_r);
     } else if (which == REVERB_SHIMMER) {
         shimmer_init(buf_l, buf_r);
+    } else if (which == REVERB_GATED || which == REVERB_REVERSE) {
+        gated_init(buf_l, buf_r);
     } else {
         for (uint32_t off = RV_FILTER_FIRST; off <= RV_FILTER_LAST; off += 4)
             *(volatile uint32_t *)(obj + off) = 0;  /* the stock reverb's filter states */
@@ -240,6 +250,8 @@ static void rv_blocks(uint8_t *obj, uint32_t which)
         spring_blocks(obj);
     else if (which == REVERB_SHIMMER)
         shimmer_blocks(obj);
+    else if (which == REVERB_GATED || which == REVERB_REVERSE)
+        gated_blocks(obj, which == REVERB_REVERSE);
 }
 
 /* Reverb object vtable slot 0x60042f94 (update method 0x60031e5d) */
@@ -290,7 +302,6 @@ static void dl_switch_to(uint32_t target, const uint32_t *buf)
         MX->dl_buf[i] = buf[i];
     TP->magic = 0;
     BB->magic = 0;
-    GT->magic = 0;
     MX->dl_cleared = 0;
     MX->dl_target = (uint8_t)target;
     MX->dl_switching = 1;
@@ -342,8 +353,6 @@ void mt_mfx_delay_update(uint8_t *obj)
                 *(volatile uint32_t *)(obj + off) = 0;
         else if (MX->dl_target == DELAY_BBD)
             bbd_init(obj, buf[0], buf[1]);
-        else if (MX->dl_target == DELAY_GATED)
-            gated_init(buf[0], buf[1]);
         else
             tape_init(obj, buf[0], buf[1]);
         MX->dl_active = MX->dl_target;
@@ -359,8 +368,6 @@ void mt_mfx_delay_update(uint8_t *obj)
     int ready;
     if (MX->dl_active == DELAY_BBD)
         ready = BB->magic == BBD_MAGIC && BB->buf[0] == buf[0] && BB->buf[1] == buf[1];
-    else if (MX->dl_active == DELAY_GATED)
-        ready = GT->magic == GT_MAGIC && GT->buf[0] == buf[0] && GT->buf[1] == buf[1];
     else
         ready = TP->magic == TAPE_MAGIC && TP->buf[0] == buf[0] && TP->buf[1] == buf[1];
     if (!ready) {
@@ -369,8 +376,6 @@ void mt_mfx_delay_update(uint8_t *obj)
     }
     if (MX->dl_active == DELAY_BBD)
         bbd_blocks(obj);
-    else if (MX->dl_active == DELAY_GATED)
-        gated_blocks(obj);
     else
         tape_blocks(obj);
 }
@@ -391,9 +396,10 @@ static void option_applied(void)            /* the hooks and settings_tick see t
 {
 }
 
-static const char *const reverb_names[REVERBS] = {"Stock", "Freeverb", "Plate", "Spring", "Shimmer"};
+static const char *const reverb_names[REVERBS] = {"Stock", "Freeverb", "Plate", "Spring", "Shimmer",
+                                                  "\"Gated\"", "Reverse"};
 static const struct menu_options reverb_desc = {&MX->reverb, REVERBS, reverb_names, option_applied};
-static const char *const delay_names[DELAYS] = {"Stock", "Tape", "BBD", "\"Gated\""};
+static const char *const delay_names[DELAYS] = {"Stock", "Tape", "BBD"};
 static const struct menu_options delay_desc = {&MX->delay, DELAYS, delay_names, option_applied};
 
 /* replaces "bl 0x60118394" at 0x60118b00 (chained): Project Settings gets room for the
@@ -415,11 +421,11 @@ void *mt_mfx_last_item(void *node, void *parent, const char *label, const char *
     PL->magic = 0;
     SP->magic = 0;
     SH->magic = 0;
+    GT->magic = 0;
     MX->dl_active = DELAY_STOCK;
     MX->dl_switching = 0;
     TP->magic = 0;
     BB->magic = 0;
-    GT->magic = 0;
     void *r = ((item_fn)mt_mfx_next_last_item)(node, parent, label, help, type, descriptor);
     mx_init_if_needed();
     malloc_fn alloc = (malloc_fn)FW_MALLOC;
@@ -430,14 +436,15 @@ void *mt_mfx_last_item(void *node, void *parent, const char *label, const char *
         if (item)
             ((item_fn)FW_MENU_ITEM)(item, folder, "Reverb",
                                     "The master reverb for this project: Stock (the Tracker's own), "
-                                    "Freeverb, Plate, Spring or Shimmer. The Master Reverb knobs work for all.",
+                                    "Freeverb, Plate, Spring, Shimmer, \"Gated\" (a burst as long as Size, "
+                                    "10-368 ms) or Reverse (the burst swells instead). The Master Reverb "
+                                    "knobs work for all.",
                                     MENU_OPTIONS, &reverb_desc);
         item = alloc(MENU_ITEM_SIZE);
         if (item)
             ((item_fn)FW_MENU_ITEM)(item, folder, "Delay",
-                                    "The master delay for this project: Stock (the Tracker's own), Tape, BBD "
-                                    "or \"Gated\" (a reverb burst as long as Time). The Master Delay knobs "
-                                    "work for all.",
+                                    "The master delay for this project: Stock (the Tracker's own), Tape or "
+                                    "BBD. The Master Delay knobs work for all.",
                                     MENU_OPTIONS, &delay_desc);
     }
     return r;
@@ -545,11 +552,13 @@ static int settings_load(void)
     int ok = ((fs_read_fn)vt[FS_READ / 4])(fs, buf, FILE_SIZE, res.handle) == (int)FILE_SIZE;
     ((fs_close_fn)vt[FS_CLOSE / 4])(fs, res.handle, 1);
     ok = ok && get32(buf) == FILE_MAGIC && get32(buf + 8) == data_sum(buf + 4) && buf[4] < REVERBS
-         && buf[5] < DELAYS;
+         && buf[5] < OLD_DELAYS;
     if (!ok)
         return 0;
     MX->reverb = MX->saved = buf[4];
-    MX->delay = MX->saved_delay = buf[5];
+    /* a file from before mf7 saying Delay 3 meant "Gated", which is a reverb now: that project
+     * plays the stock delay (the reverb choice is the user's, never auto-changed) */
+    MX->delay = MX->saved_delay = buf[5] < DELAYS ? buf[5] : DELAY_STOCK;
     MX->saved_valid = 1;
     return 1;
 }

@@ -177,10 +177,15 @@ static float spring_process(uint8_t *obj, int16_t *left, int16_t *right)
 
     uint32_t wr = SP->pre_pos, phase = SP->phase;
     float hp_x = SP->hp_x, hp_y = SP->hp_y, aa = SP->aa, acc = SP->acc;
+    /* the springs' last two outputs and the smoothing, in locals across the block (the
+     * compiler otherwise reloads them around spring_step every sample) */
+    float p0 = SP->prev[0], p1 = SP->prev[1], c0 = SP->cur[0], c1 = SP->cur[1];
+    float sm0 = SP->sm[0], sm1 = SP->sm[1];
     float level = 0.0f;
     for (uint32_t n = 0; n < BLOCK; n++) {
-        /* predelay, then the send filters */
-        pre[wr] = sat16(((float)left[n] + (float)right[n]) * 0.5f);
+        /* the predelay in integers ((l + r) / 2 cuts the half toward zero, as the old
+         * float write's sat16 did), then the send filters */
+        pre[wr] = (int16_t)(((int32_t)left[n] + (int32_t)right[n]) / 2);
         uint32_t rd = wr + PRE_RING - (uint32_t)predelay;
         if (rd >= PRE_RING)
             rd -= PRE_RING;
@@ -197,19 +202,19 @@ static float spring_process(uint8_t *obj, int16_t *left, int16_t *right)
             phase = 0;
             float xd = acc * (1.0f / SP_DECIM);
             acc = 0.0f;
-            for (uint32_t s = 0; s < SP_SPRINGS; s++) {
-                SP->prev[s] = SP->cur[s];
-                SP->cur[s] = spring_step(mem, s, xd, fb, a, lp_k, swing[s]);
-            }
+            p0 = c0;
+            c0 = spring_step(mem, 0, xd, fb, a, lp_k, swing[0]);
+            p1 = c1;
+            c1 = spring_step(mem, 1, xd, fb, a, lp_k, swing[1]);
         }
         /* back up to 44.1 kHz: between the last two outputs, then smoothed */
         float t = (float)phase * (1.0f / SP_DECIM);
-        float o0 = SP->prev[0] + (SP->cur[0] - SP->prev[0]) * t;
-        float o1 = SP->prev[1] + (SP->cur[1] - SP->prev[1]) * t;
-        SP->sm[0] += SP_SMOOTH * (o0 + SP_CROSS * o1 - SP->sm[0]);
-        SP->sm[1] += SP_SMOOTH * (o1 + SP_CROSS * o0 - SP->sm[1]);
+        float o0 = p0 + (c0 - p0) * t;
+        float o1 = p1 + (c1 - p1) * t;
+        sm0 += SP_SMOOTH * (o0 + SP_CROSS * o1 - sm0);
+        sm1 += SP_SMOOTH * (o1 + SP_CROSS * o0 - sm1);
 
-        float wl = SP->sm[0] * SP_OUT_TRIM, wrt = SP->sm[1] * SP_OUT_TRIM;
+        float wl = sm0 * SP_OUT_TRIM, wrt = sm1 * SP_OUT_TRIM;
         float dl = (float)left[n], dr = (float)right[n];
         left[n] = sat16(dl + (wl - dl) * amount);
         right[n] = sat16(dr + (wrt - dr) * amount);
@@ -221,6 +226,12 @@ static float spring_process(uint8_t *obj, int16_t *left, int16_t *right)
     SP->hp_y = hp_y;
     SP->aa = aa;
     SP->acc = acc;
+    SP->prev[0] = p0;
+    SP->prev[1] = p1;
+    SP->cur[0] = c0;
+    SP->cur[1] = c1;
+    SP->sm[0] = sm0;
+    SP->sm[1] = sm1;
     return level / BLOCK;
 }
 
