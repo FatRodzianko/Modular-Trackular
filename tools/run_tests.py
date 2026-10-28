@@ -8,7 +8,7 @@ Tiers (times with an empty cache on an 8-core PC; with the cache, only what chan
   quick    (about 2 min) tools/test_layout.py, plus every patch's emulator test on each patch alone
            and on patch/all (masterfx and synths in their --quick mode), and on the
            diagnostic builds (DIAGNOSTICS: headroom alone and listed last in patch/all
-           and in patch/all + polymeter); test_bundle_cost.py's sequencer side on each of
+           and in patch/all + tracklen); test_bundle_cost.py's sequencer side on each of
            them. For a change to one patch, while working on it.
   release  (about 40 min) quick, plus tools/test_web_patcher.py (every web patcher selection
            byte-identical to patch_ptf.py's, and its layout checks), plus every patch's
@@ -83,14 +83,14 @@ PY = sys.executable
 CACHE = ROOT / "build" / "test_cache.json"
 EDGE = 64                                  # bytes from a region's start or end that count as "at the edge"
 FLASH_SECTOR, FLASH_PAGE = 0x1000, 0x100
-STOCK_ARG = {"masterfx", "swing", "condtrig", "synths", "phase", "legato", "slicethru", "resample", "polymeter",
+STOCK_ARG = {"masterfx", "swing", "condtrig", "synths", "phase", "legato", "slicethru", "resample", "tracklen",
              "bundle_cost"}                # tests that take the stock .ptf too
 QUICK_MODE = {"masterfx", "synths", "phase", "bundle_cost"}   # tests with a --quick mode
 EXTRA_TESTS = {"synths": ["phase"]}        # a patch's tests besides test_<patch>.py (PHASE: test_phase.py)
 DIAGNOSTICS = [                            # specs outside the web patcher, tested in every tier
     ("headroom", "patch/headroom/patch.json"),
     ("all-headroom", "patch/headroom/all_headroom.json"),
-    ("all-polymeter-headroom", "patch/headroom/all_polymeter_headroom.json"),
+    ("all-tracklen-headroom", "patch/headroom/all_tracklen_headroom.json"),
 ]
 DEFAULT_SECONDS = 60.0                     # estimate for a test not timed yet, unless below
 MEASURED_SECONDS = {                       # alone, on an 8-core PC (the cache keeps its own, measured under load)

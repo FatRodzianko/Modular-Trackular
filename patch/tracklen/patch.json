@@ -1,340 +1,340 @@
 {
-  "name": "polymeter",
-  "description": "Polymeter: each track can have its own length; a shorter track loops its steps and every track starts again together when the pattern ends",
+  "name": "tracklen",
+  "description": "Variable Track Length: each track can have its own length; a shorter track loops its steps and every track starts again together when the pattern ends",
   "firmware": "TrackerPlus 1.2.0",
   "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
-  "bin": "build/polymeter.bin",
-  "sym": "build/polymeter.sym",
-  "rel": "build/polymeter.rel",
-  "prebuilt_bin": "prebuilt/polymeter.bin",
-  "prebuilt_sym": "prebuilt/polymeter.sym",
-  "prebuilt_rel": "prebuilt/polymeter.rel",
+  "bin": "build/tracklen.bin",
+  "sym": "build/tracklen.sym",
+  "rel": "build/tracklen.rel",
+  "prebuilt_bin": "prebuilt/tracklen.bin",
+  "prebuilt_sym": "prebuilt/tracklen.sym",
+  "prebuilt_rel": "prebuilt/tracklen.rel",
   "branches": [
     {
       "at": "0x600E29C6",
       "old": "ecf791fe",
-      "to": "mt_pm_bind",
-      "next": "mt_pm_next_bind",
+      "to": "mt_tl_bind",
+      "next": "mt_tl_next_bind",
       "note": "Pattern screen page 3: bind button 1 (Track Name; shared with copypattern); also binds Trk Len (the first button after humanize's and copypattern's: 2, 3 or 4) as kind 3"
     },
     {
       "at": "0x600E58B4",
       "old": "1cf052fa",
-      "to": "mt_pm_label",
-      "next": "mt_pm_next_label",
+      "to": "mt_tl_label",
+      "next": "mt_tl_next_label",
       "note": "Pattern screen page 3 labels: button 6's (empty) text, the last of buttons 2..6; then Trk Len on its button"
     },
     {
       "at": "0x600E5914",
       "old": "1cf02efa",
-      "to": "mt_pm_label2",
-      "next": "mt_pm_next_label2",
+      "to": "mt_tl_label2",
+      "next": "mt_tl_next_label2",
       "note": "Pattern screen page 3 labels: button 6's (empty) second line; then Trk Len's: the length while held"
     },
     {
       "at": "0x600E594A",
       "old": "1cf02bfa",
-      "to": "mt_pm_colors",
-      "next": "mt_pm_next_colors",
+      "to": "mt_tl_colors",
+      "next": "mt_tl_next_colors",
       "note": "Pattern screen page 3 labels: More's colors; Trk Len gets the active set"
     },
     {
       "at": "0x600E5976",
       "old": "1cf03ffa",
-      "to": "mt_pm_data",
-      "next": "mt_pm_next_data",
+      "to": "mt_tl_data",
+      "next": "mt_tl_next_data",
       "note": "Pattern screen page 3 labels: More's data; Trk Len gets Pattern Name's"
     },
     {
       "at": "0x6010B3DE",
       "old": "fff711ff",
-      "to": "mt_pm_cell_note",
-      "next": "mt_pm_next_cell_note",
+      "to": "mt_tl_cell_note",
+      "next": "mt_tl_next_cell_note",
       "note": "Pattern grid, note column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
     },
     {
       "at": "0x6010B5AE",
       "old": "fff729fe",
-      "to": "mt_pm_cell_instr3",
-      "next": "mt_pm_next_cell_instr3",
+      "to": "mt_tl_cell_instr3",
+      "next": "mt_tl_next_cell_instr3",
       "note": "Pattern grid, instrument column, 3-character text: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
     },
     {
       "at": "0x6010B62C",
       "old": "fff7eafd",
-      "to": "mt_pm_cell_instr",
-      "next": "mt_pm_next_cell_instr",
+      "to": "mt_tl_cell_instr",
+      "next": "mt_tl_next_cell_instr",
       "note": "Pattern grid, instrument column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
     },
     {
       "at": "0x6010B7BE",
       "old": "fff721fd",
-      "to": "mt_pm_cell_fx1",
-      "next": "mt_pm_next_cell_fx1",
+      "to": "mt_tl_cell_fx1",
+      "next": "mt_tl_next_cell_fx1",
       "note": "Pattern grid, FX1 column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
     },
     {
       "at": "0x6010B9C4",
       "old": "fff71efc",
-      "to": "mt_pm_cell_fx2",
-      "next": "mt_pm_next_cell_fx2",
+      "to": "mt_tl_cell_fx2",
+      "next": "mt_tl_next_cell_fx2",
       "note": "Pattern grid, FX2 column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
     },
     {
       "at": "0x600AB514",
       "old": "01f0f4f8",
-      "to": "mt_pm_rec_off1",
-      "next": "mt_pm_next_rec_off1",
+      "to": "mt_tl_rec_off1",
+      "next": "mt_tl_next_rec_off1",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600C6AFC",
       "old": "e5f700fe",
-      "to": "mt_pm_rec_off2",
-      "next": "mt_pm_next_rec_off2",
+      "to": "mt_tl_rec_off2",
+      "next": "mt_tl_next_rec_off2",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600C6B78",
       "old": "e5f7c2fd",
-      "to": "mt_pm_rec_off3",
-      "next": "mt_pm_next_rec_off3",
+      "to": "mt_tl_rec_off3",
+      "next": "mt_tl_next_rec_off3",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600C6CDE",
       "old": "e5f70ffd",
-      "to": "mt_pm_rec_off4",
-      "next": "mt_pm_next_rec_off4",
+      "to": "mt_tl_rec_off4",
+      "next": "mt_tl_next_rec_off4",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600C6ECE",
       "old": "e5f717fc",
-      "to": "mt_pm_rec_off5",
-      "next": "mt_pm_next_rec_off5",
+      "to": "mt_tl_rec_off5",
+      "next": "mt_tl_next_rec_off5",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600C6F96",
       "old": "e5f7b3fb",
-      "to": "mt_pm_rec_off6",
-      "next": "mt_pm_next_rec_off6",
+      "to": "mt_tl_rec_off6",
+      "next": "mt_tl_next_rec_off6",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600C71EE",
       "old": "e5f787fa",
-      "to": "mt_pm_rec_off7",
-      "next": "mt_pm_next_rec_off7",
+      "to": "mt_tl_rec_off7",
+      "next": "mt_tl_next_rec_off7",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600C7348",
       "old": "e5f7daf9",
-      "to": "mt_pm_rec_off8",
-      "next": "mt_pm_next_rec_off8",
+      "to": "mt_tl_rec_off8",
+      "next": "mt_tl_next_rec_off8",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600CD4A6",
       "old": "dff72bf9",
-      "to": "mt_pm_rec_off9",
-      "next": "mt_pm_next_rec_off9",
+      "to": "mt_tl_rec_off9",
+      "next": "mt_tl_next_rec_off9",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600D4792",
       "old": "d7f7b5ff",
-      "to": "mt_pm_rec_off10",
-      "next": "mt_pm_next_rec_off10",
+      "to": "mt_tl_rec_off10",
+      "next": "mt_tl_next_rec_off10",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600D491E",
       "old": "d7f7effe",
-      "to": "mt_pm_rec_off11",
-      "next": "mt_pm_next_rec_off11",
+      "to": "mt_tl_rec_off11",
+      "next": "mt_tl_next_rec_off11",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600D4ADC",
       "old": "d7f710fe",
-      "to": "mt_pm_rec_off12",
-      "next": "mt_pm_next_rec_off12",
+      "to": "mt_tl_rec_off12",
+      "next": "mt_tl_next_rec_off12",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600F0396",
       "old": "bcf7b3f9",
-      "to": "mt_pm_rec_off13",
-      "next": "mt_pm_next_rec_off13",
+      "to": "mt_tl_rec_off13",
+      "next": "mt_tl_next_rec_off13",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600F1904",
       "old": "baf7fcfe",
-      "to": "mt_pm_rec_off14",
-      "next": "mt_pm_next_rec_off14",
+      "to": "mt_tl_rec_off14",
+      "next": "mt_tl_next_rec_off14",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600F57AA",
       "old": "b6f7a9ff",
-      "to": "mt_pm_rec_off15",
-      "next": "mt_pm_next_rec_off15",
+      "to": "mt_tl_rec_off15",
+      "next": "mt_tl_next_rec_off15",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x6011A0A8",
       "old": "92f72afb",
-      "to": "mt_pm_rec_off16",
-      "next": "mt_pm_next_rec_off16",
+      "to": "mt_tl_rec_off16",
+      "next": "mt_tl_next_rec_off16",
       "note": "bl seq_record_note_off_q 0x600ac700 -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600F5500",
       "old": "b7f7feb8",
-      "to": "mt_pm_rec_off17",
-      "next": "mt_pm_next_rec_off17",
+      "to": "mt_tl_rec_off17",
+      "next": "mt_tl_next_rec_off17",
       "tail": true,
       "note": "b.w seq_record_note_off_q 0x600ac700 (a tail call) -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x600F9418",
       "old": "b3f772b9",
-      "to": "mt_pm_rec_off18",
-      "next": "mt_pm_next_rec_off18",
+      "to": "mt_tl_rec_off18",
+      "next": "mt_tl_next_rec_off18",
       "tail": true,
       "note": "b.w seq_record_note_off_q 0x600ac700 (a tail call) -> live note-off recording onto a short track's steps"
     },
     {
       "at": "0x60114EAA",
       "old": "52f094fa",
-      "to": "mt_pm_save_name",
-      "next": "mt_pm_next_save_name",
-      "note": "save request 0x60114e34, Save As only: bl strncpy(fm+0x340, name, 0x21) -> mt_pm_save_name (the lengths go with the project to its new name)"
+      "to": "mt_tl_save_name",
+      "next": "mt_tl_next_save_name",
+      "note": "save request 0x60114e34, Save As only: bl strncpy(fm+0x340, name, 0x21) -> mt_tl_save_name (the lengths go with the project to its new name)"
     }
   ],
   "itcm_branches": [
     {
       "at": "0x2170",
       "old": "1df0d0f9",
-      "to": "mt_pm_step_copy",
-      "next": "mt_pm_next_step_copy",
+      "to": "mt_tl_step_copy",
+      "next": "mt_tl_next_step_copy",
       "args": ["r4", "r5"],
-      "note": "seq_process_track, micro-step 1: bl memcpy_small (thunk 0x1f514) copying the track's step into its work record -> mt_pm_step_copy(dst, src, seq, track): a short track's step mod its length"
+      "note": "seq_process_track, micro-step 1: bl memcpy_small (thunk 0x1f514) copying the track's step into its work record -> mt_tl_step_copy(dst, src, seq, track): a short track's step mod its length"
     },
     {
       "at": "0x33A2",
       "old": "00f0d9fa",
-      "to": "mt_pm_roll_a",
-      "next": "mt_pm_next_roll_a",
-      "note": "Roll: bl seq_distance_to_next_note_q 0x3958 (seq, track, step) -> mt_pm_roll_a: looks at a short track's steps mod its length"
+      "to": "mt_tl_roll_a",
+      "next": "mt_tl_next_roll_a",
+      "note": "Roll: bl seq_distance_to_next_note_q 0x3958 (seq, track, step) -> mt_tl_roll_a: looks at a short track's steps mod its length"
     },
     {
       "at": "0x3520",
       "old": "00f01afa",
-      "to": "mt_pm_roll_b",
-      "next": "mt_pm_next_roll_b",
-      "note": "Roll: bl seq_distance_to_next_note_q 0x3958 (seq, track, step) -> mt_pm_roll_b: the same"
+      "to": "mt_tl_roll_b",
+      "next": "mt_tl_next_roll_b",
+      "note": "Roll: bl seq_distance_to_next_note_q 0x3958 (seq, track, step) -> mt_tl_roll_b: the same"
     }
   ],
   "words": [
     {
       "at": "0x600DF2F0",
       "old": "a1900c60",
-      "to": "mt_pm_jog",
-      "next": "mt_pm_next_jog",
+      "to": "mt_tl_jog",
+      "next": "mt_tl_next_jog",
       "thumb": true,
-      "note": "Pattern screen encoder callback pat_jog 0x600c90a1 -> mt_pm_jog: sets the cursor's track's length while Trk Len is held"
+      "note": "Pattern screen encoder callback pat_jog 0x600c90a1 -> mt_tl_jog: sets the cursor's track's length while Trk Len is held"
     },
     {
       "at": "0x600AB69C",
       "old": "c9150000",
-      "to": "mt_pm_rec_note1",
-      "next": "mt_pm_next_rec_note1",
+      "to": "mt_tl_rec_note1",
+      "next": "mt_tl_next_rec_note1",
       "thumb": true,
       "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
     },
     {
       "at": "0x600C73CC",
       "old": "c9150000",
-      "to": "mt_pm_rec_note2",
-      "next": "mt_pm_next_rec_note2",
+      "to": "mt_tl_rec_note2",
+      "next": "mt_tl_next_rec_note2",
       "thumb": true,
       "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
     },
     {
       "at": "0x600CD554",
       "old": "c9150000",
-      "to": "mt_pm_rec_note3",
-      "next": "mt_pm_next_rec_note3",
+      "to": "mt_tl_rec_note3",
+      "next": "mt_tl_next_rec_note3",
       "thumb": true,
       "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
     },
     {
       "at": "0x600D4B34",
       "old": "c9150000",
-      "to": "mt_pm_rec_note4",
-      "next": "mt_pm_next_rec_note4",
+      "to": "mt_tl_rec_note4",
+      "next": "mt_tl_next_rec_note4",
       "thumb": true,
       "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
     },
     {
       "at": "0x600F1924",
       "old": "c9150000",
-      "to": "mt_pm_rec_note5",
-      "next": "mt_pm_next_rec_note5",
+      "to": "mt_tl_rec_note5",
+      "next": "mt_tl_next_rec_note5",
       "thumb": true,
       "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
     },
     {
       "at": "0x600F54EC",
       "old": "c9150000",
-      "to": "mt_pm_rec_note6",
-      "next": "mt_pm_next_rec_note6",
+      "to": "mt_tl_rec_note6",
+      "next": "mt_tl_next_rec_note6",
       "thumb": true,
       "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
     },
     {
       "at": "0x600FAD84",
       "old": "c9150000",
-      "to": "mt_pm_rec_note7",
-      "next": "mt_pm_next_rec_note7",
+      "to": "mt_tl_rec_note7",
+      "next": "mt_tl_next_rec_note7",
       "thumb": true,
       "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
     },
     {
       "at": "0x6011A0FC",
       "old": "c9150000",
-      "to": "mt_pm_rec_note8",
-      "next": "mt_pm_next_rec_note8",
+      "to": "mt_tl_rec_note8",
+      "next": "mt_tl_next_rec_note8",
       "thumb": true,
       "note": "veneer literal of seq_record_live_note (ITCM 0x15c9) -> live recording onto a short track's steps"
     },
     {
       "at": "0x600403DC",
       "old": "991f0e60",
-      "to": "mt_pm_pattern_update",
-      "next": "mt_pm_next_pattern_update",
+      "to": "mt_tl_pattern_update",
+      "next": "mt_tl_next_pattern_update",
       "thumb": true,
-      "note": "Pattern screen vtable: update method 0x600e1f99 -> mt_pm_pattern_update (polymeter.bin load/save)"
+      "note": "Pattern screen vtable: update method 0x600e1f99 -> mt_tl_pattern_update (tracklen.bin load/save)"
     },
     {
       "at": "0x6003B5F8",
       "old": "75640c60",
-      "to": "mt_pm_config_update",
-      "next": "mt_pm_next_config_update",
+      "to": "mt_tl_config_update",
+      "next": "mt_tl_next_config_update",
       "thumb": true,
-      "note": "Config screen vtable: update method 0x600c6475 -> mt_pm_config_update (polymeter.bin load/save)"
+      "note": "Config screen vtable: update method 0x600c6475 -> mt_tl_config_update (tracklen.bin load/save)"
     },
     {
       "at": "0x600CBF9C",
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-pm1"
+      "note": "version text 1.2.0-tl1"
     }
   ]
 }

@@ -9,7 +9,7 @@ The scenario is tools/make_headroom_project.py's project, built in RAM: its two 
 rolls and arps; synth tracks with chords and CCs; MIDI tracks with CCs and G), played in
 song mode (1 2 1 2) at 800 BPM, Synth 1-3 at Polyphony 3/3/2, every track unmuted. The
 mods in the bundle are switched on in RAM as the hardware runs had them: Global Swing 66,
-FX Interpolation MIDI CC and Synths On, the polymeter lengths. condtrig and legato play
+FX Interpolation MIDI CC and Synths On, the tracklen lengths. condtrig and legato play
 from the patterns' FX.
 
 1. Sequencer side (both modes): instructions inside the bl seq_advance at 0x600aa7f8 per
@@ -67,7 +67,7 @@ WARMUP = 4                          # blocks after the engine starts that carry 
 CLEAR_MAX = 64                      # blocks for masterfx's switch to clear its buffers
 SW_MAGIC = 0x32534D47               # swing.c: state magic; +8 on, +9 amount - 25
 IP_MAGIC = 0x36504D4D               # interpolate.c: +8 MIDI CC, +16 synths
-PM_MAGIC = 0x314D504D               # polymeter.c: +4 len[pattern][track]
+TL_MAGIC = 0x314C544D               # tracklen.c: +4 len[pattern][track]
 MX_MAGIC, MX_READY = 0x3558464D, 0x59444552    # masterfx.c struct mfx_state (test_masterfx.py):
 MX_REVERB, MX_LOAD, MX_DELAY, MX_ON, MX_ACTIVE, MX_DL_ACTIVE = 8, 11, 13, 16, 20, 36
 REVERB_GATED, DELAY_BBD = 5, 2      # the worst pair since mf7 ("Gated" moved to the reverbs)
@@ -164,12 +164,12 @@ class Scenario:
             m.w32(ip, IP_MAGIC)
             m.w8(ip + 8, 1)
             m.w8(ip + 16, 1)
-        if "polymeter" in self.mods:
-            pm = patch_ram(ptf, "polymeter")
-            m.write(pm, struct.pack("<I", PM_MAGIC) + bytes(256 * 16))
+        if "tracklen" in self.mods:
+            tl = patch_ram(ptf, "tracklen")
+            m.write(tl, struct.pack("<I", TL_MAGIC) + bytes(256 * 16))
             for pattern in (1, 2):
                 for t, n in hp.POLY_LENGTHS.items():
-                    m.w8(pm + 4 + 16 * pattern + t, n)
+                    m.w8(tl + 4 + 16 * pattern + t, n)
         if not (masterfx and "masterfx" in self.mods):
             return ""
         mx = ram_map(m, ptf)["mx"]              # masterfx's state isn't at the start of its RAM

@@ -1,4 +1,4 @@
-# polymeter: a length per track
+# Variable Track Length: a length per track
 
 > **In development: not released.** It hasn't been tested on hardware yet, and it isn't
 > in patch/all or the web patcher. How it works and how it saves lengths may still change.
@@ -7,11 +7,11 @@ A patch for Polyend Tracker+ firmware 1.2.0 that lets each track of a pattern ha
 own length. A track shorter than the pattern plays its own steps over and over, and every
 track starts again together when the pattern ends: in a 16-step pattern a track of
 length 6 plays steps 1–6, 1–6, 1–4, then the pattern starts again. Installed on its own,
-Config shows the firmware version as `1.2.0-pm1`.
+Config shows the firmware version as `1.2.0-tl1`.
 
 The idea comes from a custom firmware for the Tracker Mini shown on r/PolyendTracker.
 This is a re-implementation from its description; nothing of it was seen or used.
-[docs/POLYMETER_PLAN.md](../../docs/POLYMETER_PLAN.md) has the investigation and the plan.
+[docs/TRACK_LENGTH_PLAN.md](../../docs/TRACK_LENGTH_PLAN.md) has the investigation and the plan.
 
 **What this build does so far.** It plays the track lengths, sets them with the
 Trk Len button, dims the steps past them in the grid, records live notes onto a short
@@ -36,7 +36,7 @@ Recording while playing works as usual. On a short track a note (or note-off) la
 the step the track is playing, not on a dimmed step: with length 6, a hit during the
 pattern's step 11 goes to step 5.
 
-The lengths are saved with the project, in `polymeter.bin` in its folder, a moment after
+The lengths are saved with the project, in `tracklen.bin` in its folder, a moment after
 each change (and the file is removed when no length is left). Opening a project loads its
 lengths; Save As takes them to the new name. A new project keeps them until its first
 save. Stock firmware ignores the file: there every track plays the whole pattern.
@@ -88,7 +88,7 @@ straight through.
 The file is read and written from the Pattern and Config screens' update methods
 (chained, as the other patches' files are), one read or write of the whole file per
 update, in pieces of at most 256 bytes, only while the file manager is idle. It holds a
-`PMT1` header, one 17-byte entry for each pattern that has a length (its number and the 16
+`TLN1` header, one 17-byte entry for each pattern that has a length (its number and the 16
 lengths) and a checksum; at most 4,347 bytes. When another project opens, the lengths are
 cleared at once and then read from its file, which is checked whole before any of it is
 used: a damaged file gives no lengths. Save As is recognised by the save request's name
@@ -98,9 +98,9 @@ folder.
 ## Building and checking it
 
 ```bash
-patch/polymeter/build.sh                    # optional: prebuilt/ is used without a build
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/polymeter/patch.json build/TrackerPlus_pm1.ptf
-python tools/emu/test_polymeter.py build/TrackerPlus_pm1.ptf path/to/TrackerPlus_1.2.0.ptf
+patch/tracklen/build.sh                    # optional: prebuilt/ is used without a build
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/tracklen/patch.json build/TrackerPlus_tl1.ptf
+python tools/emu/test_tracklen.py build/TrackerPlus_tl1.ptf path/to/TrackerPlus_1.2.0.ptf
 ```
 
 The test checks that without lengths the firmware plays exactly as stock, and that a

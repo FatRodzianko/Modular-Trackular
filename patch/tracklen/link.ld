@@ -1,5 +1,5 @@
 /* Link address only: tools/patch_ptf.py places the code after the stock image or the
- * patches listed before it, and moves it there with build/polymeter.rel. */
+ * patches listed before it, and moves it there with build/tracklen.rel. */
 MEMORY
 {
     PATCH (rx) : ORIGIN = 0x601D0000, LENGTH = 8K
@@ -17,8 +17,8 @@ SECTIONS
     /* No initialised or zeroed RAM: state goes in .mt_ram (below). */
     .data : { *(.data*) } > PATCH
     .bss  : { *(.bss*) *(COMMON) } > PATCH
-    ASSERT(SIZEOF(.data) == 0, "polymeter must not use .data")
-    ASSERT(SIZEOF(.bss) == 0, "polymeter must not use .bss")
+    ASSERT(SIZEOF(.data) == 0, "tracklen must not use .data")
+    ASSERT(SIZEOF(.bss) == 0, "tracklen must not use .bss")
 
     /* The patch's RAM: its state variables (section ".mt_ram"), neither loaded nor
      * zeroed. Linked at a placeholder address; tools/patch_ptf.py assigns it from the

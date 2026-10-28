@@ -29,12 +29,12 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
   - resample alone, and first with patch/all's other patches after it in reverse order
     (its RAM moves to another region with all of them; an ITCM-image word, as swing's;
     patch/all has it last),
-  - polymeter (ITCM hooks, 4 KB of RAM) alone, after patch/all's patches, and first with
+  - tracklen (ITCM hooks, 4 KB of RAM) alone, after patch/all's patches, and first with
     them after it in reverse order; and with page 3's other buttons (humanize,
     copypattern, both) in both orders, and with a copy of it that hooks only its two
     tail calls (b.w sites, chained by both),
   - headroom (a diagnostic) alone, listed last after patch/all's patches, and after
-    them and polymeter (its own bundle specs, patch/headroom/all_*.json),
+    them and tracklen (its own bundle specs, patch/headroom/all_*.json),
   - a copy of slicethru with a non-BL site ("replaces": "insns", the two instructions
     at 0x60035522), alone and in patch/all's place for slicethru; the site's 4 bytes
     are a BL to the hook and the bytes around it are stock,
@@ -359,23 +359,23 @@ def main() -> int:
                       version="RSR")
     all_rs_rev_spec = outdir / "all-resample-reversed.json"
     all_rs_rev_spec.write_text(json.dumps(all_rs_rev, indent=2))
-    pm = ROOT / "patch" / "polymeter" / "patch.json"
+    pm = ROOT / "patch" / "tracklen" / "patch.json"
     all_pm_list = all_rs_list + [pm]
-    all_pm = dict(rev, name="all-polymeter", include=[str(x) for x in all_pm_list], version="PMA")
-    all_pm_spec = outdir / "all-polymeter.json"
+    all_pm = dict(rev, name="all-tracklen", include=[str(x) for x in all_pm_list], version="PMA")
+    all_pm_spec = outdir / "all-tracklen.json"
     all_pm_spec.write_text(json.dumps(all_pm, indent=2))
-    all_pm_rev = dict(rev, name="all-polymeter-reversed", include=[str(x) for x in all_pm_list[::-1]],
+    all_pm_rev = dict(rev, name="all-tracklen-reversed", include=[str(x) for x in all_pm_list[::-1]],
                       version="PMR")
-    all_pm_rev_spec = outdir / "all-polymeter-reversed.json"
+    all_pm_rev_spec = outdir / "all-tracklen-reversed.json"
     all_pm_rev_spec.write_text(json.dumps(all_pm_rev, indent=2))
     hr = ROOT / "patch" / "headroom" / "patch.json"
-    hr_all, hr_all_pm = (ROOT / "patch" / "headroom" / f"{n}.json" for n in ("all_headroom", "all_polymeter_headroom"))
-    pm_page3 = {}                               # polymeter with page 3's other buttons
-    for name, version, specs in (("humanize-polymeter", "HPM", [hz, pm]), ("polymeter-humanize", "PMH", [pm, hz]),
-                                 ("copypattern-polymeter", "CPM", [cp, pm]),
-                                 ("polymeter-copypattern", "PCM", [pm, cp]),
-                                 ("humanize-copypattern-polymeter", "HCM", [hz, cp, pm]),
-                                 ("polymeter-copypattern-humanize", "MCH", [pm, cp, hz])):
+    hr_all, hr_all_pm = (ROOT / "patch" / "headroom" / f"{n}.json" for n in ("all_headroom", "all_tracklen_headroom"))
+    pm_page3 = {}                               # tracklen with page 3's other buttons
+    for name, version, specs in (("humanize-tracklen", "HPM", [hz, pm]), ("tracklen-humanize", "PMH", [pm, hz]),
+                                 ("copypattern-tracklen", "CPM", [cp, pm]),
+                                 ("tracklen-copypattern", "PCM", [pm, cp]),
+                                 ("humanize-copypattern-tracklen", "HCM", [hz, cp, pm]),
+                                 ("tracklen-copypattern-humanize", "MCH", [pm, cp, hz])):
         spec_path = outdir / f"{name}.json"
         spec_path.write_text(json.dumps(dict(rev, name=name, include=[str(x) for x in specs], version=version),
                                         indent=2))
@@ -387,15 +387,15 @@ def main() -> int:
     pm_bl = next(br for br in pm_spec["branches"] if "next" in br and not br.get("tail"))
 
     def pm_copy(name: str, branches: list[dict]) -> Path:
-        """polymeter hooking only `branches`."""
+        """tracklen hooking only `branches`."""
         path = outdir / f"{name}.json"
         path.write_text(json.dumps(dict(pm_spec, name=name, branches=branches, words=[], itcm_branches=[],
                                         **pm_files), indent=2))
         return path.resolve()
 
-    pm_tail_chain = outdir / "polymeter-tail-chain.json"
-    pm_tail_chain.write_text(json.dumps(dict(rev, name="polymeter-tail-chain",
-                                             include=[str(pm), str(pm_copy("polymeter-tails", pm_tails))],
+    pm_tail_chain = outdir / "tracklen-tail-chain.json"
+    pm_tail_chain.write_text(json.dumps(dict(rev, name="tracklen-tail-chain",
+                                             include=[str(pm), str(pm_copy("tracklen-tails", pm_tails))],
                                              version="PTC"), indent=2))
     bt_spec = json.loads(bt.read_text())
     bt_files = {k: str((bt.parent / bt_spec[k]).resolve())
@@ -468,16 +468,16 @@ def main() -> int:
             ("slicethru, then patch/all's patches reversed", all_bt_rev_spec, all_bt_list[::-1], "BTR", None),
             ("resample alone", rs, [rs], None, None),
             ("resample, then patch/all's patches reversed", all_rs_rev_spec, all_rs_list[::-1], "RSR", None),
-            ("polymeter alone (ITCM hooks)", pm, [pm], None, None),
-            ("patch/all's patches, then polymeter", all_pm_spec, all_pm_list, "PMA", None),
-            ("polymeter, then patch/all's patches reversed", all_pm_rev_spec, all_pm_list[::-1], "PMR", None),
+            ("tracklen alone (ITCM hooks)", pm, [pm], None, None),
+            ("patch/all's patches, then tracklen", all_pm_spec, all_pm_list, "PMA", None),
+            ("tracklen, then patch/all's patches reversed", all_pm_rev_spec, all_pm_list[::-1], "PMR", None),
             *[(f"page 3's buttons: {name}", spec_path, specs, version, None)
               for version, (name, spec_path, specs) in pm_page3.items()],
-            ("chained tail calls: polymeter, then a copy on its two b.w sites", pm_tail_chain,
-             [pm, outdir / "polymeter-tails.json"], "PTC", None),
+            ("chained tail calls: tracklen, then a copy on its two b.w sites", pm_tail_chain,
+             [pm, outdir / "tracklen-tails.json"], "PTC", None),
             ("headroom alone", hr, [hr], None, None),
             ("patch/all's patches, then headroom", hr_all, all_rs_list + [hr], "MH1", None),
-            ("patch/all's patches, polymeter, then headroom", hr_all_pm, all_pm_list + [hr], "MH2", None),
+            ("patch/all's patches, tracklen, then headroom", hr_all_pm, all_pm_list + [hr], "MH2", None),
             ("a non-BL site: slicethru with the two instructions at 0x60035522", bt_ins, [bt_ins], None, None),
             ("a non-BL site in patch/all: the slicethru copy in slicethru's place", all_ins_spec, all_ins_list,
              "INS", None)):
@@ -576,7 +576,7 @@ def main() -> int:
              "a b.w site takes \"tail\": true")):
         print(what)
         r = subprocess.run([sys.executable, "-I", str(ROOT / "tools" / "patch_ptf.py"), str(stock),
-                            str(pm_copy("polymeter-bad", [branch])), str(outdir / "polymeter-bad.ptf")],
+                            str(pm_copy("tracklen-bad", [branch])), str(outdir / "tracklen-bad.ptf")],
                            capture_output=True, text=True)
         check(r.returncode != 0 and refusal in (r.stdout + r.stderr), f"refused: {what}")
     print(f"outputs in {outdir}")

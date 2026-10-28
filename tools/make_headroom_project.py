@@ -14,7 +14,7 @@ there and changes, through the firmware's own code in the emulator:
     muted track, and the two patterns' Song screen masks (pattern_update_track_usage 0x600c3998), written by
     project_serialize 0x600c2600. Before any change, the base project.mt must come back
     byte for byte through the same path, so its layout is the one this script knows;
-  - masterfx.bin, swing.bin, interpolate.bin and polymeter.bin, in the formats the
+  - masterfx.bin, swing.bin, interpolate.bin and tracklen.bin, in the formats the
     patches write (stock firmware and the builds without a patch ignore its file).
 Then the sequencer plays both patterns in song mode on the given firmware, and the script
 reports what went out. Use the MH2 build there: it has every patch the project uses.
@@ -59,7 +59,7 @@ SAMPLE_TRACKS = range(0, 8)         # instruments 1-8 (0-7)
 SYNTH_TRACKS = range(8, 14)         # S1 S1 S2 S2 S3 S3 (64-66)
 MIDI_TRACKS = range(14, 16)         # M01, M02 (48, 49)
 SYNTH_VOICES = (3, 3, 2)           # Polyphony of S1-S3: the three slots share 8 voices (0x600b1400)
-POLY_LENGTHS = {2: 15, 5: 13, 10: 11, 13: 7}    # track (0-based) -> length, polymeter only
+POLY_LENGTHS = {2: 15, 5: 13, 10: 11, 13: 7}    # track (0-based) -> length, tracklen only
 
 FX_MICRO, FX_ROLL, FX_CHANCE, FX_CHORD, FX_GLIDE, FX_ARP = 2, 3, 4, 14, 19, 21
 FX_CC_A, FX_CC_B, FX_DELAY_SEND, FX_REVERB_SEND = 8, 9, 30, 32
@@ -81,10 +81,10 @@ def settings_file(magic: bytes, data: bytes) -> bytes:
     return magic + data + struct.pack("<I", fnv1a(data))
 
 
-def polymeter_file(lengths: dict[int, list[int]]) -> bytes:
+def tracklen_file(lengths: dict[int, list[int]]) -> bytes:
     entries = b"".join(bytes([p]) + bytes(v) for p, v in sorted(lengths.items()))
     count = struct.pack("<I", len(entries) // 17)
-    return b"PMT1" + count + entries + struct.pack("<I", fnv1a(count + entries))
+    return b"TLN1" + count + entries + struct.pack("<I", fnv1a(count + entries))
 
 
 def pattern_data(variant: int) -> bytes:
@@ -282,7 +282,7 @@ def main() -> int:
     files["swing.bin"] = settings_file(b"HSW1", bytes([1, SWING - 25, 0, 0]))
     files["interpolate.bin"] = settings_file(b"HIP1", bytes([1, 1, 0, 0]))
     lengths = [POLY_LENGTHS.get(t, 0) for t in range(16)]
-    files["polymeter.bin"] = polymeter_file({1: lengths, 2: lengths})
+    files["tracklen.bin"] = tracklen_file({1: lengths, 2: lengths})
 
     run = song_run(rig, pats, 6)
 
@@ -298,7 +298,7 @@ def main() -> int:
     if muted:
         print("  the base project had muted tracks: unmuted")
     print(f"  masterfx Shimmer + \"Gated\", Global Swing {SWING}, FX Interpolation MIDI CC and Synths On,")
-    print(f"  polymeter lengths {', '.join(f'track {t + 1}: {n}' for t, n in POLY_LENGTHS.items())}")
+    print(f"  tracklen lengths {', '.join(f'track {t + 1}: {n}' for t, n in POLY_LENGTHS.items())}")
     print(f"  song mode in the emulator ({ptf.name}), 6 patterns: {run['sample']} sample note-ons, "
           f"{run['synth']} synth notes, {run['midi']} MIDI note-ons, {run['cc']} MIDI CCs, "
           f"patterns requested {run['patterns']}")

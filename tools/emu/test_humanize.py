@@ -309,8 +309,8 @@ def main() -> int:
         free = range(4, 7)
     except SystemExit:
         free = range(3, 7)
-    try:                                        # polymeter's Trk Len takes the next free one
-        patch_code(ptf, "polymeter")
+    try:                                        # tracklen's Trk Len takes the next free one
+        patch_code(ptf, "tracklen")
         free = range(free.start + 1, 7)
     except SystemExit:
         pass

@@ -88,7 +88,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   future patches. See [patch/ramdiag/README.md](patch/ramdiag/README.md).
 - **headroom**: a diagnostic that measures on the device how much of each audio block's
   time the firmware uses, and the sequencer's share, on Config's developer lines. On its
-  own, or listed last after patch/all's patches (with or without polymeter). See
+  own, or listed last after patch/all's patches (with or without Variable Track Length). See
   [patch/headroom/README.md](patch/headroom/README.md).
 - **versiontest**: the smallest possible mod (version text `1.2.0-MT0`), a harmless
   first check that your unit installs patched firmware. See
@@ -150,7 +150,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/resample/` | Live resampling: the pattern plays during a Sample Recorder recording (Play, or Shift+Rec); recordings after the loaded samples |
 | `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
-| `patch/headroom/` | Timing diagnostic: worst audio block and sequencer share in % of the measured block length, late blocks; its bundle specs (`all_headroom.json`, `all_polymeter_headroom.json`) |
+| `patch/headroom/` | Timing diagnostic: worst audio block and sequencer share in % of the measured block length, late blocks; its bundle specs (`all_headroom.json`, `all_tracklen_headroom.json`) |
 | `patch/versiontest/` | Version-text test patch |
 | `patch/itcmtest/` | No-op test of ITCM hooks (stubs in the ITCM tail, loaded by the startup copy table) |
 | `tools/ptf.py` | Read / convert / re-encode `.ptf` (Intel HEX), with a byte-exact round-trip check |

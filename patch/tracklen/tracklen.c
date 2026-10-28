@@ -1,10 +1,10 @@
 /*
- * polymeter: a length per track (Polyend Tracker+ firmware 1.2.0).
+ * tracklen, Variable Track Length: a length per track (Polyend Tracker+ firmware 1.2.0).
  *
  * The idea comes from a custom firmware for the Tracker Mini shown on r/PolyendTracker
  * (each track has its own length; steps past it are dimmed; all tracks line up again at
  * the end of the pattern). This is a re-implementation from that description; nothing
- * of it was seen or used. docs/POLYMETER_PLAN.md has the investigation and the plan.
+ * of it was seen or used. docs/TRACK_LENGTH_PLAN.md has the investigation and the plan.
  *
  * A track with length E shorter than the pattern plays its steps 0..E-1 over and over,
  * and starts again with every other track when the pattern ends: in a 16-step pattern a
@@ -14,11 +14,11 @@
  * all read track 1's position) behave as in stock firmware. Only the reads of a track's
  * step data change:
  *  - seq_process_track (ITCM) copies a step's 6 bytes into the track's work record at
- *    micro-step 1 with memcpy_small at ITCM 0x2170. mt_pm_step_copy reads step
+ *    micro-step 1 with memcpy_small at ITCM 0x2170. mt_tl_step_copy reads step
  *    (position mod E) instead. Every play mode goes through it: pattern loop, song mode,
  *    Play from a position, a looping selection, performance mode;
  *  - Roll looks ahead for the next note (seq_distance_to_next_note_q, ITCM 0x3958,
- *    called at 0x33a2 and 0x3520) to know how long the roll lasts. mt_pm_roll_a/_b look
+ *    called at 0x33a2 and 0x3520) to know how long the roll lasts. mt_tl_roll_a/_b look
  *    at the same steps mod E, up to the pattern's end as stock does.
  *
  * E(t) is the track's length from the table of the playing pattern (project +0x6c8)
@@ -27,25 +27,25 @@
  * is read in the audio interrupt; until it is set up (the magic word) nothing changes.
  *
  * Setting a length: the Pattern screen's page 3 gets a "Trk Len" button, on the first
- * button after the other patches' (pm_button: 2, or 3 or 4 after Humanize and Copy to
+ * button after the other patches' (tl_button: 2, or 3 or 4 after Humanize and Copy to
  * New). While it is held, the encoder changes the cursor's track's length, 1..the
  * pattern's length, and the button's second line shows it ("--" when the track follows
  * the pattern). Released, the encoder is stock's again.
- *  - mt_pm_bind chains page 3's bind of button 1 (0x600e29c6, shared with copypattern)
+ *  - mt_tl_bind chains page 3's bind of button 1 (0x600e29c6, shared with copypattern)
  *    and binds Trk Len's button as kind 3 (called on press and on release);
- *  - mt_pm_label / mt_pm_label2 chain button 6's two (empty) text calls in page 3's
+ *  - mt_tl_label / mt_tl_label2 chain button 6's two (empty) text calls in page 3's
  *    labels (0x600e58b4, 0x600e5914), the last of buttons 2..6, and then give Trk Len's
  *    button its texts, over the empty ones stock has just set;
- *  - mt_pm_colors / mt_pm_data chain More's colors and data calls (0x600e594a,
+ *  - mt_tl_colors / mt_tl_data chain More's colors and data calls (0x600e594a,
  *    0x600e5976), the only ones after the texts, and give Trk Len's button the active
  *    colors and Pattern Name's data, as page 3 gives buttons 0 and 1;
- *  - mt_pm_jog takes the Pattern screen's encoder word (0x600df2f0, pat_jog 0x600c90a1)
+ *  - mt_tl_jog takes the Pattern screen's encoder word (0x600df2f0, pat_jog 0x600c90a1)
  *    while the button is held and still bound to this patch, and redraws the grid.
  *
  * The Pattern grid shows a short track's steps E.. in each column's empty color, the one
  * stock gives a "-" cell, so they read as "nothing plays here" with their contents still
  * visible. The grid control picks each cell's color into ctrl +0x44 and draws its text
- * with patgrid_draw_cell (0x6010b204); mt_pm_cell_* chain its 5 calls (note, instrument
+ * with patgrid_draw_cell (0x6010b204); mt_tl_cell_* chain its 5 calls (note, instrument
  * twice, FX1, FX2) and swap the color for the call. Only the column's normal color is
  * swapped, so empty cells, muted tracks, the cursor and a selection look as in stock.
  *
@@ -53,7 +53,7 @@
  * next step when the hit is late, and a note-off one step further when it would land
  * on the note's own step: seq_record_live_note (ITCM 0x15c8, reached only through 8
  * flash veneers) and seq_record_note_off_q (0x600ac700, 16 calls and 2 tail calls).
- * Both pick the row inline, so mt_pm_rec_note* / mt_pm_rec_off* wrap the whole call:
+ * Both pick the row inline, so mt_tl_rec_note* / mt_tl_rec_off* wrap the whole call:
  * each short track's rows position .. position + 3 that lie past E get the contents of
  * their step mod E (what stock's rules then read); after the call, a row stock changed
  * goes to its step mod E, and the dimmed rows get their own contents back. So a short
@@ -64,7 +64,7 @@
  * rows; the fourth row covers the position moving on meanwhile; and a recording from
  * the interrupt, nested in this one, puts back exactly what it found.
  *
- * The lengths are saved per project in <project folder>/polymeter.bin (PMT1: magic, the
+ * The lengths are saved per project in <project folder>/tracklen.bin (TLN1: magic, the
  * number of entries, one 17-byte entry per pattern that has a length: its number and
  * the 16 lengths, a checksum), read and written from the Pattern and Config screens'
  * update methods (chained), one file read or write per call, in pieces of at most 256
@@ -79,13 +79,13 @@
  *    its first save.
  * Stock firmware never reads the file: there every track plays the whole pattern.
  *
- * Shared hooks go through chain words (mt_pm_next_*) that tools/patch_ptf.py fills with
+ * Shared hooks go through chain words (mt_tl_next_*) that tools/patch_ptf.py fills with
  * what the site pointed to before, so other patches can hook them too.
  */
 #include <stdint.h>
 
-#ifndef POLYMETER_VERSION
-#define POLYMETER_VERSION "pm1"
+#ifndef TRACKLEN_VERSION
+#define TRACKLEN_VERSION "tl1"
 #endif
 
 /* ---- firmware 1.2.0 addresses ------------------------------------------------------ */
@@ -195,29 +195,29 @@ typedef char *(*strncpy_fn)(char *dst, const char *src, uint32_t n);
 /* Chain words, filled in by tools/patch_ptf.py ("next" in patch.json). volatile: the
  * compiler must read them, not assume the 0 they are linked with. */
 #define CHAIN_WORD(name) const volatile uint32_t name __attribute__((used)) = 0
-CHAIN_WORD(mt_pm_next_step_copy);           /* memcpy_small, ITCM thunk 0x1f515 */
-CHAIN_WORD(mt_pm_next_roll_a);              /* seq_distance_to_next_note_q, ITCM 0x3959 */
-CHAIN_WORD(mt_pm_next_roll_b);              /* ... */
-CHAIN_WORD(mt_pm_next_bind);                /* btn_bind 0x600cf6ed (or copypattern's hook) */
-CHAIN_WORD(mt_pm_next_label);               /* disp_ctrl_set_text 0x60101d5d */
-CHAIN_WORD(mt_pm_next_label2);              /* disp_ctrl_set_ptr38 0x60101d75 */
-CHAIN_WORD(mt_pm_next_colors);              /* disp_ctrl_set_colors 0x60101da5 */
-CHAIN_WORD(mt_pm_next_data);                /* disp_ctrl_set_data 0x60101df9 */
-CHAIN_WORD(mt_pm_next_jog);                 /* pat_jog 0x600c90a1 */
-CHAIN_WORD(mt_pm_next_cell_note);           /* patgrid_draw_cell 0x6010b205 */
-CHAIN_WORD(mt_pm_next_cell_instr3);         /* ... */
-CHAIN_WORD(mt_pm_next_cell_instr);
-CHAIN_WORD(mt_pm_next_cell_fx1);
-CHAIN_WORD(mt_pm_next_cell_fx2);
-CHAIN_WORD(mt_pm_next_pattern_update);      /* Pattern screen update 0x600e1f99 (or a patch's) */
-CHAIN_WORD(mt_pm_next_config_update);       /* Config screen update 0x600c6475 (or a patch's) */
-CHAIN_WORD(mt_pm_next_save_name);           /* strncpy, in the save request (or a patch's) */
+CHAIN_WORD(mt_tl_next_step_copy);           /* memcpy_small, ITCM thunk 0x1f515 */
+CHAIN_WORD(mt_tl_next_roll_a);              /* seq_distance_to_next_note_q, ITCM 0x3959 */
+CHAIN_WORD(mt_tl_next_roll_b);              /* ... */
+CHAIN_WORD(mt_tl_next_bind);                /* btn_bind 0x600cf6ed (or copypattern's hook) */
+CHAIN_WORD(mt_tl_next_label);               /* disp_ctrl_set_text 0x60101d5d */
+CHAIN_WORD(mt_tl_next_label2);              /* disp_ctrl_set_ptr38 0x60101d75 */
+CHAIN_WORD(mt_tl_next_colors);              /* disp_ctrl_set_colors 0x60101da5 */
+CHAIN_WORD(mt_tl_next_data);                /* disp_ctrl_set_data 0x60101df9 */
+CHAIN_WORD(mt_tl_next_jog);                 /* pat_jog 0x600c90a1 */
+CHAIN_WORD(mt_tl_next_cell_note);           /* patgrid_draw_cell 0x6010b205 */
+CHAIN_WORD(mt_tl_next_cell_instr3);         /* ... */
+CHAIN_WORD(mt_tl_next_cell_instr);
+CHAIN_WORD(mt_tl_next_cell_fx1);
+CHAIN_WORD(mt_tl_next_cell_fx2);
+CHAIN_WORD(mt_tl_next_pattern_update);      /* Pattern screen update 0x600e1f99 (or a patch's) */
+CHAIN_WORD(mt_tl_next_config_update);       /* Config screen update 0x600c6475 (or a patch's) */
+CHAIN_WORD(mt_tl_next_save_name);           /* strncpy, in the save request (or a patch's) */
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
-#define PM_MAGIC            0x314D504Du     /* "MPM1" */
+#define TL_MAGIC            0x314C544Du     /* "MTL1" */
 
-struct pm_state {
+struct tl_state {
     uint32_t magic;
     uint8_t len[PATTERNS][TRACKS];          /* 0 = the pattern's length */
     uint32_t session;                       /* project name + path the lengths belong to; 0: none yet */
@@ -228,36 +228,36 @@ struct pm_state {
     uint8_t held;                           /* Trk Len is held */
     char label[4];                          /* its second line while held: "1".."128", "--" */
 };
-static struct pm_state pm_state_ram __attribute__((section(".mt_ram")));
-#define PM (&pm_state_ram)
+static struct tl_state tl_state_ram __attribute__((section(".mt_ram")));
+#define TL (&tl_state_ram)
 
 /* RAM outside .bss holds garbage at power-on. The table is zeroed before the magic
  * word says it is valid, so the audio interrupt never reads a half-made table. */
-static void pm_init_if_needed(void)
+static void tl_init_if_needed(void)
 {
-    if (PM->magic == PM_MAGIC)
+    if (TL->magic == TL_MAGIC)
         return;
-    uint8_t *len = &PM->len[0][0];
-    for (uint32_t i = 0; i < sizeof PM->len; i++)
+    uint8_t *len = &TL->len[0][0];
+    for (uint32_t i = 0; i < sizeof TL->len; i++)
         len[i] = 0;
-    PM->session = PM->save_as = 0;
-    PM->wait = SAVE_DELAY;
-    PM->load = PM->changed = PM->held = 0;
+    TL->session = TL->save_as = 0;
+    TL->wait = SAVE_DELAY;
+    TL->load = TL->changed = TL->held = 0;
     __asm__ volatile("" ::: "memory");
-    PM->magic = PM_MAGIC;
+    TL->magic = TL_MAGIC;
 }
 
 /* E(t): the length track t plays, given the pattern's length. Inlined: it runs for
  * every track on every step. */
-static inline __attribute__((always_inline)) uint32_t pm_length(uint32_t track, uint32_t pattern_len)
+static inline __attribute__((always_inline)) uint32_t tl_length(uint32_t track, uint32_t pattern_len)
 {
-    if (PM->magic != PM_MAGIC || track >= TRACKS)
+    if (TL->magic != TL_MAGIC || track >= TRACKS)
         return pattern_len;
-    uint32_t len = PM->len[*FW_PROJECT_PATTERN][track];
+    uint32_t len = TL->len[*FW_PROJECT_PATTERN][track];
     return len >= 1 && len < pattern_len ? len : pattern_len;
 }
 
-static const uint8_t *pm_pattern(const uint8_t *seq)
+static const uint8_t *tl_pattern(const uint8_t *seq)
 {
     return *(const uint8_t *const *)(seq + SEQ_PATTERN);
 }
@@ -265,44 +265,54 @@ static const uint8_t *pm_pattern(const uint8_t *seq)
 /* ITCM 0x2170, through a stub that passes r4 (seq) and r5 (track): the copy of the
  * track's step into its work record. src is the step at the track's position; a short
  * track reads the step at its position mod E instead. */
-void *mt_pm_step_copy(void *dst, const uint8_t *src, const uint8_t *seq, uint32_t track)
+void *mt_tl_step_copy(void *dst, const uint8_t *src, const uint8_t *seq, uint32_t track)
 {
-    uint32_t pattern_len = pm_pattern(seq)[PAT_LAST_STEP] + 1u;
-    uint32_t e = pm_length(track, pattern_len);
+    uint32_t pattern_len = tl_pattern(seq)[PAT_LAST_STEP] + 1u;
+    uint32_t e = tl_length(track, pattern_len);
     if (e < pattern_len) {
         uint32_t step = *(const uint16_t *)(seq + SEQ_TRACK(track) + TRK_STEP);
         src -= STEP_SIZE * (step - step % e);
     }
-    return ((copy_fn)mt_pm_next_step_copy)(dst, src, STEP_SIZE);
+    return ((copy_fn)mt_tl_next_step_copy)(dst, src, STEP_SIZE);
 }
 
 /* Roll's look-ahead: how many steps from `step` to the next step with a note (1 = the
  * next one), or to the pattern's end when none is left, as stock counts it; a short
- * track's steps are read mod E. */
-static uint32_t pm_distance(const uint8_t *seq, uint32_t track, uint32_t step, uint32_t next)
+ * track's steps are read mod E. The steps repeat every E, so at most E of them are read,
+ * each once, counted round rather than divided per step: E steps without a note means
+ * none comes before the pattern's end. */
+static uint32_t tl_distance(const uint8_t *seq, uint32_t track, uint32_t step, uint32_t next)
 {
-    const uint8_t *pattern = pm_pattern(seq);
+    const uint8_t *pattern = tl_pattern(seq);
     uint32_t last = pattern[PAT_LAST_STEP];
-    uint32_t e = pm_length(track, last + 1u);
+    uint32_t e = tl_length(track, last + 1u);
     if (e > last)
         return ((distance_fn)next)((void *)seq, track, step);
+    uint32_t pos = (step + 1u) & 0xFFu;
+    if (pos > last)
+        return 1;
+    uint32_t span = last - pos + 1u;        /* the steps up to the pattern's end */
     const int8_t *notes = (const int8_t *)(pattern + PAT_STEPS(track));
-    uint32_t d = 1;
-    for (uint32_t pos = (step + 1u) & 0xFFu; pos <= last; pos++, d++)
-        if (notes[STEP_SIZE * (pos % e)] != NOTE_EMPTY)
+    const int8_t *p = notes + STEP_SIZE * (pos % e), *end = notes + STEP_SIZE * e;
+    for (uint32_t d = 1; d <= span && d <= e; d++) {
+        if (*p != NOTE_EMPTY)
             return d;
-    return d;
+        p += STEP_SIZE;
+        if (p == end)
+            p = notes;
+    }
+    return span + 1u;
 }
 
 /* ITCM 0x33a2 and 0x3520: bl seq_distance_to_next_note_q(seq, track, step). */
-uint32_t mt_pm_roll_a(const uint8_t *seq, uint32_t track, uint32_t step)
+uint32_t mt_tl_roll_a(const uint8_t *seq, uint32_t track, uint32_t step)
 {
-    return pm_distance(seq, track, step, mt_pm_next_roll_a);
+    return tl_distance(seq, track, step, mt_tl_next_roll_a);
 }
 
-uint32_t mt_pm_roll_b(const uint8_t *seq, uint32_t track, uint32_t step)
+uint32_t mt_tl_roll_b(const uint8_t *seq, uint32_t track, uint32_t step)
 {
-    return pm_distance(seq, track, step, mt_pm_next_roll_b);
+    return tl_distance(seq, track, step, mt_tl_next_roll_b);
 }
 
 /* ---- page 3: the Trk Len button and the encoder ------------------------------------ */
@@ -333,7 +343,7 @@ static uint32_t bl_target(uint32_t at)
  * button 2 (it hooks button 2's text call); copypattern takes the first free one after
  * it (it hooks button 3's text call, whichever button it labels). So 2, 3 or 4. The
  * flash doesn't change, so every call gives the same answer, in any bundle order. */
-static uint32_t pm_button(void)
+static uint32_t tl_button(void)
 {
     return FIRST_FREE + (bl_target(BUTTON2_TEXT_CALL) != STOCK_SET_TEXT)
                       + (bl_target(BUTTON3_TEXT_CALL) != STOCK_SET_TEXT);
@@ -343,21 +353,21 @@ static uint32_t pm_button(void)
  * same one), its lengths the table's row for project +0x6c8 */
 static uint32_t edit_pattern_len(void)
 {
-    return pm_pattern((const uint8_t *)FW_SEQ)[PAT_LAST_STEP] + 1u;
+    return tl_pattern((const uint8_t *)FW_SEQ)[PAT_LAST_STEP] + 1u;
 }
 
 /* The second line: while held, the cursor's track's length, or "--" when it plays the
  * whole pattern; otherwise stock's empty text */
-static void pm_show_label(void)
+static void tl_show_label(void)
 {
-    int ctrl = button_ctrl(pm_button());
+    int ctrl = button_ctrl(tl_button());
     if (ctrl < 0)
         return;
     const char *text = FW_EMPTY_TEXT;
-    if (PM->held) {
+    if (TL->held) {
         uint32_t len = edit_pattern_len();
-        uint32_t e = pm_length(ed()[ED_CURSOR_TRACK], len);
-        char *out = PM->label;
+        uint32_t e = tl_length(ed()[ED_CURSOR_TRACK], len);
+        char *out = TL->label;
         if (e >= len) {
             *out++ = '-';
             *out++ = '-';
@@ -369,7 +379,7 @@ static void pm_show_label(void)
             *out++ = (char)('0' + e % 10);
         }
         *out = 0;
-        text = PM->label;
+        text = TL->label;
     }
     ((ctrl_fn)FW_SET_TEXT2)((void *)FW_DISPLAY, ctrl, text);
     ((display_fn)FW_CTRL_REFRESH)((void *)FW_DISPLAY, ctrl);
@@ -377,68 +387,68 @@ static void pm_show_label(void)
 }
 
 /* Trk Len's button, kind 3: state 1 on press, 0 on release */
-void mt_pm_button(uint32_t state)
+void mt_tl_button(uint32_t state)
 {
-    pm_init_if_needed();
-    PM->held = state == 1;
-    pm_show_label();
+    tl_init_if_needed();
+    TL->held = state == 1;
+    tl_show_label();
 }
 
 /* Trk Len's button is still bound to this patch. The binds of pages 1 and 2 replace or
  * clear it, so a release that went elsewhere (More pressed while holding) can't leave
  * it held. */
-static int pm_bound(void)
+static int tl_bound(void)
 {
     const uint8_t *manager = *FW_BUTTON_MANAGER;
-    uint32_t button = pm_button();
+    uint32_t button = tl_button();
     if (!manager || manager[BTN_COUNT] <= button)
         return 0;
     const uint8_t *entry = *(const uint8_t *const *)(manager + BTN_ENTRIES) + BTN_ENTRY_SIZE * button;
     return entry[0] == BTN_KIND3
-        && *(const uint32_t *)(entry + BTN_KIND3_HANDLER) == (uint32_t)mt_pm_button;
+        && *(const uint32_t *)(entry + BTN_KIND3_HANDLER) == (uint32_t)mt_tl_button;
 }
 
 /* replaces "bl btn_bind" at 0x600e29c6 (page 3: bind button 1 = Track Name); the page
  * has just cleared buttons 0..6 */
-void mt_pm_bind(void *manager, uint32_t index, uint32_t flag, void_fn handler)
+void mt_tl_bind(void *manager, uint32_t index, uint32_t flag, void_fn handler)
 {
-    ((bind_fn)mt_pm_next_bind)(manager, index, flag, handler);
-    PM->held = 0;
-    uint32_t button = pm_button();
+    ((bind_fn)mt_tl_next_bind)(manager, index, flag, handler);
+    TL->held = 0;
+    uint32_t button = tl_button();
     if (button <= LAST_BUTTON)
-        ((bind3_fn)FW_BIND_KIND3)(manager, button, mt_pm_button);
+        ((bind3_fn)FW_BIND_KIND3)(manager, button, mt_tl_button);
 }
 
 /* replaces "bl disp_ctrl_set_text" at 0x600e58b4 (page 3: button 6's empty text, the last
  * of buttons 2..6). Button 6 keeps it; Trk Len's button gets its text after it. */
-void mt_pm_label(void *display, int ctrl, const void *text)
+void mt_tl_label(void *display, int ctrl, const void *text)
 {
-    ((ctrl_fn)mt_pm_next_label)(display, ctrl, text);
-    ((ctrl_fn)FW_SET_TEXT)(display, button_ctrl(pm_button()), "Trk Len");
+    ((ctrl_fn)mt_tl_next_label)(display, ctrl, text);
+    ((ctrl_fn)FW_SET_TEXT)(display, button_ctrl(tl_button()), "Trk Len");
 }
 
 /* replaces "bl disp_ctrl_set_ptr38" at 0x600e5914 (page 3: button 6's empty second line),
  * the same way: the length while held, else empty */
-void mt_pm_label2(void *display, int ctrl, const void *text)
+void mt_tl_label2(void *display, int ctrl, const void *text)
 {
-    ((ctrl_fn)mt_pm_next_label2)(display, ctrl, text);
-    ((ctrl_fn)FW_SET_TEXT2)(display, button_ctrl(pm_button()),
-                            PM->held && PM->magic == PM_MAGIC ? PM->label : FW_EMPTY_TEXT);
+    ((ctrl_fn)mt_tl_next_label2)(display, ctrl, text);
+    ((ctrl_fn)FW_SET_TEXT2)(display, button_ctrl(tl_button()),
+                            TL->held && TL->magic == TL_MAGIC ? TL->label : FW_EMPTY_TEXT);
 }
 
 /* replaces "bl disp_ctrl_set_colors" at 0x600e594a (page 3: More's colors) */
-void mt_pm_colors(void *display, int ctrl, const void *colors)
+void mt_tl_colors(void *display, int ctrl, const void *colors)
 {
-    ((ctrl_fn)mt_pm_next_colors)(display, ctrl, colors);
+    ((ctrl_fn)mt_tl_next_colors)(display, ctrl, colors);
     const uint8_t *styles = *(const uint8_t *const *)((const uint8_t *)display + DISP_STYLES);
-    ((ctrl_fn)FW_SET_COLORS)(display, button_ctrl(pm_button()), styles + STYLE_BUTTON);
+    ((ctrl_fn)FW_SET_COLORS)(display, button_ctrl(tl_button()), styles + STYLE_BUTTON);
 }
 
 /* replaces "bl disp_ctrl_set_data" at 0x600e5976 (page 3: More's data) */
-void mt_pm_data(void *display, int ctrl, const void *data)
+void mt_tl_data(void *display, int ctrl, const void *data)
 {
-    ((ctrl_fn)mt_pm_next_data)(display, ctrl, data);
-    ((ctrl_fn)FW_SET_DATA)(display, button_ctrl(pm_button()), (const void *)(FW_PATVIEW + PATVIEW_NAME_DATA));
+    ((ctrl_fn)mt_tl_next_data)(display, ctrl, data);
+    ((ctrl_fn)FW_SET_DATA)(display, button_ctrl(tl_button()), (const void *)(FW_PATVIEW + PATVIEW_NAME_DATA));
 }
 
 /* Pattern screen encoder word 0x600df2f0 (pat_jog, r0 = the signed delta). While Trk
@@ -446,41 +456,41 @@ void mt_pm_data(void *display, int ctrl, const void *data)
  * the pattern's length itself is stored as 0, "follows the pattern". Stock's own guards
  * (an overlay, the check at its start) leave the encoder to stock, which then does
  * nothing. */
-void mt_pm_jog(int32_t delta, uint32_t a1, uint32_t a2, uint32_t a3)
+void mt_tl_jog(int32_t delta, uint32_t a1, uint32_t a2, uint32_t a3)
 {
-    if (PM->held && PM->magic == PM_MAGIC) {
-        if (!pm_bound()) {
-            PM->held = 0;
+    if (TL->held && TL->magic == TL_MAGIC) {
+        if (!tl_bound()) {
+            TL->held = 0;
         } else if (!ed()[ED_OVERLAY] && !((guard_fn)FW_JOG_GUARD)(FW_JOG_GUARD_ARG)) {
             uint32_t track = ed()[ED_CURSOR_TRACK];
             if (track < TRACKS) {
                 int32_t len = (int32_t)edit_pattern_len();
-                int32_t e = (int32_t)pm_length(track, (uint32_t)len) + delta;
+                int32_t e = (int32_t)tl_length(track, (uint32_t)len) + delta;
                 if (e < 1)
                     e = 1;
                 if (e > len)
                     e = len;
-                uint8_t *slot = &PM->len[*FW_PROJECT_PATTERN][track], was = *slot;
+                uint8_t *slot = &TL->len[*FW_PROJECT_PATTERN][track], was = *slot;
                 *slot = (uint8_t)(e < len ? e : 0);
-                PM->changed |= *slot != was;
+                TL->changed |= *slot != was;
                 int grid = *(const volatile int8_t *)(ed() + ED_GRID_CTRL);
                 if (grid >= 0)
                     ((display_fn)FW_CTRL_REFRESH)((void *)FW_DISPLAY, grid);
-                pm_show_label();
+                tl_show_label();
             }
             return;
         }
     }
-    ((jog_fn)mt_pm_next_jog)(delta, a1, a2, a3);
+    ((jog_fn)mt_tl_next_jog)(delta, a1, a2, a3);
 }
 
 /* ---- the Pattern grid ------------------------------------------------------------- */
 
 /* The cell whose text is `text`: if its step is at or past its track's length and it has
  * its column's normal color, the column's empty color; else 0 */
-static uint32_t pm_dim_color(const uint8_t *ctrl, const char *text)
+static uint32_t tl_dim_color(const uint8_t *ctrl, const char *text)
 {
-    if (PM->magic != PM_MAGIC)
+    if (TL->magic != TL_MAGIC)
         return 0;
     uint32_t off = (uint32_t)((const uint8_t *)text - *(const uint8_t *const *)(ctrl + GRID_DATA));
     if (off >= TRACKS * TRACK_ROWS)
@@ -496,7 +506,7 @@ static uint32_t pm_dim_color(const uint8_t *ctrl, const char *text)
     int32_t len = *(const uint16_t *)(ed() + ED_GRID_LENGTH);
     if (row >= GRID_ROWS || len < 1)
         return 0;
-    uint32_t e = pm_length(track, (uint32_t)len);
+    uint32_t e = tl_length(track, (uint32_t)len);
     if (e >= (uint32_t)len)
         return 0;
     int32_t step = *(const uint16_t *)(ed() + ED_GRID_CENTRE) - GRID_CENTRE_ROW + (int32_t)row;
@@ -515,11 +525,11 @@ static uint32_t pm_dim_color(const uint8_t *ctrl, const char *text)
     return normal[COLOR_EMPTY / 4];
 }
 
-static void pm_cell(uint32_t next, uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font,
+static void tl_cell(uint32_t next, uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font,
                     const char *text, uint32_t n, uint32_t w)
 {
     uint32_t *color = (uint32_t *)(ctrl + GRID_COLOR);
-    uint32_t keep = *color, dim = pm_dim_color(ctrl, text);
+    uint32_t keep = *color, dim = tl_dim_color(ctrl, text);
     if (dim)
         *color = dim;
     ((cell_fn)next)(ctrl, x, y, font, text, n, w);
@@ -529,29 +539,29 @@ static void pm_cell(uint32_t next, uint8_t *ctrl, uint32_t x, uint32_t y, uint32
 /* replace "bl patgrid_draw_cell(ctrl, x, y, font, text, n, w)" at 0x6010b3de (note),
  * 0x6010b5ae (instrument, 3 characters), 0x6010b62c (instrument), 0x6010b7be (FX1),
  * 0x6010b9c4 (FX2) */
-void mt_pm_cell_note(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
+void mt_tl_cell_note(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
 {
-    pm_cell(mt_pm_next_cell_note, ctrl, x, y, font, text, n, w);
+    tl_cell(mt_tl_next_cell_note, ctrl, x, y, font, text, n, w);
 }
 
-void mt_pm_cell_instr3(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
+void mt_tl_cell_instr3(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
 {
-    pm_cell(mt_pm_next_cell_instr3, ctrl, x, y, font, text, n, w);
+    tl_cell(mt_tl_next_cell_instr3, ctrl, x, y, font, text, n, w);
 }
 
-void mt_pm_cell_instr(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
+void mt_tl_cell_instr(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
 {
-    pm_cell(mt_pm_next_cell_instr, ctrl, x, y, font, text, n, w);
+    tl_cell(mt_tl_next_cell_instr, ctrl, x, y, font, text, n, w);
 }
 
-void mt_pm_cell_fx1(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
+void mt_tl_cell_fx1(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
 {
-    pm_cell(mt_pm_next_cell_fx1, ctrl, x, y, font, text, n, w);
+    tl_cell(mt_tl_next_cell_fx1, ctrl, x, y, font, text, n, w);
 }
 
-void mt_pm_cell_fx2(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
+void mt_tl_cell_fx2(uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text, uint32_t n, uint32_t w)
 {
-    pm_cell(mt_pm_next_cell_fx2, ctrl, x, y, font, text, n, w);
+    tl_cell(mt_tl_next_cell_fx2, ctrl, x, y, font, text, n, w);
 }
 
 /* ---- live recording --------------------------------------------------------------- */
@@ -589,15 +599,15 @@ static void audio_restore(uint32_t was)
 /* seq_record_live_note / seq_record_note_off_q(seq, source, note, velocity, a 16-bit
  * stack argument), with the rows a short track's recording can reach mapped onto the
  * steps it plays (see the top of the file) */
-static uint32_t pm_record(uint32_t next, uint8_t *seq, uint32_t source, uint32_t note, uint32_t velocity,
+static uint32_t tl_record(uint32_t next, uint8_t *seq, uint32_t source, uint32_t note, uint32_t velocity,
                           uint32_t arg)
 {
-    if (PM->magic != PM_MAGIC)
+    if (TL->magic != TL_MAGIC)
         return ((rec_fn)next)(seq, source, note, velocity, arg);
     uint8_t *pattern = *(uint8_t *const *)(seq + SEQ_PATTERN);
     uint32_t len = pattern[PAT_LAST_STEP] + 1u, tracks = 0;
     for (uint32_t t = 0; t < TRACKS; t++)
-        if (pm_length(t, len) < len)
+        if (tl_length(t, len) < len)
             tracks |= 1u << t;
     if (!tracks)
         return ((rec_fn)next)(seq, source, note, velocity, arg);
@@ -609,7 +619,7 @@ static uint32_t pm_record(uint32_t next, uint8_t *seq, uint32_t source, uint32_t
     for (uint32_t t = 0; t < TRACKS; t++) {
         if (!(tracks >> t & 1))
             continue;
-        uint32_t e = pm_length(t, len);
+        uint32_t e = tl_length(t, len);
         uint32_t pos = *(const uint16_t *)(seq + SEQ_TRACK(t) + TRK_STEP);
         uint8_t *steps = pattern + PAT_STEPS(t);
         for (uint32_t k = 0; k < REC_ROWS; k++) {
@@ -628,7 +638,7 @@ static uint32_t pm_record(uint32_t next, uint8_t *seq, uint32_t source, uint32_t
     for (uint32_t t = 0; t < TRACKS; t++) {
         if (!(tracks >> t & 1))
             continue;
-        uint32_t e = pm_length(t, len);
+        uint32_t e = tl_length(t, len);
         uint8_t *steps = pattern + PAT_STEPS(t);
         for (uint32_t k = 0; k < REC_ROWS; k++) {
             uint32_t x = row_of[t][k];
@@ -646,11 +656,11 @@ static uint32_t pm_record(uint32_t next, uint8_t *seq, uint32_t source, uint32_t
 /* One hook per site, each with its own chain word: the 8 veneers' literal words for
  * seq_record_live_note (0x15c9), and the 18 calls of seq_record_note_off_q */
 #define REC_HOOK(name)                                                                      \
-    CHAIN_WORD(mt_pm_next_##name);                                                          \
-    uint32_t mt_pm_##name(uint8_t *seq, uint32_t source, uint32_t note, uint32_t velocity,  \
+    CHAIN_WORD(mt_tl_next_##name);                                                          \
+    uint32_t mt_tl_##name(uint8_t *seq, uint32_t source, uint32_t note, uint32_t velocity,  \
                           uint32_t arg)                                                     \
     {                                                                                       \
-        return pm_record(mt_pm_next_##name, seq, source, note, velocity, arg);              \
+        return tl_record(mt_tl_next_##name, seq, source, note, velocity, arg);              \
     }
 REC_HOOK(rec_note1) REC_HOOK(rec_note2) REC_HOOK(rec_note3) REC_HOOK(rec_note4)
 REC_HOOK(rec_note5) REC_HOOK(rec_note6) REC_HOOK(rec_note7) REC_HOOK(rec_note8)
@@ -659,7 +669,7 @@ REC_HOOK(rec_off6) REC_HOOK(rec_off7) REC_HOOK(rec_off8) REC_HOOK(rec_off9) REC_
 REC_HOOK(rec_off11) REC_HOOK(rec_off12) REC_HOOK(rec_off13) REC_HOOK(rec_off14) REC_HOOK(rec_off15)
 REC_HOOK(rec_off16) REC_HOOK(rec_off17) REC_HOOK(rec_off18)
 
-/* ---- polymeter.bin (main loop: the screens' update methods) ------------------------ */
+/* ---- tracklen.bin (main loop: the screens' update methods) ------------------------ */
 
 struct fs_open_result { uint32_t handle; uint8_t ok; uint8_t pad[3]; };
 typedef void (*fs_open_fn)(struct fs_open_result *res, void *fs, const char *path, uint32_t mode, uint32_t x);
@@ -675,7 +685,7 @@ typedef void (*fs_remove_fn)(void *fs, const char *path);
 #define FS_MODE_READ        0u
 #define FS_MODE_WRITE       3u              /* FatFs create-always + RW, as the pattern save */
 
-#define FILE_MAGIC          0x31544D50u     /* "PMT1" */
+#define FILE_MAGIC          0x314E4C54u     /* "TLN1" */
 #define FILE_HEADER         8u              /* magic, the number of entries */
 #define ENTRY_SIZE          (1u + TRACKS)   /* the pattern's number, its 16 lengths */
 #define CHUNK_ENTRIES       15u             /* 255 bytes a read or write */
@@ -734,7 +744,7 @@ static int lengths_path(char *path, uint32_t size)
 {
     if (project_unsaved())
         return 0;
-    int n = ((snprintf_fn)FW_SNPRINTF)(path, size, "%s/%s/polymeter.bin",
+    int n = ((snprintf_fn)FW_SNPRINTF)(path, size, "%s/%s/tracklen.bin",
                                        (const char *)FW_PROJECT_PATH, (const char *)FW_PROJECT_NAME);
     return n > 0 && (uint32_t)n < size;
 }
@@ -748,8 +758,8 @@ static int file_manager_idle(void)
 
 static void clear_lengths(void)
 {
-    uint8_t *len = &PM->len[0][0];
-    for (uint32_t i = 0; i < sizeof PM->len; i++)
+    uint8_t *len = &TL->len[0][0];
+    for (uint32_t i = 0; i < sizeof TL->len; i++)
         len[i] = 0;
 }
 
@@ -774,7 +784,7 @@ static int read_lengths(void *fs, const char *path, int apply)
             ok = entry[0] != 0;             /* patterns 1..255 */
             if (ok && apply)
                 for (uint32_t t = 0; t < TRACKS; t++)
-                    PM->len[entry[0]][t] = entry[1 + t];
+                    TL->len[entry[0]][t] = entry[1 + t];
         }
         sum = data_sum(sum, buf, n * ENTRY_SIZE);
         left -= n;
@@ -800,7 +810,7 @@ static uint32_t has_lengths(uint32_t pattern)
 {
     uint32_t any = 0;
     for (uint32_t t = 0; t < TRACKS; t++)
-        any |= PM->len[pattern][t];
+        any |= TL->len[pattern][t];
     return any;
 }
 
@@ -833,7 +843,7 @@ static int save_lengths(void)
             uint8_t *entry = buf + ENTRY_SIZE * n++;
             entry[0] = (uint8_t)p;
             for (uint32_t t = 0; t < TRACKS; t++)
-                entry[1 + t] = PM->len[p][t];
+                entry[1 + t] = TL->len[p][t];
         }
         if (n && (n == CHUNK_ENTRIES || p == PATTERNS)) {
             sum = data_sum(sum, buf, n * ENTRY_SIZE);
@@ -850,49 +860,49 @@ static int save_lengths(void)
 /* At most one file read or write per call. 1: the lengths were (re)loaded. */
 static int lengths_tick(void)
 {
-    pm_init_if_needed();
+    tl_init_if_needed();
     if (!*(void **)FW_FM)
         return 0;
     uint32_t session = project_session();
     int unsaved = project_unsaved();
-    if (session != PM->session) {
-        int save_as = session == PM->save_as;   /* the same project under its new name */
-        PM->save_as = 0;
-        PM->session = session;
-        PM->wait = SAVE_DELAY;
-        PM->load = !(unsaved || save_as);
-        PM->changed = (uint8_t)save_as;     /* after a Save As: written to the new folder */
+    if (session != TL->session) {
+        int save_as = session == TL->save_as;   /* the same project under its new name */
+        TL->save_as = 0;
+        TL->session = session;
+        TL->wait = SAVE_DELAY;
+        TL->load = !(unsaved || save_as);
+        TL->changed = (uint8_t)save_as;     /* after a Save As: written to the new folder */
         if (!save_as)                       /* nothing of the old project plays on */
             clear_lengths();
     }
     if (!file_manager_idle())
         return 0;
-    if (PM->load) {
-        PM->load = 0;
+    if (TL->load) {
+        TL->load = 0;
         load_lengths();
-        PM->changed = 0;                    /* nothing to write until a length changes */
+        TL->changed = 0;                    /* nothing to write until a length changes */
         return 1;
     }
-    if (unsaved || !PM->changed) {
-        PM->wait = SAVE_DELAY;
+    if (unsaved || !TL->changed) {
+        TL->wait = SAVE_DELAY;
         return 0;
     }
-    if (PM->wait) {
-        PM->wait--;
+    if (TL->wait) {
+        TL->wait--;
         return 0;
     }
-    PM->wait = SAVE_DELAY;
+    TL->wait = SAVE_DELAY;
     if (save_lengths())
-        PM->changed = 0;
+        TL->changed = 0;
     return 0;
 }
 
 /* Pattern screen vtable slot 0x600403dc (update method 0x600e1f99; chained). Lengths
  * loaded while the screen is up redraw the grid. */
-void mt_pm_pattern_update(void *screen, void *a1, void *a2, void *a3)
+void mt_tl_pattern_update(void *screen, void *a1, void *a2, void *a3)
 {
     int loaded = lengths_tick();
-    ((update_fn)mt_pm_next_pattern_update)(screen, a1, a2, a3);
+    ((update_fn)mt_tl_next_pattern_update)(screen, a1, a2, a3);
     int grid = *(const volatile int8_t *)(ed() + ED_GRID_CTRL);
     if (loaded && grid >= 0)
         ((display_fn)FW_CTRL_REFRESH)((void *)FW_DISPLAY, grid);
@@ -900,22 +910,22 @@ void mt_pm_pattern_update(void *screen, void *a1, void *a2, void *a3)
 
 /* Config screen vtable slot 0x6003b5f8 (update method 0x600c6475; chained): projects are
  * opened and saved from there */
-void mt_pm_config_update(void *screen, void *a1, void *a2, void *a3)
+void mt_tl_config_update(void *screen, void *a1, void *a2, void *a3)
 {
     lengths_tick();
-    ((update_fn)mt_pm_next_config_update)(screen, a1, a2, a3);
+    ((update_fn)mt_tl_next_config_update)(screen, a1, a2, a3);
 }
 
 /* 0x60114eaa in the save request 0x60114e34: "bl strncpy(fm + 0x340, name, 0x21)",
  * run only for Save As, after the new path is copied. The next tick sees the new
  * session and keeps the lengths for it. */
-char *mt_pm_save_name(char *dst, const char *src, uint32_t n)
+char *mt_tl_save_name(char *dst, const char *src, uint32_t n)
 {
-    char *r = ((strncpy_fn)mt_pm_next_save_name)(dst, src, n);
-    pm_init_if_needed();
-    PM->save_as = project_session();
+    char *r = ((strncpy_fn)mt_tl_next_save_name)(dst, src, n);
+    tl_init_if_needed();
+    TL->save_as = project_session();
     return r;
 }
 
-/* Config's version text: 1.2.0-pm1 */
-const char mt_version_fmt[] = "%d.%d.%d-" POLYMETER_VERSION;
+/* Config's version text: 1.2.0-tl1 */
+const char mt_version_fmt[] = "%d.%d.%d-" TRACKLEN_VERSION;

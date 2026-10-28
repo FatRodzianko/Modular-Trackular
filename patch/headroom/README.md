@@ -20,7 +20,7 @@ hardware.
 |---|---|---|
 | `patch/headroom/patch.json` | `hr1` | headroom alone, on stock firmware |
 | `patch/headroom/all_headroom.json` | `MH1` | patch/all's patches, then headroom |
-| `patch/headroom/all_polymeter_headroom.json` | `MH2` | patch/all's patches, polymeter, then headroom |
+| `patch/headroom/all_tracklen_headroom.json` | `MH2` | patch/all's patches, tracklen, then headroom |
 
 Headroom must be **listed last** in a bundle. Its sequencer hook then runs before the
 other patches' hooks on the same call, so its figure includes them.
@@ -84,7 +84,7 @@ No compiler needed (the compiled patch is in `prebuilt/`):
 ```bash
 python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/headroom/patch.json build/TrackerPlus_hr1.ptf
 python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/headroom/all_headroom.json build/TrackerPlus_MH1.ptf
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/headroom/all_polymeter_headroom.json build/TrackerPlus_MH2.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/headroom/all_tracklen_headroom.json build/TrackerPlus_MH2.ptf
 ```
 
 From source, with the Arm GNU Toolchain: `patch/headroom/build.sh`.

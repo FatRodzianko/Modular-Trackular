@@ -1,9 +1,9 @@
-"""Check the polymeter patch (a length per track): playback, the Trk Len button, the grid,
+"""Check the tracklen patch (Variable Track Length: a length per track): playback, the Trk Len button, the grid,
 live recording and the lengths' file.
 
-  python tools/emu/test_polymeter.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf>
+  python tools/emu/test_tracklen.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf>
 
-Works with the polymeter-only build and with bundles that include it. The sequencer runs
+Works with the tracklen-only build and with bundles that include it. The sequencer runs
 tick by tick (seq_tick), MIDI instruments on the tracks, with fake MIDI ports that
 record each note and the tick it went out. Track lengths are set by writing the patch's
 table (its RAM, found through the .map.json): magic, then 256 patterns x 16 tracks.
@@ -95,9 +95,9 @@ manager, the stock page-3 bind and label code, and the display calls recorded:
    result as the first. The patch's own writes to the pattern happen with the audio
    interrupt (NVIC bit 0) masked, and stock records with the interrupt as the caller
    left it (the recorders mask and enable it themselves).
-18. The lengths' file (polymeter.bin on the fake SD card of tools/emu/fakefs.py), through
+18. The lengths' file (tracklen.bin on the fake SD card of tools/emu/fakefs.py), through
    the Pattern and Config screens' update hooks: nothing written while nothing changed;
-   a change written once, a moment later (PMT1, the entries, a checksum); every pattern
+   a change written once, a moment later (TLN1, the entries, a checksum); every pattern
    with lengths (4,347 bytes) written and read back, every read and write at most 256
    bytes; another project clears them, coming back reads them; a damaged, short or
    wrong file (checksum, magic, count, pattern 0, truncated, empty) gives none, none of
@@ -128,7 +128,7 @@ SEQ, PROJECT = st.SEQ, st.PROJECT
 CUR_PATTERN = PROJECT + 0x6C8
 SITES = {0x2170: "step copy", 0x33A2: "Roll look-ahead (a)", 0x3520: "Roll look-ahead (b)"}
 DISTANCE = 0x3958                   # seq_distance_to_next_note_q (stock, ITCM)
-MAGIC = 0x314D504D
+MAGIC = 0x314C544D
 ROLL, MICRO_MOVE, BREAK, VOLUME = 3, 2, 13, 18
 VOICE_NOTE_ON = 0x5C04              # sample voices
 NOTE_ON_OUT = 0x600ABB44            # synths (as test_condtrig)
@@ -184,8 +184,8 @@ CONFIG_UPDATE_SLOT, CONFIG_UPDATE = 0x6003B5F8, 0x600C6474
 CTRL_REFRESH = 0x60101E84
 FM_STATE = 0x2001E488 + 0x13D
 SAVE_DELAY = 25
-PM_CHANGED = 0x100F                     # the patch's RAM: a length changed since the file
-PM_SIZE = 0x1018
+TL_CHANGED = 0x100F                     # the patch's RAM: a length changed since the file
+TL_SIZE = 0x1018
 
 failures: list[str] = []
 
@@ -255,7 +255,7 @@ def pair(ptf: Path, stock: Path, last: int, tracks: dict[int, tuple[int, list]],
     is written; ticks defaults to 3 passes. Returns the two event lists."""
     out = []
     for path, patched in ((ptf, True), (stock, False)):
-        rig = Rig(path, last, patch_ram(ptf, "polymeter") if patched else None)
+        rig = Rig(path, last, patch_ram(ptf, "tracklen") if patched else None)
         for t, (e, steps) in tracks.items():
             for s in range(last + 1):
                 if patched and s >= e:
@@ -366,13 +366,13 @@ def page3_buttons(ptf: Path) -> tuple[dict[int, str], int]:
 
 
 def button_checks(ptf: Path, stock: Path) -> None:
-    code = patch_code(ptf, "polymeter")
+    code = patch_code(ptf, "tracklen")
     others = page3_others(ptf)
     used, ours = page3_buttons(ptf)
     free = [b for b in range(2, 7) if b != ours and b not in used]
     print(f"Trk Len: the bind and the labels (Pattern screen, page 3): button {ours} expected"
           + (f" (with {', '.join(others)})" if others else ""))
-    r = UiRig(ptf, table=patch_ram(ptf, "polymeter"))
+    r = UiRig(ptf, table=patch_ram(ptf, "tracklen"))
     for rec in (0, 1):
         r.m.w8(ED + ED_RECORD, rec)
         r.bind()
@@ -419,15 +419,15 @@ def button_checks(ptf: Path, stock: Path) -> None:
 
 def hold_checks(ptf: Path) -> None:
     print("Trk Len held: the encoder sets the cursor's track's length")
-    table = patch_ram(ptf, "polymeter")
+    table = patch_ram(ptf, "tracklen")
     r = UiRig(ptf, table=None)
     r.table = table
     m = r.m
-    m.write(table, bytes([0xA5]) * PM_SIZE)
+    m.write(table, bytes([0xA5]) * TL_SIZE)
     r.bind()
     r.button(1)
     check(m.r32(table) == MAGIC and m.uc.mem_read(table + 4, 256 * 16) == bytes(256 * 16)
-          and r.r8(table + PM_CHANGED) == 0,
+          and r.r8(table + TL_CHANGED) == 0,
           "the first press sets up the table from garbage (magic, all lengths 0, nothing to save)")
     check(r.text2() == "--" and any(n == "refresh" and c == CTRL0 + TRK_LEN for n, c, _ in r.calls),
           f"press: the second line reads {r.text2()!r} and is redrawn")
@@ -436,14 +436,14 @@ def hold_checks(ptf: Path) -> None:
         r.jog(delta)
         check(r.stored(0) == want and r.text2() == label and not r.jogs,
               f"encoder {delta:+d}: track 1 length {r.stored(0)} ({r.text2()!r}), stock's encoder not called")
-    check(r.r8(table + PM_CHANGED) == 1, "a length changed: marked for the file")
-    m.w8(table + PM_CHANGED, 0)
+    check(r.r8(table + TL_CHANGED) == 1, "a length changed: marked for the file")
+    m.w8(table + TL_CHANGED, 0)
     for delta in (0, -10):                      # 6 stays 6; 1 - 10 clamps to 1
         if delta < 0:
             r.jog(-5)
-            m.w8(table + PM_CHANGED, 0)
+            m.w8(table + TL_CHANGED, 0)
         r.jog(delta)
-        check(r.stored(0) == (6 if delta == 0 else 1) and r.r8(table + PM_CHANGED) == 0,
+        check(r.stored(0) == (6 if delta == 0 else 1) and r.r8(table + TL_CHANGED) == 0,
               f"encoder {delta:+d} that leaves the length as it was ({r.stored(0)}): nothing marked")
     r.jog(5)
     m.w8(ED + ED_CURSOR_TRACK, 3)
@@ -535,8 +535,8 @@ def jog_ram(ptf: Path, press: bool, scenario, deltas=(1, 1, -1, 3, -2, 5, -7, 1)
         calls.append([(n, c) for n, c, _ in r.calls])
     skip = []
     try:
-        lo = patch_ram(ptf, "polymeter")
-        skip = [(lo, lo + PM_SIZE)]
+        lo = patch_ram(ptf, "tracklen")
+        skip = [(lo, lo + TL_SIZE)]
     except SystemExit:
         pass
     dumps = []
@@ -553,8 +553,8 @@ def jog_ram(ptf: Path, press: bool, scenario, deltas=(1, 1, -1, 3, -2, 5, -7, 1)
 def stock_jog_checks(ptf: Path, stock: Path) -> None:
     print("Without the hold the encoder is stock's")
     names = [p["name"] for p in json.loads(ptf.with_suffix(".map.json").read_text())["patches"]]
-    if names != ["polymeter"]:
-        print(f"  (skipped: compared with stock only on polymeter alone; this build has {len(names)} patches)")
+    if names != ["tracklen"]:
+        print(f"  (skipped: compared with stock only on tracklen alone; this build has {len(names)} patches)")
         return
 
     def column(rec, col, row=0, track=0):
@@ -584,16 +584,16 @@ def stock_jog_checks(ptf: Path, stock: Path) -> None:
 def site_checks(ptf: Path) -> None:
     print("Sites")
     stubs = json.loads(ptf.with_suffix(".map.json").read_text())["itcm_stubs"]["sites"]
-    ours = {int(s["at"], 16) for s in stubs if s["patch"] == "polymeter"}
+    ours = {int(s["at"], 16) for s in stubs if s["patch"] == "tracklen"}
     for at, what in SITES.items():
-        check(at in ours, f"ITCM {at:#x} ({what}) goes through a stub to polymeter")
+        check(at in ours, f"ITCM {at:#x} ({what}) goes through a stub to tracklen")
 
 
 def stock_checks(ptf: Path, stock: Path) -> None:
     print("No lengths: as stock firmware")
     others = [(t, s, 40 + s, (MICRO_MOVE, 20 * (s % 3)) if t % 2 else (VOLUME, 50), (ROLL, 6) if s % 5 == 0 else (0, 0))
               for t in (0, 1, 7, 15) for s in range(16) if (s + t) % 3]
-    ram = patch_ram(ptf, "polymeter")
+    ram = patch_ram(ptf, "tracklen")
     cases = (("table set up, no lengths", None),
              ("table not set up (no magic)", lambda r: r.m.w32(ram, 0)),
              ("lengths 0, 16 and 40 in a 16-step pattern", lambda r: (r.length(0, 16), r.length(1, 40), r.length(7, 0))),
@@ -620,7 +620,7 @@ def length_checks(ptf: Path, stock: Path) -> None:
     for e in (1, 5, 6, 15):
         a, b = pair(ptf, stock, 15, {0: (e, notes_steps(e))}, others=[(1, s, 70 + s, (0, 0), (0, 0)) for s in range(16)])
         check(a == b and len(a) > 40, f"track 1 length {e} in 16 steps: {len(a)} events as the oracle")
-    rig = Rig(ptf, 15, patch_ram(ptf, "polymeter"))
+    rig = Rig(ptf, 15, patch_ram(ptf, "tracklen"))
     for s in range(16):
         rig.put(0, s, 40 + s)
     rig.length(0, 6)
@@ -634,7 +634,7 @@ def length_checks(ptf: Path, stock: Path) -> None:
     check(a == b and len(a) > 300, f"all 16 tracks, lengths 1..16 at once: {len(a)} events as the oracle")
 
     # positions and the pattern's end: track 16 short, every position still runs 0..15
-    rig = Rig(ptf, 15, patch_ram(ptf, "polymeter"))
+    rig = Rig(ptf, 15, patch_ram(ptf, "tracklen"))
     for s in range(16):
         rig.put(15, s, 40 + s)
         rig.put(1, s, 40 + s)
@@ -706,8 +706,8 @@ def mode_checks(ptf: Path, stock: Path) -> None:
 def roll_checks(ptf: Path, stock: Path) -> None:
     print("Roll's look-ahead")
     hooks = {int(s["at"], 16): int(s["hook"], 16) for s in
-             json.loads(ptf.with_suffix(".map.json").read_text())["itcm_stubs"]["sites"] if s["patch"] == "polymeter"}
-    ram = patch_ram(ptf, "polymeter")
+             json.loads(ptf.with_suffix(".map.json").read_text())["itcm_stubs"]["sites"] if s["patch"] == "tracklen"}
+    ram = patch_ram(ptf, "tracklen")
     pm = Rig(ptf, 15, ram)
     sk = Rig(stock, 15)
     content = {0: None, 3: 50, 5: 52, 9: 60, 13: 64}            # notes on the 6-step track 1 and on track 2
@@ -719,22 +719,25 @@ def roll_checks(ptf: Path, stock: Path) -> None:
     for s in range(16):
         if s % 6 in content and content[s % 6] is not None:
             sk.put(0, s, content[s % 6])
+    pm.put(2, 9, 60)                                            # track 3, length 5: a note only past it
     pm.length(0, 6)
+    pm.length(2, 5)
     bad = []
     for at in (0x33A2, 0x3520):
-        for t in (0, 1):
+        for t in (0, 1, 2):
             for step in range(16):
                 got = pm.m.call(hooks[at] | 1, SEQ, t, step)
                 want = sk.m.call(DISTANCE | 1, SEQ, t, step)
                 if got != want:
                     bad.append((hex(at), t, step, got, want))
-    check(not bad, f"both hooks, every step of a 6-step track and of a track without a length: as stock "
-                   f"on the written-out pattern{'' if not bad else f' (differs: {bad[:4]})'}")
+    check(not bad, f"both hooks, every step of a 6-step track, a 5-step track with no note in its steps and a "
+                   f"track without a length: as stock on the written-out pattern"
+                   f"{'' if not bad else f' (differs: {bad[:4]})'}")
 
 
 def song_checks(ptf: Path) -> None:
     print("Song mode, pattern A then B")
-    rig = Rig(ptf, 15, patch_ram(ptf, "polymeter"))
+    rig = Rig(ptf, 15, patch_ram(ptf, "tracklen"))
     m = rig.m
     a_buf, b_buf = st.pattern(m, 15), st.pattern(m, 15)
     for s in range(16):
@@ -770,11 +773,11 @@ def song_checks(ptf: Path) -> None:
 
 def cost_checks(ptf: Path) -> None:
     print("Cost (instructions in the patch's code and its ITCM stubs, 16 tracks with notes, 4 passes)")
-    lo, hi = patch_code(ptf, "polymeter")
+    lo, hi = patch_code(ptf, "tracklen")
     stubs = [int(x["stub"], 16) for x in json.loads(ptf.with_suffix(".map.json").read_text())["itcm_stubs"]["sites"]
-             if x["patch"] == "polymeter"]
+             if x["patch"] == "tracklen"]
     for label, short in (("no lengths", False), ("16 tracks of length 5", True)):
-        rig = Rig(ptf, 15, patch_ram(ptf, "polymeter"))
+        rig = Rig(ptf, 15, patch_ram(ptf, "tracklen"))
         for t in range(16):
             for s in range(16):
                 rig.put(t, s, 40 + s)
@@ -865,7 +868,7 @@ class GridRig:
 
 def grid_checks(ptf: Path, stock: Path) -> None:
     print("The Pattern grid: steps past a track's length in the column's empty color")
-    table = patch_ram(ptf, "polymeter")
+    table = patch_ram(ptf, "tracklen")
     dim_sites: set[int] = set()
 
     def case(what, last, lengths, **kw):
@@ -1039,7 +1042,7 @@ def rec_case(ptf: Path, stock: Path, table: int, what: str, last: int, lengths: 
 
 def record_checks(ptf: Path, stock: Path) -> None:
     print("Live recording onto a short track's steps")
-    table = patch_ram(ptf, "polymeter")
+    table = patch_ram(ptf, "tracklen")
     real = {0: {2: 42}}                         # track 1, length 6: a note on step 2 only
     at = lambda step, micro=8: STEP * step + 12 * micro
     rec_case(ptf, stock, table, "early hit on step 11 (row 10 -> step 4)", 15, {0: 6}, real,
@@ -1076,7 +1079,7 @@ def record_checks(ptf: Path, stock: Path) -> None:
     r.record()
     r.run(at(10) - at(9, 0))
     m = r.m
-    lo, hi = patch_code(ptf, "polymeter")
+    lo, hi = patch_code(ptf, "tracklen")
     ours: list[int] = []                        # ISER bit 0 at each of the patch's writes to the pattern
 
     def write(uc, access, a, size, value, user):
@@ -1133,16 +1136,16 @@ def fnv1a(data: bytes) -> int:
     return h
 
 
-def pmt1(lengths: dict[int, tuple]) -> bytes:
-    """polymeter.bin for {pattern: 16 lengths}: PMT1, the count, the entries, a checksum"""
+def tln1(lengths: dict[int, tuple]) -> bytes:
+    """tracklen.bin for {pattern: 16 lengths}: TLN1, the count, the entries, a checksum"""
     entries = b"".join(bytes([p]) + bytes(v) for p, v in sorted(lengths.items()) if any(v))
     count = struct.pack("<I", len(entries) // 17)
-    return b"PMT1" + count + entries + struct.pack("<I", fnv1a(count + entries))
+    return b"TLN1" + count + entries + struct.pack("<I", fnv1a(count + entries))
 
 
 def file_checks(ptf: Path) -> None:
-    print("the lengths' file (polymeter.bin), through the screens' update hooks")
-    table = patch_ram(ptf, "polymeter")
+    print("the lengths' file (tracklen.bin), through the screens' update hooks")
+    table = patch_ram(ptf, "tracklen")
     m = mach.Machine(ptf)
     fs = FakeFS(m, Path("."))
     m.stub_function(PATTERN_UPDATE, lambda mm: 0)
@@ -1151,7 +1154,7 @@ def file_checks(ptf: Path) -> None:
     m.stub_function(CTRL_REFRESH, lambda mm: refreshed.append(mm.arg(1)))
     m.w8(ED + ED_GRID_CTRL, 0xFF)               # no grid control: the Pattern screen not built
     pat_hook, cfg_hook = m.r32(PATTERN_UPDATE_SLOT), m.r32(CONFIG_UPDATE_SLOT)
-    m.write(table, bytes([0xA5]) * PM_SIZE)     # RAM at power-on
+    m.write(table, bytes([0xA5]) * TL_SIZE)     # RAM at power-on
 
     def tick(n=1, hook=None):
         for _ in range(n):
@@ -1166,13 +1169,13 @@ def file_checks(ptf: Path) -> None:
         for p, v in lengths.items():
             raw[16 * p:16 * p + 16] = bytes(v)
         m.write(table + 4, bytes(raw))
-        m.w8(table + PM_CHANGED, 1)
+        m.w8(table + TL_CHANGED, 1)
 
     def path(name):
-        return f"Projects/User/{name}/polymeter.bin"
+        return f"Projects/User/{name}/tracklen.bin"
 
     def writes():
-        return len([x for x in fs.log if "polymeter.bin mode 3" in x])
+        return len([x for x in fs.log if "tracklen.bin mode 3" in x])
 
     def reopen(name="A", hook=None):
         fs.set_project(Path("."), "B" if name != "B" else "C", "Projects/User")
@@ -1188,7 +1191,7 @@ def file_checks(ptf: Path) -> None:
 
     fs.set_project(Path("."), "A", "Projects/User")
     tick()
-    check(m.r32(table) == MAGIC and get() == {}, "power-on garbage, a project without polymeter.bin: no lengths")
+    check(m.r32(table) == MAGIC and get() == {}, "power-on garbage, a project without tracklen.bin: no lengths")
     tick(SAVE_DELAY + 5)
     check(writes() == 0 and not fs.removed, "nothing written while nothing changed")
     a = {1: lens(t1=6), 200: lens(t3=5, t16=100)}
@@ -1196,8 +1199,8 @@ def file_checks(ptf: Path) -> None:
     tick(SAVE_DELAY - 2)
     check(writes() == 0, "no write right after a change")
     tick(5)
-    check(writes() == 1 and fs.overlay.get(path("A")) == pmt1(a),
-          f"the change is written once, a moment later (PMT1, 2 entries: {len(pmt1(a))} bytes)")
+    check(writes() == 1 and fs.overlay.get(path("A")) == tln1(a),
+          f"the change is written once, a moment later (TLN1, 2 entries: {len(tln1(a))} bytes)")
     tick(SAVE_DELAY * 2)
     check(writes() == 1, "and not again while nothing changes")
     reopen("B")
@@ -1208,23 +1211,23 @@ def file_checks(ptf: Path) -> None:
     full = {p: tuple((p + t) % 120 + 1 for t in range(16)) for p in range(1, 256)}
     put(full)
     tick(SAVE_DELAY + 5)
-    check(fs.overlay.get(path("A")) == pmt1(full) and len(pmt1(full)) == 8 + 255 * 17 + 4,
-          f"every pattern with lengths: {len(pmt1(full))} bytes written")
+    check(fs.overlay.get(path("A")) == tln1(full) and len(tln1(full)) == 8 + 255 * 17 + 4,
+          f"every pattern with lengths: {len(tln1(full))} bytes written")
     reopen()
     check(get() == full, "and read back whole")
     check(max(fs.read_sizes + fs.write_sizes) <= 256, f"every read and write is at most 256 bytes "
           f"(largest {max(fs.read_sizes + fs.write_sizes)})")
 
-    good = pmt1(a)
+    good = tln1(a)
     body = good[4:-4]
     count = struct.pack("<I", 3)
     zero = struct.pack("<I", 1) + bytes(17)
     for label, bad in (("a wrong checksum", good[:-1] + bytes([good[-1] ^ 1])),
                        ("a wrong magic", b"X" + good[1:]),
-                       ("a count of 256", b"PMT1" + struct.pack("<I", 256) + good[8:]),
-                       ("more entries counted than there are", b"PMT1" + count + body[4:]
+                       ("a count of 256", b"TLN1" + struct.pack("<I", 256) + good[8:]),
+                       ("more entries counted than there are", b"TLN1" + count + body[4:]
                         + struct.pack("<I", fnv1a(count + body[4:]))),
-                       ("an entry for pattern 0", b"PMT1" + zero + struct.pack("<I", fnv1a(zero))),
+                       ("an entry for pattern 0", b"TLN1" + zero + struct.pack("<I", fnv1a(zero))),
                        ("the checksum missing", good[:-4]),
                        ("the header only", good[:8]),
                        ("an empty file", b"")):
@@ -1251,9 +1254,9 @@ def file_checks(ptf: Path) -> None:
     tick()
     m.w8(FM_STATE, 5)                           # the file manager busy (a project being opened)
     fs.set_project(Path("."), "A", "Projects/User")
-    reads = len([x for x in fs.log if "polymeter.bin mode 0" in x])
+    reads = len([x for x in fs.log if "tracklen.bin mode 0" in x])
     tick(3)
-    check(len([x for x in fs.log if "polymeter.bin mode 0" in x]) == reads and get() == {},
+    check(len([x for x in fs.log if "tracklen.bin mode 0" in x]) == reads and get() == {},
           "while the file manager is busy: the file isn't read yet (no lengths)")
     m.w8(FM_STATE, 0)
     m.w8(ED + ED_GRID_CTRL, 9)
@@ -1277,7 +1280,7 @@ def file_checks(ptf: Path) -> None:
     check(writes() == n, "a project without a name: nothing written")
     check(not any("mode 3" in x and ".mtp" in x for x in fs.log), "no pattern file is written")
 
-    save_as_checks(check, m, fs, tick, "polymeter.bin", get, put, {}, a, {7: lens(t2=3)}, pmt1, SAVE_DELAY)
+    save_as_checks(check, m, fs, tick, "tracklen.bin", get, put, {}, a, {7: lens(t2=3)}, tln1, SAVE_DELAY)
 
 
 def main() -> int:

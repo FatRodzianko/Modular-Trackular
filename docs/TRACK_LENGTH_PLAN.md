@@ -1,4 +1,9 @@
-# Polymeter (a length per track): plan (firmware 1.2.0)
+# Variable Track Length (a length per track): plan (firmware 1.2.0)
+
+> This patch was planned and built as "polymeter" (`patch/polymeter`, `pm1`,
+> `polymeter.bin`). It is now Variable Track Length: `patch/tracklen`, version `tl1`,
+> lengths in `tracklen.bin` (header `TLN1`). The tracks don't run free across the
+> pattern's end, so "polymeter" overstated it. The plan below keeps the old name.
 
 Each track gets its own length inside a pattern. A shorter track loops its own steps
 until the pattern ends, and then every track starts again together. In a 16-step

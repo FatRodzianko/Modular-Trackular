@@ -1,6 +1,6 @@
 {
-  "name": "all-polymeter-headroom",
-  "description": "patch/all, then polymeter, with headroom last (diagnostic)",
+  "name": "all-tracklen-headroom",
+  "description": "patch/all, then tracklen, with headroom last (diagnostic)",
   "firmware": "TrackerPlus 1.2.0",
   "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
   "include": [
@@ -16,7 +16,7 @@
     "../copypattern/patch.json",
     "../slicethru/patch.json",
     "../resample/patch.json",
-    "../polymeter/patch.json",
+    "../tracklen/patch.json",
     "../headroom/patch.json"
   ],
   "version": "MH2",
