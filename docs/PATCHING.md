@@ -124,6 +124,7 @@ must be byte-identical to these builds:
 | the previous slicethru (without Loop) | `TrackerPlus_bt4.ptf` | `1.2.0-bt4` | tested | `8aed6732660f5c8e8ab231b20fbfa58bfaf3b875896ce790b5b9ae2bd6552232` |
 | the previous slicethru (Save As dropped the setting) | `TrackerPlus_bt3.ptf` | `1.2.0-bt3` | tested | `76e0a004302bb9e57d214cb04cf0053e906f1b6de3141a4ad4809f440de2cb2e` |
 | resample (live resampling) | `TrackerPlus_rs4.ptf` | `1.2.0-rs4` | tested | `5cf21721e8c1f9339304b24adfcc355a07f37dcaff9697a5b97ab41d50352925` |
+| songloop (Song Loop) | `TrackerPlus_sl4.ptf` | `1.2.0-sl4` | tested | `403c76593d2e5f096893ddb2771dd7c90536b1dedc7f64352bf5c154c24ca935` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 | itcmtest (ITCM hooks test, on its own) | `TrackerPlus_it1.ptf` | `1.2.0-it1` | tested | `701b35dfadb4626ebe19e94ccb3af47aff9e4d604684d59b2e8b9cbf5da18d7c` |
@@ -145,7 +146,7 @@ Each patch can be installed on its own, or several can go into one firmware:
   MIDI legato,
   `patch/copypattern/patch.json` the Copy to New button,
   `patch/slicethru/patch.json` the Beat Slice Thru play mode,
-  `patch/resample/patch.json` live resampling.
+  `patch/resample/patch.json` live resampling, `patch/songloop/patch.json` Song Loop.
 - **Several patches:** use a bundle spec, which lists the patches to combine.
   `patch/all/patch.json` is the bundle that ships (all twelve: colorsong, Humanize,
   interpolate, masterfx, swing, the visualizer, condtrig, synths, legato, copypattern,
@@ -300,10 +301,11 @@ python tools/emu/test_legato.py build/TrackerPlus_lg2.ptf path/to/TrackerPlus_1.
 python tools/emu/test_copypattern.py build/TrackerPlus_cp4.ptf
 python tools/emu/test_slicethru.py build/TrackerPlus_bt5.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_resample.py build/TrackerPlus_rs4.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/emu/test_songloop.py build/TrackerPlus_sl4.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_bundle_cost.py build/TrackerPlus_all.ptf path/to/TrackerPlus_1.2.0.ptf [--quick]
 ```
 
-`tools/run_tests.py` runs the tests of the mods the web patcher offers. resample isn't
+`tools/run_tests.py` runs the tests of the mods the web patcher offers. songloop isn't
 offered yet, so run its test on its own, as above.
 
 
@@ -317,7 +319,8 @@ each patch alone, `patch/all` (all twelve) and its reverse, colorsong, humanize 
 other order, those three with masterfx in both orders, the six before condtrig in the other order, the six with synths in both orders,
 copypattern alone, with humanize in both orders and with all nine in both orders,
 slicethru alone and first with the others after it in reverse order,
-resample alone and first with the others after it in reverse order, and two
+resample alone and first with the others after it in reverse order,
+songloop alone, after the others and first with them after it in reverse order, and two
 patches on the same chained sites, and
 checks that each patch's code and RAM sit where they
 should (RAM in a region the patch may use, no two blocks overlapping), that exactly the
