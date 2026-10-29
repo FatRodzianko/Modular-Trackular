@@ -19,8 +19,8 @@ hardware.
 | Spec | Version | What |
 |---|---|---|
 | `patch/headroom/patch.json` | `hr1` | headroom alone, on stock firmware |
-| `patch/headroom/all_headroom.json` | `MH1` | patch/all's patches, then headroom |
-| `patch/headroom/all_tracklen_headroom.json` | `MH2` | patch/all's patches, tracklen, then headroom |
+| `patch/headroom/all_headroom.json` | `MH1` | patch/all's patches but tracklen, then headroom |
+| `patch/headroom/all_tracklen_headroom.json` | `MH2` | patch/all's patches (tracklen last), then headroom |
 
 Headroom must be **listed last** in a bundle. Its sequencer hook then runs before the
 other patches' hooks on the same call, so its figure includes them.

@@ -7,7 +7,7 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
     visualizer alone, ramdiag alone,
   - versiontest alone (pinned base; byte-identical to MT0),
   - patch/all (colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig,
-    synths, legato, copypattern, slicethru, resample),
+    synths, legato, copypattern, slicethru, resample, tracklen),
   - colorsong, humanize and interpolate the other way round (interpolate, humanize,
     colorsong),
   - colorsong, humanize, interpolate and masterfx, both ways round, and with swing and
@@ -56,6 +56,8 @@ For each output it reads the image back and its .map.json, and checks:
     which equal the .bin's value plus the code move or the RAM move, exactly;
   - each chain word ("next") holds what its site pointed to before that patch: the
     stock target or the hook of the patch before it;
+  - each link word ("links") holds the other patch's symbol where it landed, or 0 when
+    that patch isn't in the bundle (condtrig's link to tracklen, in both orders);
   - every hooked site (BL or word) points at the hook of the last patch that hooks it;
     branch sites are BLs, but tail calls ("tail"), which stay b.w;
   - ITCM hooks: each hooked ITCM BL (in the ITCM image in flash) goes to its stub at
@@ -136,6 +138,12 @@ def verify(label: str, out: Path, specs: list[Path], version: str | None, stock:
     hooked: dict[int, tuple[str, int, str]] = {}    # site -> (kind, what it points to, patch)
     forms: dict[int, str] = {}                      # branch site -> "bl", or "b.w" for a tail call
     itcm: dict[int, tuple[int, tuple]] = {}         # ITCM site -> (last hook, registers passed)
+    placed = {}                                     # patch -> its symbols where it landed
+    for sp in specs:
+        q = patch_files(sp)
+        n = q["spec"]["name"]
+        link = q["rel"]["link"] if q["rel"] else int(q["spec"]["base"], 16)
+        placed[n] = {k: v + int(layout[n]["code"][0], 16) - link for k, v in q["syms"].items()}
     for sp in specs:
         p = patch_files(sp)
         spec, blob, rel = p["spec"], p["blob"], p["rel"]
@@ -177,6 +185,10 @@ def verify(label: str, out: Path, specs: list[Path], version: str | None, stock:
                   f"{name}: {size} B of late RAM at {start:#x} in {region}, its word's size")
             ram_blocks.append((start, rend, name + " (late)"))
             struct.pack_into("<I", want, woff, start)
+        for ln in spec.get("links", []):            # another patch's address, 0 without it
+            other = placed.get(ln["patch"])
+            value = other[ln["symbol"]] | (1 if ln.get("thumb") else 0) if other else 0
+            struct.pack_into("<I", want, syms[ln["word"]] - base, value)
         chained = 0
         for kind, hook in [("bl", br) for br in spec["branches"]] + \
                 [("word", w) for w in spec.get("words", []) if not (version and w.get("version"))]:
@@ -204,7 +216,8 @@ def verify(label: str, out: Path, specs: list[Path], version: str | None, stock:
             itcm[at] = (syms[hook["to"]], tuple(hook.get("args", [])))
         check(got == bytes(want), f"{name}: code at {base:#x} (moved {delta:+#x}), {len(offsets)} code words "
               f"and {len(ram_offsets)} RAM words (moved {ram_delta:+#x}) relocated, {chained} chain words "
-              f"filled, all other bytes as built")
+              f"filled" + "".join(f", link {ln['word']} -> {ln['patch'] if ln['patch'] in placed else 0}"
+                                   for ln in spec.get("links", [])) + ", all other bytes as built")
         end = base + len(blob)
     sites_ok = all((bl_target(img, base0, at) if kind == "bl" else struct.unpack_from("<I", img, at - base0)[0])
                    == target for at, (kind, target, _) in hooked.items())
@@ -430,7 +443,7 @@ def main() -> int:
             ("synths alone", sy, [sy], None, None),
             ("ramdiag alone", rd, [rd], None, None),
             ("patch/all: colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig, synths, legato, "
-             "copypattern, slicethru, resample", all_spec, [cs, hz, ip, mx, sw, vz, ct, sy, lg, cp, bt, rs],
+             "copypattern, slicethru, resample, tracklen", all_spec, [cs, hz, ip, mx, sw, vz, ct, sy, lg, cp, bt, rs, pm],
              json.loads(all_spec.read_text())["version"], None),
             ("reversed: interpolate, humanize, colorsong", rev_spec, [ip, hz, cs], "MTR", None),
             ("colorsong, humanize, interpolate, masterfx", with_mx_spec, [cs, hz, ip, mx], "MTX", None),

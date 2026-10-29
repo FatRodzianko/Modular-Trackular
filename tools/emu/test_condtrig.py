@@ -34,6 +34,12 @@ audio block runs it, with no time to add, so only its check for a new take runs.
    `8:8`, and stock firmware's text for everything else.
 9. Stock firmware with such patterns: values 101..137 always play, show as numbers, and
    an encoder edit makes them 100.
+9b. With Variable Track Length (tracklen) in the build: a short track's conditions count
+   its own loops (each start of its loop, the last cut-short one too) against a model,
+   for lengths 1, 5, 6 and the pattern's length - 1 together with a track without a
+   length, lengths 48 and 100 in a 128-step pattern, playback from a later step, a Break FX ending the pattern early, and
+   performance mode's backward play (which counts as without a length). Skipped on
+   builds without tracklen.
 10. Cost: the patch's own instructions per audio block at 800 BPM with a condition in
     FX1 and FX2 of every track (what it adds to stock's work: test_bundle_cost.py).
 """
@@ -50,7 +56,7 @@ from unicorn.arm_const import UC_ARM_REG_S0
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from patch_ptf import bl_target  # noqa: E402
-from layout import patch_code  # noqa: E402
+from layout import patch_code, patch_function  # noqa: E402
 import seq_timing as st  # noqa: E402
 
 SEQ = st.SEQ
@@ -380,16 +386,123 @@ def song_checks(ptf: Path) -> None:
           f"(patterns heard {''.join('AB'[n - 1] for n in patterns)})")
 
 
+TL_MAGIC = 0x314C544D                # tracklen's state: "MTL1", then its lengths [256 patterns][16 tracks]
+
+
+def tracklen_ram(ptf: Path) -> int | None:
+    """tracklen's RAM in this build, or None when it isn't in it."""
+    for p in json.loads(Path(ptf).with_suffix(".map.json").read_text())["patches"]:
+        if p["name"] == "tracklen" and p["ram"]:
+            return int(p["ram"]["start"], 16)
+    return None
+
+
+def loop_model(value: int, step: int, e: int, length: int, start: int, steps: int) -> list[int]:
+    """The steps (counted from playback start at `start`) on which a condition on `step` of
+    a track of length e plays: n is the number of loop starts after the first step played."""
+    out, n = [], 0
+    for q in range(start, start + steps):
+        pos = q % length
+        if q > start and pos % e == 0:
+            n += 1
+        if pos % e == step and holds(value, n):
+            out.append(q - start)
+    return out
+
+
+def track_length_checks(ptf: Path) -> None:
+    ram = tracklen_ram(ptf)
+    if ram is None:
+        print("Short tracks (Variable Track Length): not in this build, skipped")
+        return
+    print("Short tracks (Variable Track Length): conditions count the track's own loops")
+
+    def rig_with(lengths: dict[int, int], steps: int = 16) -> Rig:
+        rig = Rig(ptf, steps=steps)
+        rig.m.w8(PROJECT + 0x6C8, 1)                    # the playing pattern: 1
+        rig.m.write(ram, struct.pack("<I", TL_MAGIC) + bytes(256 * 16))
+        for t, e in lengths.items():
+            rig.m.w8(ram + 4 + 16 * 1 + t, e)
+        return rig
+
+    def played(rig: Rig, ch: int) -> list[int]:
+        return sorted((t - FIRST_MICRO) // STEP for t, c, _ in rig.notes() if c == ch)
+
+    cases = [(0, 6, 1, 103), (1, 1, 0, 108), (2, 15, 0, 104), (3, 5, 2, 102), (4, 16, 1, 103), (5, 6, 1, 101),
+             (6, 6, 3, 105)]                            # (track, length, step, condition); 16: none
+    rig = rig_with({t: e for t, e, _, _ in cases if e < 16})
+    for t, _, s, v in cases:
+        rig.step(t, s, (CHANCE, v))
+    rig.start()
+    rig.run(4, extra=0)
+    for t, e, s, v in cases:
+        want = loop_model(v, s, e, 16, 0, 64)
+        got = played(rig, t + 1)
+        check(got == want, f"length {e if e < 16 else 'none'}, {NAMES[v]} on step {s + 1}: "
+                           f"steps {got[:8]}{' ...' if len(got) > 8 else ''}")
+
+    rig = rig_with({0: 48, 1: 100}, steps=128)
+    rig.step(0, 40, (CHANCE, 103))                      # 1:2 on step 41
+    rig.step(1, 90, (CHANCE, 108))                      # 1:4 on step 91
+    rig.start()
+    rig.run(3, extra=0)
+    for t, e, s, v in ((0, 48, 40, 103), (1, 100, 90, 108)):
+        want = loop_model(v, s, e, 128, 0, 3 * 128)
+        check(played(rig, t + 1) == want, f"128 steps, length {e}: {NAMES[v]} on step {s + 1} plays on steps "
+                                          f"{played(rig, t + 1)}")
+
+    rig = rig_with({0: 6})
+    rig.step(0, 3, (CHANCE, 101))                       # 1st on step 4
+    rig.step(0, 1, (CHANCE, 103))                       # 1:2 on step 2
+    rig.start(9)
+    rig.run(2, extra=-9 * STEP)
+    want = sorted(set(loop_model(101, 3, 6, 16, 9, 23) + loop_model(103, 1, 6, 16, 9, 23)))
+    check(played(rig, 1) == want, f"length 6, playback from step 10: 1st and 1:2 on {played(rig, 1)}")
+
+    rig = rig_with({0: 3})
+    rig.step(0, 1, (CHANCE, 103))                       # 1:2 on step 2
+    rig.step(5, 7, (BREAK, 1))                          # Break on step 8: the pattern is 8 steps long
+    rig.start()
+    rig.run(2, extra=0)                                 # 32 steps: 4 passes of 8
+    want = loop_model(103, 1, 3, 8, 0, 32)
+    check(played(rig, 1) == want, f"length 3, Break FX on step 8: 1:2 on {played(rig, 1)}")
+
+    got = []
+    for lengths in ({}, {0: 2}):
+        rig = rig_with(lengths, steps=4)
+        rig.m.w8(SEQ + 0x1D, 1)                         # performance mode
+        for t in range(16):
+            rig.m.w16(SEQ + 0x38 + 2 * t, 3)
+        rig.m.w8(SEQ + 0xB9, 1)                         # track 1: backward
+        for s in range(4):
+            rig.step(0, s, (CHANCE, 103))
+        rig.start()
+        rig.run(6, extra=0)
+        got.append(played(rig, 1))
+    check(got[0] == got[1], f"performance mode, backward, 1:2 on every step: length 2 counts as none ({got[1]})")
+
+
 def cost_checks(ptf: Path) -> None:
     print("Cost (the patch's own instructions per block at 800 BPM, 16 tracks with a condition in FX1 and FX2)")
-    lo, hi = patch_code(ptf, "condtrig")
+    ranges = [patch_code(ptf, "condtrig")]
+    if tracklen_ram(ptf) is not None:                   # its call to tracklen's mt_tl_len counts here
+        ranges.append(patch_function(ptf, "tracklen", "mt_tl_len"))
+        print("  (with tracklen's mt_tl_len, which it calls on every track's every step)")
     for label, value in (("Chance 50", 50), ("1:2", 103), ("8:8", 137)):
-        rig = Rig(ptf, patched=True)
+        short = len(ranges) > 1                         # with tracklen: 2 steps, every track of length 1,
+        rig = Rig(ptf, steps=2 if short else 1, patched=True)   # so each step is a loop start
         for t in range(16):
             rig.step(t, 0, (CHANCE, value), (CHANCE, value))
+        if short:
+            ram = tracklen_ram(ptf)
+            rig.m.w8(PROJECT + 0x6C8, 1)
+            rig.m.write(ram, struct.pack("<I", TL_MAGIC) + bytes(256 * 16))
+            for t in range(16):
+                rig.m.w8(ram + 4 + 16 + t, 1)
         rig.start()
         n = [0]
-        h = rig.m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: n.__setitem__(0, n[0] + 1), begin=lo, end=hi - 1)
+        hs = [rig.m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: n.__setitem__(0, n[0] + 1), begin=lo, end=hi - 1)
+              for lo, hi in ranges]
         blocks = []
         for tick in range(STEP * 2):
             if tick % TICKS_PER_BLOCK == 0:
@@ -397,7 +510,8 @@ def cost_checks(ptf: Path) -> None:
             rig.m.ticks += 1
             rig.m.call(st.SEQ_TICK, SEQ, max_insns=2_000_000)
         blocks.append(n[0])
-        rig.m.uc.hook_del(h)
+        for h in hs:
+            rig.m.uc.hook_del(h)
         worst = max(b - a for a, b in zip(blocks, blocks[1:]))
         check(worst <= OWN_LIMIT, f"{label}: at most {OWN_LIMIT} of its own per block ({worst} at worst, "
                                   f"{n[0]} over two steps)")
@@ -492,6 +606,7 @@ def main() -> int:
     drop_checks(ptf)
     counting_checks(ptf)
     reset_checks(ptf)
+    track_length_checks(ptf)
     ui_checks(ptf, stock)
     cost_checks(ptf)
     print(f"{len(failures)} failure(s)")

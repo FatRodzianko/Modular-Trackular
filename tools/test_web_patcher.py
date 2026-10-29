@@ -17,8 +17,8 @@ Needs Node (runs web/patcher.js through tools/web_patcher_node.mjs). It:
     itself on its ITCM sites;
   - does the same for a non-BL site ("replaces": "insns"): test_layout.py's slicethru
     copy, alone and in slicethru's place in patch/all;
-  - does the same for tail calls ("tail": b.w sites): tracklen (not on the page yet)
-    alone, and with a copy of itself on its two b.w sites;
+  - does the same for tail calls ("tail": b.w sites): tracklen with a copy of itself on
+    its two b.w sites;
   - checks both refuse the same things: another firmware version, a bundle with
     ramdiag, a shared site not chained by both, two patches passing different
     registers at one ITCM site, a non-BL site with "next" or a bad "replaces", a
@@ -246,7 +246,7 @@ def main() -> int:
     # deployed.
     extra = outdir / "site-extra"
     shutil.copytree(site, extra)
-    for name in ("ramdiag", "tracklen"):         # not on the page
+    for name in ("ramdiag",):                    # not on the page
         src = ROOT / "patch" / name
         (extra / "patch" / name / "prebuilt").mkdir(parents=True)
         shutil.copyfile(src / "patch.json", extra / "patch" / name / "patch.json")
@@ -319,7 +319,6 @@ def main() -> int:
         "itcm-chain": bundle("itcm-chain", ["condtrig", "condtrig-copy"], "CHI"),
         "slicethru-insns": "patch/slicethru-insns/patch.json",
         "all-insns": bundle("all-insns", [i if i != "slicethru" else "slicethru-insns" for i in ids], "INS"),
-        "tracklen": "patch/tracklen/patch.json",
         "tail-chain": bundle("tail-chain", ["tracklen", "tracklen-tails"], "PTC"),
     }
     refusals = {

@@ -37,9 +37,9 @@ link() {                               # link <linker script> <elf> <map>
         -Wl,--undefined=mt_tl_bind -Wl,--undefined=mt_tl_label -Wl,--undefined=mt_tl_label2 \
         -Wl,--undefined=mt_tl_colors -Wl,--undefined=mt_tl_data -Wl,--undefined=mt_tl_jog \
         -Wl,--undefined=mt_tl_cell_note -Wl,--undefined=mt_tl_cell_instr3 -Wl,--undefined=mt_tl_cell_instr \
-        -Wl,--undefined=mt_tl_cell_fx1 -Wl,--undefined=mt_tl_cell_fx2 \
+        -Wl,--undefined=mt_tl_cell_fx1 -Wl,--undefined=mt_tl_cell_fx2 -Wl,--undefined=mt_tl_ghost \
         -Wl,--undefined=mt_tl_pattern_update -Wl,--undefined=mt_tl_config_update \
-        -Wl,--undefined=mt_tl_save_name \
+        -Wl,--undefined=mt_tl_save_name -Wl,--undefined=mt_tl_len \
         "${REC_HOOKS[@]}" -Wl,--undefined=mt_version_fmt \
         -Wl,-Map="$3" "$OUT/tracklen.o" -o "$2"
 }

@@ -103,6 +103,14 @@
       "title": "Live Resampling",
       "summary": "The Sample Recorder can record with the pattern playing: press Play after Rec, or start the recording with Shift+Rec (after the count-in, if Pre Roll is on). Samples and synths play at the mix levels with delay and reverb; stopping the recording stops the pattern. Recordings go after the loaded samples, so they stay intact. Otherwise the recorder is stock.",
       "status": "Tested on hardware"
+    },
+    {
+      "id": "tracklen",
+      "bit": 12,
+      "spec": "patch/tracklen/patch.json",
+      "title": "Variable Track Length",
+      "summary": "Each track of a pattern can have its own length (Pattern screen, More twice, hold Trk Len and turn the encoder). A shorter track loops its own steps and every track starts again together when the pattern ends; the steps past its length show its loop in grey. Live recording and Conditional Trigs follow the track's own loop. Saved per project; stock firmware plays every track the whole pattern.",
+      "status": "Tested on hardware"
     }
   ],
   "tested_builds": {
@@ -151,6 +159,8 @@
     "190bdcd2cbb24ad7b71d0e1aee61f828f0a761a60bbd3e8e9a73b55c2bc028f4": "all twelve mods (1.2.0-MTY)",
     "8200a81f3de0c395e4dab97c273def7125f6890d2e1147d33cd66bb9f6841f33": "interpolate (1.2.0-ip7)",
     "38860b39e6ca58102b137dbd14690b3c134d6e09aadb779cb23b887b9ff2ec18": "visualizer (1.2.0-vz6)",
-    "5393e48e8bd23b1504ff0a8b75ee29ed1962fee1f19acb4a30bc705d99d0e5ac": "all twelve mods (1.2.0-MTZ)"
+    "5393e48e8bd23b1504ff0a8b75ee29ed1962fee1f19acb4a30bc705d99d0e5ac": "all twelve mods (1.2.0-MTZ)",
+    "9ddb1fc889f69293cf15e5cd8910e15d97cf742b1684ab6c878c8f82d5a3a440": "condtrig (1.2.0-ct2)",
+    "babfded088d61424511b6a3edb0a384937f28458d0721f70c9e9c27670880ed3": "all thirteen mods (1.2.0-MVL)"
   }
 }

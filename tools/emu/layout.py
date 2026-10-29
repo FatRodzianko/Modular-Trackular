@@ -40,3 +40,23 @@ def patch_late_ram(ptf: Path, name: str) -> tuple[int, int]:
         if p["name"] == name and p.get("late_ram"):
             return int(p["late_ram"]["start"], 16), int(p["late_ram"]["end"], 16)
     raise SystemExit(f"{map_path}: no late RAM for {name}")
+
+
+def patch_function(ptf: Path, name: str, symbol: str) -> tuple[int, int]:
+    """Start and end of one function of patch/<name> in the firmware built at `ptf`: its
+    symbol up to the next one, from the patch's build (or prebuilt, as patch_ptf.py
+    picks), moved to where the patch landed."""
+    d = Path(__file__).resolve().parent.parent.parent / "patch" / name
+    spec = json.loads((d / "patch.json").read_text())
+    pre = "" if (d / spec["bin"]).exists() else "prebuilt_"
+    syms = {}
+    for line in (d / spec[pre + "sym"]).read_text().splitlines():
+        parts = line.split()
+        if len(parts) == 3:
+            syms[parts[2]] = int(parts[0], 16)
+    link = next(int(line.split()[1], 16) for line in (d / spec[pre + "rel"]).read_text().splitlines()
+                if line.startswith("link "))
+    lo, _ = patch_code(ptf, name)
+    start = syms[symbol]
+    end = min(v for v in syms.values() if v > start)
+    return start - link + lo, end - link + lo

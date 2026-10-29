@@ -44,7 +44,8 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
 - **condtrig**: conditional trigs. Turn a Chance FX (C) past 100 and it becomes a
   condition on how many times the pattern has played: `1st`, `!1s` (not the first), or
   `1:2` … `8:8` (the A-th pass of every B), counted per track from the start of
-  playback or of the pattern. The idea comes from Psygoo's CT6. Tested on hardware. See [patch/condtrig/README.md](patch/condtrig/README.md).
+  playback or of the pattern; on a track with its own length (tracklen), per loop of
+  that track. The idea comes from Psygoo's CT6. Tested on hardware. See [patch/condtrig/README.md](patch/condtrig/README.md).
 - **synths**: two synths, WAVE and PHASE, each taking the place of one of the five
   synth models per project (Config → Project Settings → Synth Engines → WAVE replaces,
   PHASE replaces). The Model list then shows them, with their own controls:
@@ -81,7 +82,14 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   input. Recordings go into the free part of the sample memory, so the loaded samples
   stay intact; the longest recording is that free part. Otherwise the recorder is
   stock. Tested on hardware. See [patch/resample/README.md](patch/resample/README.md).
-- **all**: all twelve mods above in one firmware (version text `1.2.0-MTZ`), from
+- **tracklen**: Variable Track Length. Each track of a pattern can have its own length
+  (Pattern screen, More twice, hold Trk Len and turn the encoder). A shorter track
+  loops its own steps and every track starts again together when the pattern ends; the
+  grid shows the loop going on past the length in grey. Live recording lands on the
+  step the track is playing, and conditional trigs count the track's own loops. Saved
+  per project; stock firmware plays every track the whole pattern. Tested on hardware
+  in patch/all. See [patch/tracklen/README.md](patch/tracklen/README.md).
+- **all**: all thirteen mods above in one firmware (version text `1.2.0-MVL`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
@@ -125,7 +133,7 @@ page only offers a download when its output is byte-identical to what
 `tools/patch_ptf.py` makes. See "In your browser" in [docs/PATCHING.md](docs/PATCHING.md).
 
 Each mod can be installed on its own, or several can be combined into one firmware.
-`patch/all` combines all twelve, and you can make your own mix, including
+`patch/all` combines all thirteen, and you can make your own mix, including
 patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.md).
 
 ## Layout
@@ -148,7 +156,8 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/copypattern/` | Copy to New: copies the current pattern into the next empty one |
 | `patch/slicethru/` | Beat Slice Thru: a play mode whose notes play from their slice to the sample end, and can loop the whole sample |
 | `patch/resample/` | Live resampling: the pattern plays during a Sample Recorder recording (Play, or Shift+Rec); recordings after the loaded samples |
-| `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample in one firmware |
+| `patch/tracklen/` | Variable Track Length: a length per track and pattern, set with the Trk Len button, saved per project |
+| `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample + tracklen in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/headroom/` | Timing diagnostic: worst audio block and sequencer share in % of the measured block length, late blocks; its bundle specs (`all_headroom.json`, `all_tracklen_headroom.json`) |
 | `patch/versiontest/` | Version-text test patch |

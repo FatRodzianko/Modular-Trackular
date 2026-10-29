@@ -37,6 +37,12 @@ patch.json files (relative to the bundle's folder), in the order they are placed
 The included patches' own version-text words ("version": true) are dropped, and the
 bundle's text is appended after the last patch.
 
+Links: "links" lists words in a patch that get another patch's address, for patches that
+work together: {"word": "<symbol>", "patch": "<name>", "symbol": "<symbol>"}, with
+"thumb": true for a function. The word (linked as 0) gets the other patch's symbol
+address once every patch is placed, or stays 0 when that patch isn't in the build, so
+the order the patches are listed in doesn't matter.
+
 Chained hooks: a branch or word with "next": "<symbol>" names a 4-byte word in the
 patch (linked as 0) that the patcher fills with what the site pointed to before: the
 stock target (Thumb bit set) or the hook of the patch listed before it. The patch
@@ -275,7 +281,7 @@ def load_patch(spec: dict, pdir: Path, in_bundle: bool) -> dict:
             "ram_startup": bool(spec.get("ram_startup")),
             "late_word": spec.get("late_ram"), "late_size": late_size(spec, blob, syms, rel, pinned),
             "branches": spec["branches"], "words": words,
-            "itcm_branches": spec.get("itcm_branches", [])}
+            "itcm_branches": spec.get("itcm_branches", []), "links": spec.get("links", [])}
 
 
 def itcm_sites(parts: list[dict]) -> dict[int, tuple[str, ...]]:
@@ -328,10 +334,10 @@ def assign_ram(parts: list[dict], itcm_reserved: int = 0) -> None:
             sys.exit(f"{p['name']}: no free RAM region has {p['late_size']} bytes left for its late RAM ({left})")
 
 
-def set_next(p: dict, symbol: str, value: int, linked: int = 0) -> None:
+def set_next(p: dict, symbol: str, value: int, linked: int = 0, what: str = "next") -> None:
     """Fill patch p's chain word `symbol` (placed, linked as `linked`: 0) with `value`."""
     if symbol not in p["syms"]:
-        sys.exit(f"{p['name']}: no symbol {symbol!r} for \"next\"")
+        sys.exit(f"{p['name']}: no symbol {symbol!r} for \"{what}\"")
     off = p["syms"][symbol] - p["base"]
     blob = bytearray(p["blob"])
     if off & 3 or not 0 <= off <= len(blob) - 4 or struct.unpack_from("<I", blob, off)[0] != linked:
@@ -404,6 +410,16 @@ def main() -> int:
         if p["late"]:
             set_next(p, p["late_word"], p["late"][0], linked=p["late_size"])
         end = base + len(p["blob"])
+    by_name = {p["name"]: p for p in parts}
+    for p in parts:
+        for ln in p["links"]:
+            other = by_name.get(ln["patch"])
+            if other is not None and ln["symbol"] not in other["syms"]:
+                sys.exit(f"{p['name']}: {ln['patch']} has no symbol {ln['symbol']!r} for \"links\"")
+            value = other["syms"][ln["symbol"]] | (1 if ln.get("thumb") else 0) if other else 0
+            set_next(p, ln["word"], value, what="links")
+            print(f"link {p['name']}.{ln['word']} -> " + (f"{ln['patch']}.{ln['symbol']} @ {value:#x}" if other
+                                                          else f"0 ({ln['patch']} not in the build)"))
     stub_flash = None
     if stub_sites:
         stub_flash = (end + ALIGN - 1) & ~(ALIGN - 1)

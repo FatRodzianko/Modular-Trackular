@@ -34,6 +34,11 @@
  *    pattern), seen when track 16 ends a step. In song mode a pattern repeated in the
  *    next slot keeps counting, so its repeats can play different steps.
  * A track's count goes back to 0 when its own queued pattern (performance mode) starts.
+ * With Variable Track Length (patch/tracklen) in the build, a track with its own length E
+ * also counts each start of its own loop: a step whose position is a nonzero multiple
+ * of E (track +0x88, the position that track reads mod E). mt_ct_tl_len is linked to
+ * tracklen's mt_tl_len by the patcher ("links"), and is 0 without tracklen. In
+ * performance mode only forward tracks count this way: the others' positions jump.
  * Only the audio interrupt changes the counts; the main loop only sets `pending`.
  *
  * Entering and showing them. The encoder edit of FX values (seq_change_selection_fx_value,
@@ -52,7 +57,7 @@
 #include <stdint.h>
 
 #ifndef CONDTRIG_VERSION
-#define CONDTRIG_VERSION "ct1"
+#define CONDTRIG_VERSION "ct2"
 #endif
 
 /* ---- firmware 1.2.0 addresses ------------------------------------------------------ */
@@ -61,8 +66,11 @@
 /* sequencer object */
 #define SEQ_PATTERN         0x14u           /* the playing pattern's buffer (.mtp layout) */
 #define SEQ_PLAYING         0x2Au
+#define SEQ_PERFORMANCE     0x1Du           /* performance mode on */
 #define SEQ_TRACK(t)        (0x68u * (t))
+#define TRK_STEP            0x88u           /* uint16: the track's position in the pattern */
 #define TRK_LOOP_STEPS      0x8Au           /* int16: steps of the loop so far, 0 at its start */
+#define TRK_PLAY_MODE       0xB9u           /* performance mode: 0 forward, else backward, random... */
 #define TRK_QUEUED          0xBCu           /* int32: queued pattern (performance mode), -1 none */
 #define TRACKS              16u
 #define LAST_TRACK          15u
@@ -84,6 +92,7 @@ typedef void (*play_from_fn)(void *seq, uint32_t step);
 typedef void (*advance_fn)(void *seq, float seconds);
 typedef uint32_t (*advance_step_fn)(void *seq, uint32_t track);
 typedef int32_t (*max_fn)(void *selection, uint32_t type, int32_t value);
+typedef uint32_t (*tl_len_fn)(const void *seq, uint32_t track);
 typedef int32_t (*cell_text_fn)(void *seq, char *buf, uint32_t size, uint32_t column, uint32_t track,
                                 int32_t step);
 
@@ -102,6 +111,7 @@ CHAIN_WORD(mt_ct_next_render_advance);      /* seq_advance in the render loop (v
 CHAIN_WORD(mt_ct_next_cell_max);            /* fx_max (veneer 0x600af2c9) */
 CHAIN_WORD(mt_ct_next_fx1_text);            /* fx_value_text_cell 0x600afdc9 */
 CHAIN_WORD(mt_ct_next_fx2_text);            /* fx_value_text_cell 0x600afdc9 */
+CHAIN_WORD(mt_ct_tl_len);                   /* tracklen's mt_tl_len ("links"), 0 without it */
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
@@ -189,6 +199,17 @@ int32_t mt_ct_chance(int32_t lo, int32_t hi, const uint8_t *column, uint32_t tra
 
 /* ---- counting passes (audio interrupt) ------------------------------------------ */
 
+/* A short track (tracklen) starts its own loop: its position is a nonzero multiple of
+ * its length. */
+static int ct_own_loop(const uint8_t *seq, const uint8_t *trk, uint32_t track)
+{
+    if (mt_ct_tl_len == 0u || (seq[SEQ_PERFORMANCE] && trk[TRK_PLAY_MODE] != 0u))
+        return 0;
+    uint32_t e = ((tl_len_fn)mt_ct_tl_len)(seq, track);
+    uint32_t step = *(const volatile uint16_t *)(trk + TRK_STEP);
+    return e != 0u && step != 0u && step % e == 0u;
+}
+
 /* the word the sequencer's ITCM code jumps through to seq_advance_step(seq, track),
  * 0x601acf00 in flash (chained): after a track ends a step */
 uint32_t mt_ct_advance_step(void *seq, uint32_t track)
@@ -201,8 +222,8 @@ uint32_t mt_ct_advance_step(void *seq, uint32_t track)
     if (track >= TRACKS)
         return r;
     ct_sync();
-    if (*(volatile int16_t *)(trk + TRK_LOOP_STEPS) == 0) {    /* the track starts its loop again */
-        uint32_t n = CT->pass[track] + 1u;
+    if (*(volatile int16_t *)(trk + TRK_LOOP_STEPS) == 0 || ct_own_loop(s, trk, track)) {
+        uint32_t n = CT->pass[track] + 1u;      /* the track starts its loop again */
         CT->pass[track] = (uint16_t)(n >= 2u * CT_CYCLE ? n - CT_CYCLE : n);
     }
     if (queued >= 0 && *(volatile int32_t *)(trk + TRK_QUEUED) < 0)

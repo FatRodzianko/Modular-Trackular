@@ -50,35 +50,42 @@
       "old": "fff711ff",
       "to": "mt_tl_cell_note",
       "next": "mt_tl_next_cell_note",
-      "note": "Pattern grid, note column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
+      "note": "Pattern grid, note column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length grey (the muted color), empty ones blank"
     },
     {
       "at": "0x6010B5AE",
       "old": "fff729fe",
       "to": "mt_tl_cell_instr3",
       "next": "mt_tl_next_cell_instr3",
-      "note": "Pattern grid, instrument column, 3-character text: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
+      "note": "Pattern grid, instrument column, 3-character text: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length grey (the muted color), empty ones blank"
     },
     {
       "at": "0x6010B62C",
       "old": "fff7eafd",
       "to": "mt_tl_cell_instr",
       "next": "mt_tl_next_cell_instr",
-      "note": "Pattern grid, instrument column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
+      "note": "Pattern grid, instrument column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length grey (the muted color), empty ones blank"
     },
     {
       "at": "0x6010B7BE",
       "old": "fff721fd",
       "to": "mt_tl_cell_fx1",
       "next": "mt_tl_next_cell_fx1",
-      "note": "Pattern grid, FX1 column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
+      "note": "Pattern grid, FX1 column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length grey (the muted color), empty ones blank"
     },
     {
       "at": "0x6010B9C4",
       "old": "fff71efc",
       "to": "mt_tl_cell_fx2",
       "next": "mt_tl_next_cell_fx2",
-      "note": "Pattern grid, FX2 column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length in the column's empty color"
+      "note": "Pattern grid, FX2 column: bl patgrid_draw_cell 0x6010b204; a short track's steps past its length grey (the muted color), empty ones blank"
+    },
+    {
+      "at": "0x600DF548",
+      "old": "06eb4603",
+      "to": "mt_tl_ghost",
+      "replaces": "insns",
+      "note": "patview_fill_rows_q 0x600df3a0, every grid row's step: add.w r3, r6, r6, lsl #1 -> mt_tl_ghost (past a short track's length a row shows the step it plays there, step mod E)"
     },
     {
       "at": "0x600AB514",
@@ -334,7 +341,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-tl1"
+      "note": "version text 1.2.0-tl7"
     }
   ]
 }

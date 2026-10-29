@@ -20,7 +20,7 @@ Tiers (times with an empty cache on an 8-core PC; with the cache, only what chan
   deep     (hours) release with masterfx and synths in full mode on every mix. Overnight, and
            only when their audio code changes.
 
-The cover set: the web patcher offers every mix of the mods (4095 for twelve). Byte
+The cover set: the web patcher offers every mix of the mods (8191 for thirteen). Byte
 identity and the layout checks run on all of them (the harness does that in minutes);
 the emulator tests run on the fewest mixes that between them contain every case that
 differs from mix to mix:

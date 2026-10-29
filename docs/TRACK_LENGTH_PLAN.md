@@ -22,7 +22,12 @@ confirmations) is done: its results are in section 9, in FINDINGS section 29, an
 Phase 2 (the playback core, `patch/polymeter`, `pm1`) and phase 3 (the Trk Len button
 and the encoder) are built, emulator-tested and committed (section 9). Phase 4 (the
 grid), phase 5 (live recording, with the patcher's tail calls) and phase 6 (the file)
-are built and emulator-tested (section 9). Not tested on hardware.
+are built and emulator-tested (section 9). Section 13 (conditions per loop of a short
+track) is built: condtrig `ct2`, hardware-tested on its own. Live recording over several
+loops (a note may replace a note-off on a short track) is `tl7`. Phase 7 is done:
+tracklen is bit 12 in the web patcher (mix names past `B`: `C`…`L`, `0`…`5`, as
+proposed in section 8) and in `patch/all` as `1.2.0-MVL`, the build for the hardware
+check.
 
 ## 1. Verdict
 
@@ -785,3 +790,55 @@ says go.
    - a marker for a short track's real playing row.
 5. **Web patcher:** do the harness-disk change first and then join everything (option
    1), or ship `pm1` alone first (option 2)?
+
+## 13. Plan: conditions count a short track's own loops
+
+**Found on hardware (TLA bundle).** condtrig counts a track's passes when the track's loop
+counter (track `+0x8a`) goes back to 0. That counter still runs over the whole pattern,
+so on a short track a condition counts pattern passes. With length 6 in a 16-step
+pattern, `1:2` on step 2 plays steps 2, 8 and 14 on pass 1 and nothing on pass 2
+(emulator, matches the hardware report). Chance percentages roll on each repeat, as
+users expect. Users will expect conditions to count the track's own loops.
+
+**Behaviour.**
+- On a track with a length E, the count goes up each time the track starts its own
+  loop: at the pattern's start (as now) and at every step that is a multiple of E.
+  The last, cut-short loop of a pass counts as a loop.
+- Example, E = 6 in 16 steps: loops start at steps 1, 7 and 13 of every pass, so `1:2`
+  on step 2 plays steps 2 and 14 on pass 1, step 8 on pass 2, steps 2 and 14 on pass 3.
+- Resets are unchanged: back to 0 when playback starts and when another pattern
+  starts. Play from a position: the first loop played, even part of one, is loop 0
+  (as condtrig's `1st` does today).
+- Tracks without a length, and condtrig without tracklen, count exactly as today.
+
+**How condtrig gets E: a patcher link (new).**
+- Neither patch can see the other's code or RAM today, and nothing in the patcher
+  lets one patch refer to another.
+- New `patch.json` entry: `"links": [{"word": "<symbol>", "patch": "<name>",
+  "symbol": "<symbol>", "thumb": true}]`. After placing every patch, the patcher
+  writes the other patch's symbol address into the word, or 0 when that patch isn't
+  in the build. Order-independent, as every patch is placed first.
+- Same in `tools/patch_ptf.py` and `web/patcher.js`; the harness proves them
+  byte-identical on every selection.
+- tracklen exports `mt_tl_len(track, pattern_len)`, its existing `tl_length` rule, so
+  the length rule has one owner. condtrig links to it.
+
+**condtrig's change.** In `mt_ct_advance_step`, after the stock call, for a track
+whose `+0x8a` didn't go back to 0: when the link is set, E = `mt_tl_len(track, L)`;
+if E < L and the track's position (`+0x88`) is a nonzero multiple of E, count one
+more. One call and one division per track and step when tracklen is installed;
+nothing extra without it. Performance mode keeps its own loop rule, and its
+backward and random modes count only on `+0x8a`.
+
+**Steps, one commit each.**
+1. Patcher links in `patch_ptf.py` and `web/patcher.js`, with `tools/test_layout.py`
+   cases: link present, absent, both patch orders. No patch uses it yet, so every
+   build stays byte-identical.
+2. tracklen tl6: exports `mt_tl_len`; its tests unchanged.
+3. condtrig ct2: the link and the count. Emulator tests: the E = 6 example above;
+   E = 1; E = L − 1; play from a position; song mode; a Break FX; performance mode;
+   without tracklen identical to ct1; the cost check.
+4. Then phase 7 as planned.
+
+**Testing.** Release tier after steps 1–3 (~60–65 min measured last time, 2 jobs), then
+on hardware: condtrig alone (counts as before) and the TLA-style bundle (the example).

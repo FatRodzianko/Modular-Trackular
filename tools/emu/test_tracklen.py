@@ -59,6 +59,8 @@ manager, the stock page-3 bind and label code, and the display calls recorded:
    after page 3 is bound again, the encoder goes to stock with the same delta and the
    table doesn't change; also while held, when an overlay is open or stock's own guard
    is set.
+12b. Through the firmware's button input (0x600cc610): a press, then the "still held"
+   events (state 2) a held button sends, leave Trk Len held; the release ends it.
 13. A length set with the button plays: track 1 set to 6 in a 16-step pattern plays
    0-5 0-5 0-3.
 14. Without the hold the encoder is stock's: alone, cursor moves and edits (record off
@@ -76,6 +78,8 @@ manager, the stock page-3 bind and label code, and the display calls recorded:
    views (8 tracks of one column), a 3-character instrument text (its own call site),
    and a table without lengths, not set up, or set for another pattern (all stock).
 16. The encoder held on Trk Len also redraws the grid control.
+16b. ... and refills its row texts at once: past the new length the rows show the loop for
+   it (steps that come back into the length show their own contents), with no cursor move.
 17. Live recording during play (settings+0xce 2, the Pattern screen current, seq+0x2b
    set), pads' note-on through seq_record_live_note's veneers and note-off through the
    hooked calls of seq_record_note_off_q. The oracle: stock firmware with each short
@@ -92,7 +96,13 @@ manager, the stock page-3 bind and label code, and the display calls recorded:
    and onto a step holding a note: kept), length 1, 128 steps, two short
    tracks, a track without a length (as stock), and no lengths at all (the whole
    pattern as stock). Every one of the 8 veneers and 18 note-off sites gives the same
-   result as the first. The patch's own writes to the pattern happen with the audio
+   result as the first.
+17b. Recording over several loops, a sample instrument (the one change from stock's
+   rules: a short track's note-offs don't stop a note from landing on its step): with
+   length 6, three hits in loop 1 fill the 6 steps with notes and note-offs; loop 2's
+   hits on note-offs stay on track 1, a hit on a note goes to the next track; a hit
+   that goes elsewhere leaves the note-offs; length 2; a track without a length keeps
+   stock's rule (as stock firmware). The patch's own writes to the pattern happen with the audio
    interrupt (NVIC bit 0) masked, and stock records with the interrupt as the caller
    left it (the recorders mask and enable it themselves).
 18. The lengths' file (tracklen.bin on the fake SD card of tools/emu/fakefs.py), through
@@ -122,7 +132,7 @@ import machine as mach  # noqa: E402
 from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
 from project_save import save_as_checks  # noqa: E402
 import seq_timing as st  # noqa: E402
-from layout import patch_code, patch_ram  # noqa: E402
+from layout import patch_code, patch_function, patch_ram  # noqa: E402
 
 SEQ, PROJECT = st.SEQ, st.PROJECT
 CUR_PATTERN = PROJECT + 0x6C8
@@ -147,6 +157,7 @@ ED_CURSOR_ROW = 0x1E6
 BUTTON_MANAGER_PTR = 0x200209E0
 PAGE3_BIND, PAGE3_LABELS = 0x600E29A4, 0x600E584C
 BTN_CLEAR = 0x600CF53C                  # btn_clear(manager, first, last)
+BTN_INPUT = 0x600CC610                  # the buttons' input callback (manager pointer, button, state): 1 press, 2 still held, 0 release
 JOG_WORD, STOCK_JOG = 0x600DF2F0, 0x600C90A0
 JOG_GUARD = 0x6010E0F8                  # stock pat_jog does nothing while this is nonzero
 HELD_QUERY = 0x600CF90C                 # buttons_is_held_q: no buttons object in this rig
@@ -398,7 +409,7 @@ def button_checks(ptf: Path, stock: Path) -> None:
         text2 = {c: r.m.cstr(a) for n, c, a in calls if n == "text2"}
         colors = [a for n, c, a in calls if n == "colors" and c == ctrl]
         data = [a for n, c, a in calls if n == "data" and c == ctrl]
-        check(text.get(ctrl) == "Trk Len" and text2.get(ctrl) == "",
+        check(text.get(ctrl) == "Trk Len" and text2.get(ctrl) == "--",
               f"{mode}: button {ours} reads {text.get(ctrl)!r} / {text2.get(ctrl)!r}")
         check(colors == [styles + STYLE_ACTIVE] and data == [NAME_DATA],
               f"{mode}: button {ours} gets the active colors and Pattern Name's data")
@@ -458,7 +469,7 @@ def hold_checks(ptf: Path) -> None:
     print("Trk Len released, unbound or blocked: the encoder is stock's")
     before = bytes(m.uc.mem_read(table, 4 + 256 * 16))
     r.button(0)
-    check(r.text2() == "", f"release: the second line is empty again ({r.text2()!r})")
+    check(r.text2() == "13", f"release: the second line still shows the length ({r.text2()!r})")
     for delta in (1, -2):
         r.jog(delta)
         check(r.jogs == [delta] and bytes(m.uc.mem_read(table, 4 + 256 * 16)) == before,
@@ -500,6 +511,44 @@ def hold_checks(ptf: Path) -> None:
         r.jog(delta)
         check(r.stored(0) == want and r.text2() == label, f"128 steps, encoder {delta:+d}: {r.stored(0)} ({r.text2()!r})")
     r.button(0)
+
+    print("Trk Len through the firmware's button input (press, still held, release)")
+    r = UiRig(ptf, table=None)
+    r.table = table
+    m = r.m
+    skip = m.alloc(0x40)                        # the manager's per-button "skip" bytes, all 0
+    m.w32(r.mgr + 0xC, skip)
+    m.w8(table + 4 + 16 + 0, 0)
+    m.w8(CUR_PATTERN, 1)
+    m.w8(ED + ED_CURSOR_TRACK, 0)
+    for buf in (r.cur, r.nxt):
+        m.w8(buf + 0x1C, 15)
+    r.bind()
+    for state in (1, 2, 2):                     # a press, then "still held" events
+        m.call(BTN_INPUT, BUTTON_MANAGER_PTR, TRK_LEN, state)
+    r.jog(-4)
+    check(r.stored(0) == 12 and not r.jogs,
+          f"press, then 'still held' (state 2) twice, encoder -4: length {r.stored(0)}, stock's encoder not called")
+    m.call(BTN_INPUT, BUTTON_MANAGER_PTR, TRK_LEN, 0)
+    r.jog(1)
+    check(r.jogs == [1] and r.stored(0) == 12, f"release: stock's encoder gets {r.jogs}, the length stays 12")
+
+    print("Trk Len's second line follows the cursor's track (the Pattern screen's update)")
+    m.stub_function(PATTERN_UPDATE, lambda mm: 0)
+    update = m.r32(PATTERN_UPDATE_SLOT)
+    shown = []
+    for what, setup in (("cursor to track 2 (no length)", lambda: m.w8(ED + ED_CURSOR_TRACK, 1)),
+                        ("nothing changed", lambda: None),
+                        ("cursor back to track 1", lambda: m.w8(ED + ED_CURSOR_TRACK, 0)),
+                        ("track 1's length changed elsewhere (a file load)", lambda: m.w8(table + 4 + 16, 9)),
+                        ("page 3 left (its binds cleared), cursor to track 2",
+                         lambda: (m.call(BTN_CLEAR, r.mgr, 0, 6), m.w8(ED + ED_CURSOR_TRACK, 1)))):
+        setup()
+        r.calls.clear()
+        m.call(update, PATVIEW, 0, 0, 0)
+        shown.append((what, r.text2()))
+    check([t for _, t in shown] == ["--", None, "12", "9", None],
+          "second line after each update: " + "; ".join(f"{w}: {t!r}" for w, t in shown))
 
     print("A length set with Trk Len plays")
     r = UiRig(ptf, table=None)
@@ -772,8 +821,10 @@ def song_checks(ptf: Path) -> None:
 
 
 def cost_checks(ptf: Path) -> None:
-    print("Cost (instructions in the patch's code and its ITCM stubs, 16 tracks with notes, 4 passes)")
+    print("Cost (instructions in the patch's code and its ITCM stubs, 16 tracks with notes, 4 passes;"
+          " mt_tl_len, which only condtrig calls, counts in condtrig's cost check)")
     lo, hi = patch_code(ptf, "tracklen")
+    len_lo, len_hi = patch_function(ptf, "tracklen", "mt_tl_len")
     stubs = [int(x["stub"], 16) for x in json.loads(ptf.with_suffix(".map.json").read_text())["itcm_stubs"]["sites"]
              if x["patch"] == "tracklen"]
     for label, short in (("no lengths", False), ("16 tracks of length 5", True)):
@@ -786,7 +837,7 @@ def cost_checks(ptf: Path) -> None:
         rig.start()
         n = [0]
         count = lambda uc, a, size, u: n.__setitem__(0, n[0] + 1)
-        hs = [rig.m.uc.hook_add(UC_HOOK_CODE, count, begin=lo, end=hi - 1)]
+        hs = [rig.m.uc.hook_add(UC_HOOK_CODE, count, begin=a, end=b - 1) for a, b in ((lo, len_lo), (len_hi, hi))]
         hs += [rig.m.uc.hook_add(UC_HOOK_CODE, count, begin=a, end=a + 11) for a in stubs]
         rig.run(4 * 16 * STEP)
         for h in hs:
@@ -797,9 +848,13 @@ def cost_checks(ptf: Path) -> None:
 
 class GridRig:
     """The Pattern grid of one pattern: every step of every track filled (note, sample
-    instrument, FX1 and FX2), except the steps `empty` names, which stay empty."""
+    instrument, FX1 and FX2), except the steps `empty` names, which stay empty. `loop`
+    ({track: E}) writes a track's first E steps out to the pattern's end (step s holds step
+    s mod E's contents); `holes` ({(track, step)}) leaves those steps (before the write-out)
+    empty."""
 
     def __init__(self, ptf: Path, last: int, table: int | None = None, lengths=None, empty=None,
+                 loop=None, holes=frozenset(),
                  cursor: int = 0, wrap: int = 0, highlight_track: int | None = None, first_track: int = 0,
                  mutes=(), layout: int = 0, mask: int = 0, three=(), pattern: int = 1):
         self.m = m = st.make(ptf)
@@ -809,8 +864,9 @@ class GridRig:
         m.w8(CUR_PATTERN, 1)
         for t in range(16):
             for s in range(last + 1):
-                if not (empty and s >= empty.get(t, 999)):
-                    st.set_step(m, buf, t, s, 24 + s % 96, 4 + t, (VOLUME, 10 + s % 50), (ROLL, 1 + s % 5))
+                src = s % loop[t] if loop and t in loop and s >= loop[t] else s
+                if not (empty and s >= empty.get(t, 999)) and (t, src) not in holes:
+                    st.set_step(m, buf, t, s, 24 + src % 96, 4 + t, (VOLUME, 10 + src % 50), (ROLL, 1 + src % 5))
         if table is not None:
             m.write(table, struct.pack("<I", MAGIC) + bytes(256 * 16))
             for t, e in (lengths or {}).items():
@@ -866,25 +922,53 @@ class GridRig:
         return tuple(self.m.r32(base + o) for o in (8, 0xC, 0x10, 0x14, 0x18, 0x1C, 0x20, 0x24))
 
 
+def past_end(rig: "GridRig", pointer: int, lengths: dict) -> int | None:
+    """The column (0..3) of the cell with this text pointer when its step is at or past its
+    track's length, else None (as the patch decodes it)"""
+    m = rig.m
+    off = pointer - GRID_DATA
+    track, row, col = off // 0x11D, off % 0x11D // 0x13, {0: 0, 5: 1, 9: 2, 0xE: 3}.get(off % 0x11D % 0x13)
+    length = struct.unpack("<H", m.uc.mem_read(ED + 0x1EA, 2))[0]
+    e = lengths.get(track, 0)
+    if col is None or not 1 <= e < length:
+        return None
+    step = struct.unpack("<H", m.uc.mem_read(ED + 0x1E8, 2))[0] - 7 + row
+    if not 0 <= step < length:
+        if m.uc.mem_read(st.SETTINGS + 0xD2, 1)[0]:
+            return None
+        step %= length
+    return col if step >= e else None
+
+
 def grid_checks(ptf: Path, stock: Path) -> None:
-    print("The Pattern grid: steps past a track's length in the column's empty color")
+    print("The Pattern grid: past a track's length, its loop going on, grey (a muted track's color)")
     table = patch_ram(ptf, "tracklen")
     dim_sites: set[int] = set()
+    base = STYLE + 0x2B8
 
-    def case(what, last, lengths, **kw):
-        """the patched grid with lengths against stock's with those steps left empty"""
-        got = GridRig(ptf, last, table, lengths, **kw)
-        cells, sites, dl = got.draw()
-        want_cells, _, want_dl = GridRig(stock, last, empty=lengths, **kw).draw()
-        plain, _, _ = GridRig(stock, last, **kw).draw()
-        dimmed = sum(a != b for (_, a), (_, b) in zip(cells, plain))
-        pointers = [p for p, _ in cells] == [p for p, _ in want_cells]
-        same = [c for _, c in cells] == [c for _, c in want_cells]
-        diff = [(hex(p), hex(a), hex(b)) for (p, a), (_, b) in zip(cells, want_cells) if a != b][:3]
-        check(pointers and same and dl == want_dl and dimmed > 0,
-              f"{what}: {len(cells)} cells, {dimmed} dimmed, as stock's empty steps"
-              + ("" if same else f" (differ: {diff})") + ("" if dl == want_dl else " (display list differs)"))
-        if same:
+    def case(what, last, lengths, holes=frozenset(), **kw):
+        """the patched grid with lengths against stock's with each short track's loop
+        written out to the pattern's end: past the end, a cell in its column's normal color
+        grey, an empty one blank (as many spaces), everything else as stock"""
+        got = GridRig(ptf, last, table, lengths, holes=holes, **kw)
+        cells, sites, _ = got.draw()
+        oracle = GridRig(stock, last, loop={t: e for t, e in lengths.items() if e <= last}, holes=holes, **kw)
+        written, _, _ = oracle.draw()
+        bad, grey, blank = [], 0, 0
+        for (p, c), (wp, wc) in zip(cells, written):
+            text, want_text = got.m.cstr(p), oracle.m.cstr(wp)
+            col = past_end(oracle, wp, lengths)
+            want_c, want_t = wc, want_text
+            if col is not None and wc == oracle.m.r32(base + 8 + 4 * col):
+                want_c, grey = oracle.m.r32(base + 0x30), grey + 1
+            elif col is not None and wc == oracle.m.r32(base + 0x18 + 4 * col) and want_text.startswith("-"):
+                want_t, blank = " " * len(want_text), blank + 1
+            if not ((p == wp or want_t != want_text) and c == want_c and text == want_t):   # a blank is the patch's own text
+                bad.append((hex(wp), want_text, text, hex(wc), hex(c)))
+        check(len(cells) == len(written) and not bad and grey > 0,
+              f"{what}: {len(cells)} cells, {grey} grey and {blank} blank past the end (the loop going on), "
+              f"the rest as stock{'' if not bad else f' (differ: {bad[:3]})'}")
+        if not bad:
             for site in sites:
                 dim_sites.add(site)
         return got
@@ -903,8 +987,15 @@ def grid_checks(ptf: Path, stock: Path) -> None:
     case("3-character instrument texts", 15, {0: 6, 1: 2}, cursor=3, three=(0, 1, 2))
     check(dim_sites == set(CELL_SITES), "every call site dims a cell: "
           + ", ".join(CELL_SITES[s] for s in sorted(dim_sites)))
-    n = rig.colors()
-    check(len(set(n)) == 8, "the 8 colors are distinct: " + " ".join(f"{c:06x}" for c in n))
+    n = rig.colors() + (rig.m.r32(base + 0x30),)
+    check(len(set(n)) == 9, "the 8 column colors and the muted one are distinct: " + " ".join(f"{c:06x}" for c in n))
+
+    print("Empty steps in a short track's loop: blank past the end")
+    holes = frozenset({(0, 1), (0, 4), (1, 0), (2, 2), (2, 3)})
+    case("cursor on track 1 at step 9, track 3 muted", 15, {0: 6, 1: 3, 2: 4}, holes,
+         cursor=9, highlight_track=0, mutes=(2,))
+    case("row setting 0 (rows wrap round), cursor at step 1", 15, {0: 6, 1: 3, 2: 4}, holes, cursor=1, wrap=0)
+    case("3-character instrument texts", 15, {0: 6, 1: 3, 2: 4}, holes, cursor=3, three=(0, 1))
 
     for what, setup in (("no lengths", lambda m: None),
                         ("table not set up", lambda m: m.write(table, bytes([0xA5]) * (4 + 256 * 16))),
@@ -924,6 +1015,34 @@ def grid_checks(ptf: Path, stock: Path) -> None:
     r.jog(-3)
     check(("refresh", 40) in [(n, c) for n, c, _ in r.calls] and r.stored(0) == 13,
           f"encoder -3 while held: track 1 length {r.stored(0)}, the grid (control 40) is refreshed")
+    r.button(0)
+
+    print("Trk Len refills the grid: the loop for the new length at once, with no cursor move")
+    r = UiRig(ptf, table=table)
+    m = r.m
+    for s in range(16):
+        r.put(0, s, 40 + s)
+    m.w8(table + 4 + 16, 0)
+    m.w8(CUR_PATTERN, 1)
+    m.w8(ED + ED_CURSOR_TRACK, 0)
+    m.w16(ED + ED_CURSOR_ROW, 7)
+    m.w8(ED + ED_GRID_CTRL, 40)
+
+    def note_texts() -> dict[int, str]:
+        """track 1's note text per step shown, from the grid's row texts"""
+        centre = struct.unpack("<H", m.uc.mem_read(ED + 0x1E8, 2))[0]
+        return {centre - 7 + row: m.cstr(GRID_DATA + 0x13 * row) for row in range(15)}
+    m.call(FILL_ROWS, PATVIEW)
+    base = note_texts()
+    r.bind()
+    r.button(1)
+    for delta, e in ((-12, 4), (2, 6), (-1, 5), (11, 0)):
+        r.jog(delta)
+        got = note_texts()
+        want = {s: base[s % e] if e and s >= e else base[s] for s in got}
+        check(got == want and r.stored(0) == e and len(set(base.values())) == 15,
+              f"encoder {delta:+d} to length {e or '--'}: every row shows "
+              + ("the loop past the end" if e else "its own step") + ("" if got == want else f" (got {got})"))
     r.button(0)
 
 
@@ -1070,6 +1189,52 @@ def record_checks(ptf: Path, stock: Path) -> None:
     p = rec_case(ptf, stock, table, "no lengths: as stock", 15, {}, {},
                  [(at(9), "press", 68), (at(10, 5), "release", 68)], (0, 9, 68))
     check(p.irq == ["on", "on"], f"no lengths: the audio interrupt isn't touched ({p.irq})")
+
+    print("Recording over several loops: a short track's note-offs don't block a note")
+
+    def loops(path: Path, lengths: dict[int, int], hits, last: int = 15, put=()):
+        r = RecRig(path, last, table if lengths else None)
+        r.m.stub_function(VOICE_NOTE_ON, lambda mm: 0)
+        for t, s_, note in put:
+            r.put(t, s_, note, bufs=(r.cur,))
+        for t, e in lengths.items():
+            r.length(t, e)
+        r.start(0)
+        r.record()
+        now, got = 0, []
+        for i, step in enumerate(hits):
+            note = 60 + i
+            r.run(at(step) - now)
+            now = at(step)
+            r.press(note)
+            r.run(at(step, 14) - now)
+            now = at(step, 14)
+            r.release(note)
+            got.append(next(((t, s_) for t in range(16) for s_, row in enumerate(r.rows(t)) if row[0] == note), None))
+        return r, got
+
+    # length 6: three notes and their note-offs fill steps 0-5 in loop 1; loop 2's hits on
+    # steps 1 and 3 (note-offs) stay on track 1; then step 1 holds a note: the next track
+    r, got = loops(ptf, {0: 6}, [0, 2, 4, 7, 9, 13])
+    want = [(0, 0), (0, 2), (0, 4), (0, 1), (0, 3), (1, 13)]
+    check(got == want, f"length 6, hits on steps 1, 3, 5, then 8 and 10 (loop 2's steps 2 and 4, note-offs), then "
+                       f"14 (step 2, now a note): {got}")
+    check([b[0] for b in r.rows(0)[:6]] == [60, 63, 61, 64, 62, 0xFC] and r.rows(0)[6:] == [bytes([0xFF] + [0] * 5)] * 10,
+          f"track 1's steps: {[b[0] for b in r.rows(0)[:6]]}, the dimmed rows untouched")
+    # a hit that goes to another track (its step holds a note) leaves the note-offs it
+    # could reach in place
+    r, got = loops(ptf, {0: 6}, [0, 2, 6], put=[(1, 6, 50)])
+    check(got[2] == (2, 6) and [b[0] for b in r.rows(0)[:6]] == [60, 0xFC, 61, 0xFC, 0xFF, 0xFF],
+          f"a hit on step 7 (loop step 1, a note) goes to track 3 (track 2 has a note there): {got[2]}; "
+          f"track 1's note-offs stay: {[b[0] for b in r.rows(0)[:6]]}")
+    # length 1 and length 2: the one or two steps
+    r, got = loops(ptf, {0: 2}, [0, 3, 5])
+    check(got == [(0, 0), (0, 1), (1, 5)], f"length 2: hits on steps 1, 4 (a note-off), 6 (a note): {got}")
+    # a track without a length keeps stock's rule: its note-off blocks
+    s_got = loops(stock, {}, [0, 1])[1]
+    r, got = loops(ptf, {2: 6}, [0, 1])
+    check(got == s_got == [(0, 0), (1, 1)], f"a track without a length: a hit onto its note-off goes to the next "
+                                            f"track, as stock ({got}, stock {s_got})")
 
     print("Every recording site, and the audio interrupt")
     r = RecRig(ptf, 15, table)

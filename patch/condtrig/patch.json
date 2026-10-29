@@ -110,7 +110,16 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-ct1"
+      "note": "version text 1.2.0-ct2"
+    }
+  ],
+  "links": [
+    {
+      "word": "mt_ct_tl_len",
+      "patch": "tracklen",
+      "symbol": "mt_tl_len",
+      "thumb": true,
+      "note": "Variable Track Length's length per track, when it is in the build: a short track's conditions count its own loops"
     }
   ]
 }

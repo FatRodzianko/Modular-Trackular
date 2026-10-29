@@ -29,8 +29,9 @@
  * Setting a length: the Pattern screen's page 3 gets a "Trk Len" button, on the first
  * button after the other patches' (tl_button: 2, or 3 or 4 after Humanize and Copy to
  * New). While it is held, the encoder changes the cursor's track's length, 1..the
- * pattern's length, and the button's second line shows it ("--" when the track follows
- * the pattern). Released, the encoder is stock's again.
+ * pattern's length. The button's second line always shows the cursor's track's length
+ * ("--" when the track follows the pattern); the Pattern screen's update redraws it when
+ * the track, the pattern or the length changes. Released, the encoder is stock's again.
  *  - mt_tl_bind chains page 3's bind of button 1 (0x600e29c6, shared with copypattern)
  *    and binds Trk Len's button as kind 3 (called on press and on release);
  *  - mt_tl_label / mt_tl_label2 chain button 6's two (empty) text calls in page 3's
@@ -40,14 +41,16 @@
  *    0x600e5976), the only ones after the texts, and give Trk Len's button the active
  *    colors and Pattern Name's data, as page 3 gives buttons 0 and 1;
  *  - mt_tl_jog takes the Pattern screen's encoder word (0x600df2f0, pat_jog 0x600c90a1)
- *    while the button is held and still bound to this patch, and redraws the grid.
+ *    while the button is held and still bound to this patch, and refills and redraws the
+ *    grid (stock's row fill, so the steps past the length show the new loop).
  *
- * The Pattern grid shows a short track's steps E.. in each column's empty color, the one
- * stock gives a "-" cell, so they read as "nothing plays here" with their contents still
- * visible. The grid control picks each cell's color into ctrl +0x44 and draws its text
- * with patgrid_draw_cell (0x6010b204); mt_tl_cell_* chain its 5 calls (note, instrument
- * twice, FX1, FX2) and swap the color for the call. Only the column's normal color is
- * swapped, so empty cells, muted tracks, the cursor and a selection look as in stock.
+ * The Pattern grid shows a short track's steps E.. grey, in a muted track's color, so they
+ * read as "nothing plays here" with their contents still visible; empty ones ("-") are
+ * blank, so the column stops at E. The grid control picks each cell's color into ctrl
+ * +0x44 and draws its text with patgrid_draw_cell (0x6010b204); mt_tl_cell_* chain its 5
+ * calls (note, instrument twice, FX1, FX2) and swap the color or the text for the call.
+ * Only the column's normal and empty colors are swapped, so muted tracks, the cursor and
+ * a selection look as in stock.
  *
  * Live recording during play writes a note at the track's position (+0x88), or at the
  * next step when the hit is late, and a note-off one step further when it would land
@@ -63,6 +66,14 @@
  * playback reads a short track's steps below E only, so it never sees the borrowed
  * rows; the fourth row covers the position moving on meanwhile; and a recording from
  * the interrupt, nested in this one, puts back exactly what it found.
+ * One change from stock's rules, for notes on short tracks: stock records a note only
+ * onto a step without one, and a note-off (which it writes after each recorded note when
+ * the pad is let go) counts as one. All of a short track's loops share its E steps, so
+ * a few notes and their note-offs fill them in the first loop and every later hit went
+ * to another track. So for the note recorder, a short track's steps it can reach that
+ * hold a note-off are shown to stock as empty; a step stock didn't record on gets its
+ * note-off back. Notes are never replaced. (The audio interrupt could play such a step
+ * during the call and miss its note-off once: the note then sounds on to the next one.)
  *
  * The lengths are saved per project in <project folder>/tracklen.bin (TLN1: magic, the
  * number of entries, one 17-byte entry per pattern that has a length: its number and
@@ -85,7 +96,7 @@
 #include <stdint.h>
 
 #ifndef TRACKLEN_VERSION
-#define TRACKLEN_VERSION "tl1"
+#define TRACKLEN_VERSION "tl7"
 #endif
 
 /* ---- firmware 1.2.0 addresses ------------------------------------------------------ */
@@ -115,6 +126,7 @@
 #define ED_GRID_CENTRE      0x1E8u          /* uint16: the step on the grid's middle row */
 #define ED_GRID_LENGTH      0x1EAu          /* uint16: the pattern's length, as the grid was filled */
 #define ED_GRID_CTRL        0x29Bu          /* int8 control index of the grid */
+#define FW_FILL_ROWS        0x600DF3A1u     /* patview_fill_rows_q(patview): the grid's row texts */
 #define PATVIEW_NAME_DATA   0x12CCu         /* page 3: Pattern Name's (button 0's) data */
 #define FW_DISPLAY          0x20027D64u
 #define DISP_STYLES         8u
@@ -154,11 +166,13 @@
 #define TRACK_ROWS          0x11Du
 #define COLOR_NORMAL        0x08u
 #define COLOR_EMPTY         0x10u           /* + the normal color's offset */
+#define COLOR_MUTED         0x30u           /* a muted track's cells */
 #define FW_SETTINGS         0x2002061Cu
 #define SET_ROW_WRAP        0xD2u           /* 0: rows outside the pattern show it wrapped round */
 
 /* live recording */
 #define REC_ROWS            4u              /* the rows a recorder writes: position + 0..2, + 1 if it moves on */
+#define NOTE_OFF            0xFCu           /* a step's note byte: note-off (no note: 0xFF) */
 #define FW_NVIC_ISER0       ((volatile uint32_t *)0xE000E100u)
 #define FW_NVIC_ICER0       ((volatile uint32_t *)0xE000E180u)
 #define AUDIO_IRQ           1u              /* NVIC bit 0: the audio block (audio_irq_disable 0x600303d4) */
@@ -183,6 +197,7 @@ typedef void (*bind3_fn)(void *manager, uint32_t index, state_fn handler);
 typedef void (*ctrl_fn)(void *display, int ctrl, const void *arg);
 typedef void (*display_fn)(void *display, int ctrl);
 typedef void (*sync_fn)(void *display);
+typedef void (*fill_fn)(void *patview);
 typedef void (*jog_fn)(int32_t delta, uint32_t a1, uint32_t a2, uint32_t a3);
 typedef uint32_t (*guard_fn)(uint32_t arg);
 typedef void (*cell_fn)(void *ctrl, uint32_t x, uint32_t y, uint32_t font, const char *text,
@@ -226,7 +241,8 @@ struct tl_state {
     uint8_t load;                           /* read the project's file once the file manager is idle */
     uint8_t changed;                        /* a length changed since the file was read or written */
     uint8_t held;                           /* Trk Len is held */
-    char label[4];                          /* its second line while held: "1".."128", "--" */
+    char label[4];                          /* its second line: "1".."128", "--" */
+    uint8_t shown[3];                       /* what it shows: the track, the pattern, E (0: "--") */
 };
 static struct tl_state tl_state_ram __attribute__((section(".mt_ram")));
 #define TL (&tl_state_ram)
@@ -260,6 +276,15 @@ static inline __attribute__((always_inline)) uint32_t tl_length(uint32_t track, 
 static const uint8_t *tl_pattern(const uint8_t *seq)
 {
     return *(const uint8_t *const *)(seq + SEQ_PATTERN);
+}
+
+/* For condtrig, linked to it by the patcher ("links"): the length track t plays in seq's
+ * pattern, 0 when it plays the whole pattern. Its conditions count the track's own loops. */
+uint32_t mt_tl_len(const uint8_t *seq, uint32_t track)
+{
+    uint32_t pattern_len = tl_pattern(seq)[PAT_LAST_STEP] + 1u;
+    uint32_t e = tl_length(track, pattern_len);
+    return e < pattern_len ? e : 0u;
 }
 
 /* ITCM 0x2170, through a stub that passes r4 (seq) and r5 (track): the copy of the
@@ -356,39 +381,64 @@ static uint32_t edit_pattern_len(void)
     return tl_pattern((const uint8_t *)FW_SEQ)[PAT_LAST_STEP] + 1u;
 }
 
-/* The second line: while held, the cursor's track's length, or "--" when it plays the
- * whole pattern; otherwise stock's empty text */
+/* What the second line shows: the cursor's track, the pattern, its E (0 when it plays the
+ * whole pattern) */
+static void label_key(uint8_t key[3])
+{
+    uint32_t len = edit_pattern_len(), track = ed()[ED_CURSOR_TRACK];
+    uint32_t e = tl_length(track, len);
+    key[0] = (uint8_t)track;
+    key[1] = *FW_PROJECT_PATTERN;
+    key[2] = (uint8_t)(e < len ? e : 0);
+}
+
+/* The second line, held or not: the cursor's track's length, or "--" when it plays the
+ * whole pattern */
+static const char *tl_format_label(void)
+{
+    label_key(TL->shown);
+    uint32_t e = TL->shown[2];
+    char *out = TL->label;
+    if (!e) {
+        *out++ = '-';
+        *out++ = '-';
+    } else {
+        if (e >= 100)
+            *out++ = (char)('0' + e / 100);
+        if (e >= 10)
+            *out++ = (char)('0' + e / 10 % 10);
+        *out++ = (char)('0' + e % 10);
+    }
+    *out = 0;
+    return TL->label;
+}
+
+/* The grid's row texts written again (as stock's encoder does after an edit), so the
+ * steps past a length show the loop for the new length; the fill ends by redrawing the
+ * grid control itself */
+static void tl_refill_grid(void)
+{
+    if (*(const volatile int8_t *)(ed() + ED_GRID_CTRL) >= 0)
+        ((fill_fn)FW_FILL_ROWS)((void *)FW_PATVIEW);
+}
+
 static void tl_show_label(void)
 {
     int ctrl = button_ctrl(tl_button());
     if (ctrl < 0)
         return;
-    const char *text = FW_EMPTY_TEXT;
-    if (TL->held) {
-        uint32_t len = edit_pattern_len();
-        uint32_t e = tl_length(ed()[ED_CURSOR_TRACK], len);
-        char *out = TL->label;
-        if (e >= len) {
-            *out++ = '-';
-            *out++ = '-';
-        } else {
-            if (e >= 100)
-                *out++ = (char)('0' + e / 100);
-            if (e >= 10)
-                *out++ = (char)('0' + e / 10 % 10);
-            *out++ = (char)('0' + e % 10);
-        }
-        *out = 0;
-        text = TL->label;
-    }
-    ((ctrl_fn)FW_SET_TEXT2)((void *)FW_DISPLAY, ctrl, text);
+    ((ctrl_fn)FW_SET_TEXT2)((void *)FW_DISPLAY, ctrl, tl_format_label());
     ((display_fn)FW_CTRL_REFRESH)((void *)FW_DISPLAY, ctrl);
     ((sync_fn)FW_DISP_SYNC)((void *)FW_DISPLAY);
 }
 
-/* Trk Len's button, kind 3: state 1 on press, 0 on release */
+/* Trk Len's button, kind 3: state 1 on press, 0 on release. A button still held a moment
+ * later sends 2 (the input callback 0x600cc610 passes it on to kind 3); like stock's
+ * Length (0x600e249c), only 1 and 0 count. */
 void mt_tl_button(uint32_t state)
 {
+    if (state > 1)
+        return;
     tl_init_if_needed();
     TL->held = state == 1;
     tl_show_label();
@@ -428,12 +478,12 @@ void mt_tl_label(void *display, int ctrl, const void *text)
 }
 
 /* replaces "bl disp_ctrl_set_ptr38" at 0x600e5914 (page 3: button 6's empty second line),
- * the same way: the length while held, else empty */
+ * the same way: the cursor's track's length */
 void mt_tl_label2(void *display, int ctrl, const void *text)
 {
     ((ctrl_fn)mt_tl_next_label2)(display, ctrl, text);
-    ((ctrl_fn)FW_SET_TEXT2)(display, button_ctrl(tl_button()),
-                            TL->held && TL->magic == TL_MAGIC ? TL->label : FW_EMPTY_TEXT);
+    tl_init_if_needed();
+    ((ctrl_fn)FW_SET_TEXT2)(display, button_ctrl(tl_button()), tl_format_label());
 }
 
 /* replaces "bl disp_ctrl_set_colors" at 0x600e594a (page 3: More's colors) */
@@ -473,9 +523,7 @@ void mt_tl_jog(int32_t delta, uint32_t a1, uint32_t a2, uint32_t a3)
                 uint8_t *slot = &TL->len[*FW_PROJECT_PATTERN][track], was = *slot;
                 *slot = (uint8_t)(e < len ? e : 0);
                 TL->changed |= *slot != was;
-                int grid = *(const volatile int8_t *)(ed() + ED_GRID_CTRL);
-                if (grid >= 0)
-                    ((display_fn)FW_CTRL_REFRESH)((void *)FW_DISPLAY, grid);
+                tl_refill_grid();
                 tl_show_label();
             }
             return;
@@ -486,21 +534,21 @@ void mt_tl_jog(int32_t delta, uint32_t a1, uint32_t a2, uint32_t a3)
 
 /* ---- the Pattern grid ------------------------------------------------------------- */
 
-/* The cell whose text is `text`: if its step is at or past its track's length and it has
- * its column's normal color, the column's empty color; else 0 */
-static uint32_t tl_dim_color(const uint8_t *ctrl, const char *text)
+/* The cell whose text is `text`: if its step is at or past its track's length, the grid's
+ * color table, and its column in *column; else 0 */
+static const uint32_t *tl_past_end(const uint8_t *ctrl, const char *text, uint32_t *column)
 {
     if (TL->magic != TL_MAGIC)
         return 0;
     uint32_t off = (uint32_t)((const uint8_t *)text - *(const uint8_t *const *)(ctrl + GRID_DATA));
     if (off >= TRACKS * TRACK_ROWS)
         return 0;
-    uint32_t track = off / TRACK_ROWS, row = off % TRACK_ROWS / ROW_SIZE, column;
+    uint32_t track = off / TRACK_ROWS, row = off % TRACK_ROWS / ROW_SIZE;
     switch (off % TRACK_ROWS % ROW_SIZE) {
-    case 0x0: column = 0; break;
-    case 0x5: column = 1; break;
-    case 0x9: column = 2; break;
-    case 0xE: column = 3; break;
+    case 0x0: *column = 0; break;
+    case 0x5: *column = 1; break;
+    case 0x9: *column = 2; break;
+    case 0xE: *column = 3; break;
     default: return 0;
     }
     int32_t len = *(const uint16_t *)(ed() + ED_GRID_LENGTH);
@@ -519,19 +567,63 @@ static uint32_t tl_dim_color(const uint8_t *ctrl, const char *text)
     }
     if ((uint32_t)step < e)
         return 0;
-    const uint32_t *normal = *(const uint32_t *const *)(ctrl + GRID_COLORS) + (COLOR_NORMAL / 4 + column);
-    if (*(const uint32_t *)(ctrl + GRID_COLOR) != *normal)
-        return 0;
-    return normal[COLOR_EMPTY / 4];
+    return *(const uint32_t *const *)(ctrl + GRID_COLORS);
 }
 
+/* The step a grid row of track `track` shows its texts from: past a short track's length,
+ * the step it plays there (step mod E), so the grid shows the loop going on, grey */
+uint32_t mt_tl_ghost_step(int32_t step, uint32_t track)
+{
+    int32_t len = *(const int16_t *)(ed() + ED_GRID_LENGTH);
+    if (TL->magic != TL_MAGIC || track >= TRACKS || len < 1 || step < 0 || step >= len)
+        return (uint32_t)step;
+    uint32_t e = tl_length(track, (uint32_t)len);
+    return (uint32_t)step >= e ? (uint32_t)step % e : (uint32_t)step;
+}
+
+/* 0x600df548 in patview_fill_rows_q (0x600df3a0), over "add.w r3, r6, r6, lsl #1"
+ * ("replaces": "insns"): every row's three ways to its step (in the pattern, wrapped below
+ * 0, wrapped past the end) meet here with the step in r6 and the track in fp, and every
+ * read of the step's note, instrument and FX after it goes through r6. Sets r6 to the
+ * step to show and r3 as that instruction does; keeps every other register (r2 is live).
+ * The flags are dead: the code after it sets them afresh. */
+__attribute__((naked)) void mt_tl_ghost(void)
+{
+    __asm__ volatile(
+        "push {r0, r1, r2, r3, ip, lr}\n\t"
+        "mov r0, r6\n\t"
+        "mov r1, fp\n\t"
+        "bl mt_tl_ghost_step\n\t"
+        "mov r6, r0\n\t"
+        "add.w r3, r6, r6, lsl #1\n\t"
+        "pop {r0, r1, r2}\n\t"
+        "add sp, sp, #4\n\t"
+        "pop {ip, pc}\n\t");
+}
+
+/* Past the end, a cell in its column's normal color is drawn grey, in a muted track's
+ * color, and an empty one ("-", in the empty color) as blank, as many spaces as it has
+ * characters, so the track visibly stops at its length. The cursor, a selection and muted
+ * tracks keep their own colors and texts. */
 static void tl_cell(uint32_t next, uint8_t *ctrl, uint32_t x, uint32_t y, uint32_t font,
                     const char *text, uint32_t n, uint32_t w)
 {
+    static const char spaces[] = "     ";
     uint32_t *color = (uint32_t *)(ctrl + GRID_COLOR);
-    uint32_t keep = *color, dim = tl_dim_color(ctrl, text);
-    if (dim)
-        *color = dim;
+    uint32_t keep = *color;
+    uint32_t column = 0;
+    const uint32_t *colors = tl_past_end(ctrl, text, &column);
+    if (colors) {
+        const uint32_t *normal = colors + COLOR_NORMAL / 4 + column;
+        if (keep == normal[0]) {
+            *color = colors[COLOR_MUTED / 4];
+        } else if (keep == normal[COLOR_EMPTY / 4] && text[0] == '-') {
+            uint32_t k = 0;
+            while (k < sizeof spaces - 1 && text[k])
+                k++;
+            text = spaces + (sizeof spaces - 1 - k);
+        }
+    }
     ((cell_fn)next)(ctrl, x, y, font, text, n, w);
     *color = keep;
 }
@@ -600,7 +692,7 @@ static void audio_restore(uint32_t was)
  * stack argument), with the rows a short track's recording can reach mapped onto the
  * steps it plays (see the top of the file) */
 static uint32_t tl_record(uint32_t next, uint8_t *seq, uint32_t source, uint32_t note, uint32_t velocity,
-                          uint32_t arg)
+                          uint32_t arg, uint32_t lift_offs)
 {
     if (TL->magic != TL_MAGIC)
         return ((rec_fn)next)(seq, source, note, velocity, arg);
@@ -615,6 +707,8 @@ static uint32_t tl_record(uint32_t next, uint8_t *seq, uint32_t source, uint32_t
     uint8_t own[TRACKS][REC_ROWS][STEP_SIZE];       /* a dimmed row's own contents */
     uint8_t lent[TRACKS][REC_ROWS][STEP_SIZE];      /* what it was given: its step mod E */
     uint8_t row_of[TRACKS][REC_ROWS];
+    uint8_t lifted[TRACKS][REC_ROWS];               /* steps below E whose note-off was lifted */
+    uint8_t n_lifted[TRACKS];
     uint32_t audio = audio_mask();
     for (uint32_t t = 0; t < TRACKS; t++) {
         if (!(tracks >> t & 1))
@@ -622,6 +716,14 @@ static uint32_t tl_record(uint32_t next, uint8_t *seq, uint32_t source, uint32_t
         uint32_t e = tl_length(t, len);
         uint32_t pos = *(const uint16_t *)(seq + SEQ_TRACK(t) + TRK_STEP);
         uint8_t *steps = pattern + PAT_STEPS(t);
+        n_lifted[t] = 0;
+        for (uint32_t k = 0; lift_offs && k < REC_ROWS; k++) {
+            uint32_t r = (pos + k) % len % e;
+            if (steps[STEP_SIZE * r] == NOTE_OFF) {
+                steps[STEP_SIZE * r] = 0xFFu;
+                lifted[t][n_lifted[t]++] = (uint8_t)r;
+            }
+        }
         for (uint32_t k = 0; k < REC_ROWS; k++) {
             uint32_t x = (pos + k) % len;
             row_of[t][k] = (uint8_t)x;
@@ -648,6 +750,9 @@ static uint32_t tl_record(uint32_t next, uint8_t *seq, uint32_t source, uint32_t
                 copy_step(steps + STEP_SIZE * (x % e), steps + STEP_SIZE * x);
             copy_step(steps + STEP_SIZE * x, own[t][k]);
         }
+        for (uint32_t i = 0; i < n_lifted[t]; i++)
+            if (steps[STEP_SIZE * lifted[t][i]] == 0xFFu)
+                steps[STEP_SIZE * lifted[t][i]] = NOTE_OFF;
     }
     audio_restore(audio);
     return ret;
@@ -655,19 +760,21 @@ static uint32_t tl_record(uint32_t next, uint8_t *seq, uint32_t source, uint32_t
 
 /* One hook per site, each with its own chain word: the 8 veneers' literal words for
  * seq_record_live_note (0x15c9), and the 18 calls of seq_record_note_off_q */
-#define REC_HOOK(name)                                                                      \
+#define REC_HOOK(name, lift)                                                                \
     CHAIN_WORD(mt_tl_next_##name);                                                          \
     uint32_t mt_tl_##name(uint8_t *seq, uint32_t source, uint32_t note, uint32_t velocity,  \
                           uint32_t arg)                                                     \
     {                                                                                       \
-        return tl_record(mt_tl_next_##name, seq, source, note, velocity, arg);              \
+        return tl_record(mt_tl_next_##name, seq, source, note, velocity, arg, lift);        \
     }
-REC_HOOK(rec_note1) REC_HOOK(rec_note2) REC_HOOK(rec_note3) REC_HOOK(rec_note4)
-REC_HOOK(rec_note5) REC_HOOK(rec_note6) REC_HOOK(rec_note7) REC_HOOK(rec_note8)
-REC_HOOK(rec_off1) REC_HOOK(rec_off2) REC_HOOK(rec_off3) REC_HOOK(rec_off4) REC_HOOK(rec_off5)
-REC_HOOK(rec_off6) REC_HOOK(rec_off7) REC_HOOK(rec_off8) REC_HOOK(rec_off9) REC_HOOK(rec_off10)
-REC_HOOK(rec_off11) REC_HOOK(rec_off12) REC_HOOK(rec_off13) REC_HOOK(rec_off14) REC_HOOK(rec_off15)
-REC_HOOK(rec_off16) REC_HOOK(rec_off17) REC_HOOK(rec_off18)
+#define REC_NOTE(name) REC_HOOK(name, 1u)    /* notes: a short track's note-offs don't block */
+#define REC_OFF(name) REC_HOOK(name, 0u)
+REC_NOTE(rec_note1) REC_NOTE(rec_note2) REC_NOTE(rec_note3) REC_NOTE(rec_note4)
+REC_NOTE(rec_note5) REC_NOTE(rec_note6) REC_NOTE(rec_note7) REC_NOTE(rec_note8)
+REC_OFF(rec_off1) REC_OFF(rec_off2) REC_OFF(rec_off3) REC_OFF(rec_off4) REC_OFF(rec_off5)
+REC_OFF(rec_off6) REC_OFF(rec_off7) REC_OFF(rec_off8) REC_OFF(rec_off9) REC_OFF(rec_off10)
+REC_OFF(rec_off11) REC_OFF(rec_off12) REC_OFF(rec_off13) REC_OFF(rec_off14) REC_OFF(rec_off15)
+REC_OFF(rec_off16) REC_OFF(rec_off17) REC_OFF(rec_off18)
 
 /* ---- tracklen.bin (main loop: the screens' update methods) ------------------------ */
 
@@ -898,14 +1005,18 @@ static int lengths_tick(void)
 }
 
 /* Pattern screen vtable slot 0x600403dc (update method 0x600e1f99; chained). Lengths
- * loaded while the screen is up redraw the grid. */
+ * loaded while the screen is up refill and redraw the grid. On page 3, Trk Len's second line follows
+ * the cursor's track, the pattern and its length (redrawn only when one changes). */
 void mt_tl_pattern_update(void *screen, void *a1, void *a2, void *a3)
 {
     int loaded = lengths_tick();
     ((update_fn)mt_tl_next_pattern_update)(screen, a1, a2, a3);
-    int grid = *(const volatile int8_t *)(ed() + ED_GRID_CTRL);
-    if (loaded && grid >= 0)
-        ((display_fn)FW_CTRL_REFRESH)((void *)FW_DISPLAY, grid);
+    if (loaded)
+        tl_refill_grid();
+    uint8_t key[3];
+    label_key(key);
+    if ((key[0] != TL->shown[0] || key[1] != TL->shown[1] || key[2] != TL->shown[2]) && tl_bound())
+        tl_show_label();
 }
 
 /* Config screen vtable slot 0x6003b5f8 (update method 0x600c6475; chained): projects are

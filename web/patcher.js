@@ -293,7 +293,7 @@ const decoder = new TextDecoder();
 const SPEC_KEYS = new Set([
   "name", "description", "firmware", "stock_image_sha256", "bin", "sym", "rel", "prebuilt_bin",
   "prebuilt_sym", "prebuilt_rel", "base", "branches", "words", "ram_startup", "ram_regions", "standalone",
-  "include", "version", "version_word", "itcm_branches", "late_ram",
+  "include", "version", "version_word", "itcm_branches", "late_ram", "links",
 ]);
 
 function checkKeys(spec) {
@@ -359,7 +359,7 @@ async function loadPatch(spec, specUrl, inBundle, io, log) {
     ram_rel: rel ? rel.ram_offsets : [], ram_order: order,
     ram_startup: Boolean(spec.ram_startup),
     late_word: spec.late_ram ?? null, late_size: lateSize(spec, blob, syms, rel, pinned),
-    branches: spec.branches, words, itcm_branches: spec.itcm_branches ?? [],
+    branches: spec.branches, words, itcm_branches: spec.itcm_branches ?? [], links: spec.links ?? [],
   };
 }
 
@@ -420,8 +420,8 @@ function assignRam(parts, itcmReserved = 0) {
   }
 }
 
-function setNext(p, symbol, value, linked = 0) {
-  if (!has(p.syms, symbol)) fail(`${p.name}: no symbol ${JSON.stringify(symbol)} for "next"`);
+function setNext(p, symbol, value, linked = 0, what = "next") {
+  if (!has(p.syms, symbol)) fail(`${p.name}: no symbol ${JSON.stringify(symbol)} for "${what}"`);
   const off = p.syms[symbol] - p.base;
   if ((off & 3) || !(0 <= off && off <= p.blob.length - 4) || getU32(p.blob, off) !== linked) {
     fail(`${p.name}: ${symbol} is not an aligned word holding ${linked} in the patch code`);
@@ -497,6 +497,17 @@ export async function patchFirmware({ stockBytes, stock: parsed, spec, specUrl, 
     place(p, base);
     if (p.late) setNext(p, p.late_word, p.late[0], p.late_size);
     end = base + p.blob.length;
+  }
+  // Links: a word that gets another patch's address, 0 when that patch isn't in the build.
+  const byName = new Map(parts.map((p) => [p.name, p]));
+  for (const p of parts) {
+    for (const ln of p.links) {
+      const other = byName.get(ln.patch);
+      if (other && !has(other.syms, ln.symbol)) fail(`${p.name}: ${ln.patch} has no symbol ${JSON.stringify(ln.symbol)} for "links"`);
+      const value = other ? (other.syms[ln.symbol] | (ln.thumb ? 1 : 0)) >>> 0 : 0;
+      setNext(p, ln.word, value, 0, "links");
+      log(`link ${p.name}.${ln.word} -> ` + (other ? `${ln.patch}.${ln.symbol} @ ${hx(value)}` : `0 (${ln.patch} not in the build)`));
+    }
   }
   let stubFlash = null;
   if (stubSites.size) {
@@ -740,9 +751,10 @@ export function selectionKey(manifest, ids) {
 
 // Which spec a selection uses: one mod's own, patch/all's, or a bundle of the mods in
 // the manifest's order with a 3-character version text from the selection's bits: a
-// letter for bits 8 and up ("M" for none, "N" for bit 8, ... "Z" for 13, then "A" and
-// "B" for 14 and 15), then bits 0-7 as two hex digits. Mixes of the first eight mods
-// keep their "M" names.
+// character for bits 8 and up ("M" for none, "N" for bit 8, ... "Z" for 13, then "A"
+// to "L" for 14 to 25, then "0" to "5" for 26 to 31), then bits 0-7 as two hex digits.
+// Mixes of the first eight mods keep their "M" names, and mixes without bit 12 keep
+// theirs.
 export function planSelection(manifest, allSpec, ids) {
   const chosen = manifest.patches.filter((p) => ids.includes(p.id));
   if (!chosen.length || chosen.length !== new Set(ids).size) throw new PatchError("unknown or empty selection");
@@ -754,8 +766,8 @@ export function planSelection(manifest, allSpec, ids) {
   }
   const mask = chosen.reduce((m, p) => m | (1 << p.bit), 0);
   const high = mask >> 8;
-  if (high > 15) throw new PatchError("selection code needs a letter past B");
-  const letter = high <= 13 ? 0x4d + high : 0x41 + (high - 14);
+  if (high > 31) throw new PatchError("selection code needs a character past 5");
+  const letter = high <= 13 ? 0x4d + high : high <= 25 ? 0x41 + (high - 14) : 0x30 + (high - 26);
   const version = String.fromCharCode(letter) + (mask & 0xff).toString(16).toUpperCase().padStart(2, "0");
   const names = chosen.map((p) => p.id);
   const spec = {

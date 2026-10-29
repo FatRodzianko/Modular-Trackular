@@ -6,7 +6,7 @@ it sets that Macro. So the value changes in jumps. With this patch it ramps smoo
 to the next step on that track with the same letter. CC A 0 on step 1 and CC A 127 on
 step 17 becomes a 16-step sweep; the steps in between need no FX.
 Installed on its own, Config shows the firmware version as `1.2.0-ip7`. Together with
-all the other mods ([`patch/all`](../all/patch.json)) it shows `1.2.0-MTZ`.
+all the other mods ([`patch/all`](../all/patch.json)) it shows `1.2.0-MVL`.
 
 **Status:** tested on hardware (in a firmware with colorsong and humanize), MIDI and synths.
 
@@ -162,7 +162,7 @@ runs on `TrackerPlus_MTE.ptf`.
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
 Config → Firmware → the patched file. Config should show `1.2.0-ip7 Build 1504` (or
-`1.2.0-MTZ Build 1504` for all mods).
+`1.2.0-MVL Build 1504` for all mods).
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Patterns are unchanged (the
 patch writes nothing into them), so they play as before, with stepped CCs. Stock

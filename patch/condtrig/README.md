@@ -3,7 +3,7 @@
 A patch for Polyend Tracker+ firmware 1.2.0 that gives the Chance FX (C) conditions on
 how many times the pattern has played, so a step can play only on the first pass, on
 every second pass, on the third of every four, and so on. Installed on its own, Config
-shows the firmware version as `1.2.0-ct1`.
+shows the firmware version as `1.2.0-ct2`.
 
 The idea comes from **Psygoo**'s
 [Tracker+ Conditional Trigs](https://github.com/Psygoo/TrackerPlus-CT-Web/) (CT6). This
@@ -46,6 +46,12 @@ C 50 together play on half of every fourth pass.
 - **Per track.** A track starts a new pass each time it starts its loop again: at the
   end of the pattern, after a Break FX, at the end of a looping selection, and at its
   own length and play mode in performance mode.
+- **Short tracks.** With Variable Track Length (patch/tracklen) in the same build, a
+  track with its own length counts its own loops: each time it starts its loop again,
+  including the last, cut-short loop of a pattern pass. With length 6 in a 16-step
+  pattern, its loops start on steps 1, 7 and 13 of every pass, so `1:2` on step 2 plays
+  steps 2 and 14 on the first pass, step 8 on the second, and so on. In performance
+  mode this holds for forward tracks; the other play modes count as without a length.
 - **Back to 0** whenever playback starts (Play, Play again while playing, a count-in,
   Preview, rendering), and when another pattern starts playing.
 - **Song mode.** A pattern repeated in the next song slot keeps counting, so four slots
@@ -69,6 +75,11 @@ number. Touching such a value with the encoder makes it C 100.
 | `mt_ct_fx1_text`, `mt_ct_fx2_text` | `bl fx_value_text_cell` at `0x600df748` (FX1) and `0x600df77c` (FX2) in the pattern grid's row fill (chained) | A Chance value of 101–137 shows as its condition's name (3 characters); everything else as in stock firmware |
 | `mt_ct_play_from_a`…`_d` | the literals of the four flash veneers to `seq_play_from` (`0x600ac604`, `0x600ac694`, `0x600acd34`, `0x600ad544`), chained | The same, for playback started from the main loop (also while already playing) |
 
+With tracklen in the build, `mt_ct_advance_step` also counts a step whose position
+(track `+0x88`) is a nonzero multiple of the track's length. It gets the length from
+tracklen's `mt_tl_len`, whose address the patcher writes into `mt_ct_tl_len` ("links"
+in `patch.json`; 0 without tracklen, and then nothing changes).
+
 Only the audio interrupt changes the counts; the main loop only asks for them to go
 back to 0. The patch's RAM is 48 bytes. With conditions on every track, the sequencer
 runs fewer instructions than stock firmware with Chance percentages, as a condition
@@ -81,8 +92,8 @@ the same text function, but only percentages reach it.
 
 ```bash
 patch/condtrig/build.sh                     # optional: prebuilt/ is used without a build
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/condtrig/patch.json build/TrackerPlus_ct1.ptf
-python tools/emu/test_condtrig.py build/TrackerPlus_ct1.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/condtrig/patch.json build/TrackerPlus_ct2.ptf
+python tools/emu/test_condtrig.py build/TrackerPlus_ct2.ptf path/to/TrackerPlus_1.2.0.ptf
 ```
 
 The test plays every condition in both FX columns, checks what a skipped step drops
@@ -94,7 +105,7 @@ that Chance 0–100 plays exactly as in stock firmware, and the cost.
 
 1. Back up the SD card, and use a copy of a project. Keep the stock
    `TrackerPlus_1.2.0.ptf` in `/Firmware`.
-2. Install `TrackerPlus_ct1.ptf` through Config → Firmware. Config shows `1.2.0-ct1`.
+2. Install `TrackerPlus_ct2.ptf` through Config → Firmware. Config shows `1.2.0-ct2`.
 3. On a 4-step pattern, put notes with `1st` on step 1, `1:2` on step 2, `2:2` on step
    3 and `1:4` on step 4. Check the cells show those names.
 4. Play: step 1 only on the first pass, step 2 on passes 1, 3, 5…, step 3 on passes 2,
