@@ -47,6 +47,13 @@ step. On a short track a new note may therefore go onto a step holding only a no
 which it replaces. A step holding a note is never overwritten: as in stock firmware, the
 note then goes to another track.
 
+Two more stock rules apply to every track, short or not. A track that is still sounding a
+note takes no live note: the hit goes to the next armed track (Shift+Rec: Live REC
+Armed), or is lost when that track is the only one armed. A note entered by hand has no
+OFF after it, so once it plays its track counts as sounding until an OFF plays on it; on
+a short track its note comes round every loop, so this shows up much sooner. And a hit
+in the second half of a step is recorded on the next step.
+
 Copy to New (patch/copypattern) copies a pattern without its lengths: set them again in
 the new pattern.
 
