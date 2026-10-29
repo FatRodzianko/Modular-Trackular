@@ -7,7 +7,8 @@
 // or {"name", "spec"} (a spec file, used as is). For each job it writes
 // <out dir>/<name>.ptf and .map.json, and, for a mix, the spec it made to
 // <site dir>/patch/<spec name>/patch.json, where tools/patch_ptf.py can read it.
-// A selection job with "plan": true is only planned (its spec written, nothing patched).
+// A selection job with "plan": true is only planned (its spec written, nothing patched;
+// its result gives the spec's path and version).
 // The stock firmware is parsed once, for all the jobs. Prints one JSON line per job.
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -52,7 +53,7 @@ for (const job of JSON.parse(readFileSync(jobsPath, "utf8"))) {
         result.spec = plan.specPath;
       }
       if (job.plan) {
-        console.log(JSON.stringify(Object.assign(result, { ok: true, planned: true })));
+        console.log(JSON.stringify(Object.assign(result, { ok: true, planned: true, version: spec.version })));
         continue;
       }
     } else {

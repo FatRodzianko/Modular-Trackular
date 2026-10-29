@@ -288,7 +288,16 @@ file it already passed with the same test and emulator code. The web patcher che
 keeps its own cache per selection, so after a change to one mod it redoes only the
 selections that contain it (all 16383 took about 68 minutes on six cores, none about
 30 seconds).
-`--no-cache` runs everything; `--jobs N` sets how many run at once.
+`--no-cache` runs everything; `--jobs N` sets how many run at once (the web patcher
+check, too, uses N processes).
+
+Before anything long it runs checks that take seconds, and stops if one fails: every
+`patch.json` and `web/*.json` parses, the web patcher's JavaScript passes `node --check`,
+and each patch's `build/` (which `patch_ptf.py` uses in place of `prebuilt/`) matches its
+`prebuilt/` (the quick tier only names those that don't). The layout test then runs
+alone, before the emulator tests. The web patcher check first checks that no two mixes'
+names differ only in case (Windows and FAT ignore case); if that or anything else in it
+fails, the tests not yet started are dropped.
 
 Each check can also be run on its own:
 

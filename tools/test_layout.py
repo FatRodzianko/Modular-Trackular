@@ -6,8 +6,7 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
   - colorsong alone, humanize alone, interpolate alone, masterfx alone, swing alone,
     visualizer alone, ramdiag alone,
   - versiontest alone (pinned base; byte-identical to MT0),
-  - patch/all (colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig,
-    synths, legato, copypattern, slicethru, resample, tracklen, songloop),
+  - patch/all (the mods its include list names),
   - colorsong, humanize and interpolate the other way round (interpolate, humanize,
     colorsong),
   - colorsong, humanize, interpolate and masterfx, both ways round, and with swing and
@@ -441,6 +440,8 @@ def main() -> int:
     all_ins = dict(rev, name="all-insns", include=[str(x) for x in all_ins_list], version="INS")
     all_ins_spec = outdir / "all-insns.json"
     all_ins_spec.write_text(json.dumps(all_ins, indent=2))
+    # patch/all as it ships: its own include list, so adding a mod to it needs no edit here
+    all_list = [(all_spec.parent / i).resolve() for i in json.loads(all_spec.read_text())["include"]]
     stock_img = bytes(read_ptf(stock).image)
 
     for label, spec, specs, version, sha in (
@@ -453,9 +454,7 @@ def main() -> int:
             ("visualizer alone", vz, [vz], None, None),
             ("synths alone", sy, [sy], None, None),
             ("ramdiag alone", rd, [rd], None, None),
-            ("patch/all: colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig, synths, legato, "
-             "copypattern, slicethru, resample, tracklen, songloop", all_spec,
-             [cs, hz, ip, mx, sw, vz, ct, sy, lg, cp, bt, rs, pm, sl],
+            ("patch/all: " + ", ".join(x.parent.name for x in all_list), all_spec, all_list,
              json.loads(all_spec.read_text())["version"], None),
             ("reversed: interpolate, humanize, colorsong", rev_spec, [ip, hz, cs], "MTR", None),
             ("colorsong, humanize, interpolate, masterfx", with_mx_spec, [cs, hz, ip, mx], "MTX", None),

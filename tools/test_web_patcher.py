@@ -1,12 +1,17 @@
 """Check that the web patcher (web/patcher.js) makes exactly what tools/patch_ptf.py makes.
 
   python tools/test_web_patcher.py <stock TrackerPlus_1.2.0.ptf> [out dir] [--update] [--no-cache]
+                                   [--jobs N]
 
 Needs Node (runs web/patcher.js through tools/web_patcher_node.mjs). It:
   - stages the site with web/stage.py, as the deployment does, and runs both patchers
     on the staged files (so both use the prebuilt patches);
   - checks patcher.js's constants (RAM regions, alignment, version text) equal
     patch_ptf.py's;
+  - before patching anything, checks every selection's spec path, and every bundle's
+    version text, is unique ignoring case (Windows and FAT ignore it, so two would
+    overwrite each other or read the same in Config), and that the version texts are
+    letters and digits; stops if not;
   - for every selection the page offers (each mod alone, patch/all, every other mix),
     plans it as the page does, patches it in JavaScript, patches the same spec with
     patch_ptf.py, and checks the .ptf files are byte-identical and the .map.json files
@@ -36,9 +41,10 @@ Needs Node (runs web/patcher.js through tools/web_patcher_node.mjs). It:
 Outputs: <out dir>/py, the .ptf and .map.json files the emulator tests need, and
 <out dir>/js, the web patcher's .map.json files (its .ptf files only where they differ).
 
-Both patchers run in parallel: the web patcher in one Node process per core, patch_ptf.py
-in a pool of worker processes that parse the stock firmware once (patch_ptf.py's own
-code, called in the worker instead of in a new interpreter per selection).
+Both patchers run in parallel, --jobs N processes at once (default one per core): the web
+patcher in Node processes, patch_ptf.py in a pool of worker processes that parse the
+stock firmware once (patch_ptf.py's own code, called in the worker instead of in a new
+interpreter per selection).
 
 The selections' cache (<out dir>/selections.json): a selection's key is a digest of the
 patcher code (both patchers, test_layout.py and this file), the stock firmware, the spec
@@ -210,8 +216,29 @@ def tested_hashes() -> dict[str, tuple[str, bool]]:
     return {code: (sha, hw.startswith("tested")) for code, hw, sha in rows}
 
 
+def name_problems(plans: dict[str, dict]) -> tuple[list[str], list[str]]:
+    """Selections whose spec paths or version texts match ignoring case (Windows and FAT
+    ignore it), and version texts that aren't 1 to VERSION_MAX letters and digits. Only
+    bundles (mixes and patch/all) have a version text in their spec; a single mod's is in
+    its code."""
+    clashes = []
+    for field in ("spec", "version"):
+        seen = {}
+        for n, pl in plans.items():
+            v = pl.get(field)
+            if pl["ok"] and v is not None:
+                if v.lower() in seen:
+                    clashes.append(f"{n} and {seen[v.lower()]}: {field} {v}")
+                seen.setdefault(v.lower(), n)
+    bad = sorted({str(pl["version"]) for pl in plans.values() if pl["ok"] and pl.get("version") is not None
+                  and not re.fullmatch(r"[0-9A-Za-z]{1,%d}" % patch_ptf.VERSION_MAX, str(pl["version"]))})
+    return clashes, bad
+
+
 def main() -> int:
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    opts = sys.argv[1:]
+    procs = int(opts[opts.index("--jobs") + 1]) if "--jobs" in opts else PROCS
+    args = [a for i, a in enumerate(opts) if not a.startswith("--") and (i == 0 or opts[i - 1] != "--jobs")]
     update = "--update" in sys.argv
     use_cache = "--no-cache" not in sys.argv
     stock = Path(args[0]).resolve()
@@ -366,11 +393,20 @@ def main() -> int:
 
     # the selections that passed before with the same inputs, from the page's own plans
     _, plans = run_js(site, stock, [dict(j, plan=True) for j in sel_jobs], outdir / "js")
+    print("names")
+    clashes, bad = name_problems(plans)
+    check(not clashes, f"the {len(plans)} selections' spec paths and version texts are unique ignoring case"
+          + "".join(f"\n          {c}" for c in clashes[:10]))
+    check(not bad, f"version texts are letters and digits, at most {patch_ptf.VERSION_MAX}"
+          + (f": {', '.join(bad[:10])}" if bad else ""))
+    if failures:                                  # before the long part
+        print(f"{len(failures)} failure(s), before patching anything")
+        return 1
     base = hashlib.sha256("|".join([*(file_sha(f) for f in CODE), file_sha(stock)]).encode()).hexdigest()
     keys = {n: selection_key(base, site, pl) if pl["ok"] else None for n, pl in plans.items()}
     cached = {n for n, k in keys.items() if k in cache and outputs_as_written(py_dir, n, cache[k])}
     todo = [j for j in sel_jobs if j["name"] not in cached]
-    _, js_new = run_js(site, stock, todo, outdir / "js", PROCS)
+    _, js_new = run_js(site, stock, todo, outdir / "js", procs)
     js_sel = {j["name"]: cache[keys[j["name"]]]["js"] if j["name"] in cached else js_new[j["name"]]
               for j in sel_jobs}
     extra_jobs = [{"name": n, "spec": s} for n, s in other_orders.items()]
@@ -394,7 +430,7 @@ def main() -> int:
                 layout_args(sel)) for sel in todo]
     py_jobs += [(extra, n, s, stock, outdir, js_extra[n]["ok"], None) for n, s in other_orders.items()]
     py_jobs += [(extra, n, s, st, outdir, False, None) for n, (s, st, _) in refusals.items()]
-    with ProcessPoolExecutor(PROCS, initializer=_init_worker, initargs=(str(stock),)) as pool:
+    with ProcessPoolExecutor(procs, initializer=_init_worker, initargs=(str(stock),)) as pool:
         py = dict(zip([j[1] for j in py_jobs], pool.map(_py_job, *zip(*py_jobs), chunksize=4)))
     for n in cached:                              # as they were when they passed
         py[n] = SimpleNamespace(returncode=0, stdout="", stderr="", same=True, same_map=True,

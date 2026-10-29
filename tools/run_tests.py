@@ -55,6 +55,18 @@ page accepts) when everything else in it passes, as test_web_patcher.py --update
 Use it after changing a patch or web/manifest.json, instead of a separate harness run.
 The pass is recorded for the rewritten file, so the next run doesn't repeat it.
 
+Before anything long, checks that take seconds (preflight), and stops on a failure:
+  - every patch.json and web/*.json parses, and web/*.js and the Node tool pass node --check
+    (release and deep; quick needs no Node);
+  - each patch's build/ (which patch_ptf.py prefers to prebuilt/) holds what prebuilt/
+    does: otherwise the tests test a build users don't get. Release and deep stop on it;
+    quick only names them (a patch being worked on has a newer build/);
+  - then tools/test_layout.py, alone, before the emulator tests.
+If the web harness fails (its name check fails in about a minute, before it patches
+anything), the jobs not yet started are dropped. --jobs N also caps the harness's own
+processes; while it runs beside other jobs, up to 2N - 1 processes can be busy, so for a
+hard CPU cap set the run's processor affinity (it passes to the processes it starts).
+
 Writes a log per job and a summary (summary.txt) to --out (default build/testrun).
 Exit status 0 when everything passed.
 """
@@ -199,6 +211,54 @@ def cover_set(outputs: list[Path], sites: dict[str, set[int]], tested: list[Path
     return chosen
 
 
+# ---- preflight ----------------------------------------------------------------------
+
+def stale_builds() -> list[str]:
+    """Patches whose build/ files differ from prebuilt/ (patch_ptf.py uses build/ when present)."""
+    stale = []
+    for spec_path in sorted((ROOT / "patch").glob("*/patch.json")):
+        try:
+            spec, d = json.loads(spec_path.read_text()), spec_path.parent
+        except ValueError:                     # preflight reports it
+            continue
+        for k in ("bin", "sym", "rel"):
+            built, shipped = spec.get(k), spec.get("prebuilt_" + k)
+            if not (built and shipped and (d / built).is_file() and (d / shipped).is_file()):
+                continue
+            a, b = (d / built).read_bytes(), (d / shipped).read_bytes()
+            if k != "bin":                     # text: line endings don't count
+                a, b = a.replace(b"\r\n", b"\n"), b.replace(b"\r\n", b"\n")
+            if a != b:
+                stale.append(f"patch/{d.name}/{built}")
+    return stale
+
+
+def preflight(tier: str) -> list[str]:
+    """Problems found in seconds, which otherwise surface late in a long run."""
+    problems = []
+    for f in sorted([*(ROOT / "patch").rglob("*.json"), *(ROOT / "web").glob("*.json")]):
+        if "build" in f.relative_to(ROOT).parts or "prebuilt" in f.relative_to(ROOT).parts:
+            continue
+        try:
+            json.loads(f.read_text())
+        except ValueError as e:
+            problems.append(f"{f.relative_to(ROOT)}: not valid JSON ({e})")
+    if tier != "quick":
+        for f in [*sorted((ROOT / "web").glob("*.js")), TOOLS / "web_patcher_node.mjs"]:
+            r = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
+            if r.returncode:
+                problems.append(f"{f.relative_to(ROOT)}: node --check failed\n{r.stderr.strip()}")
+    stale = stale_builds()
+    if stale:
+        what = ("build/ differs from prebuilt/ (patch_ptf.py uses build/), so the tests would not test what "
+                "users get: copy it to prebuilt/ when shipping it, or move build/ aside:\n  " + "\n  ".join(stale))
+        if tier == "quick":
+            print("note: " + what, flush=True)
+        else:
+            problems.append(what)
+    return problems
+
+
 # ---- running ------------------------------------------------------------------------
 
 def own_files(patch: str) -> list[Path] | None:
@@ -221,6 +281,8 @@ class Runner:
         self.stock_sha = sha256_file(stock)
         self.lock = threading.Lock()
         self.results: list[tuple[str, str, bool, str]] = []   # (what, test, ok, note)
+        self.stopped = ""                    # why the jobs not yet started were dropped
+        self.dropped = 0
         (out / "logs").mkdir(parents=True, exist_ok=True)
 
     def save(self):
@@ -277,8 +339,9 @@ class Runner:
         log = self.out / "logs" / f"{ptf.stem}.{patch}.{mode}.txt"
         return (f"{ptf.stem}", kind, key, cmd, log, also)
 
-    def run_all(self, jobs: list[tuple]) -> int:
-        """Run jobs (label, kind, key, cmd, log) in parallel, longest first; print progress."""
+    def run_all(self, jobs: list[tuple], stop_kinds: set[str] = frozenset()) -> int:
+        """Run jobs (label, kind, key, cmd, log) in parallel, longest first; print progress.
+        A failed job of a kind in stop_kinds drops the jobs not yet started."""
         todo = [j for j in jobs if not (self.use_cache and j[2] in self.cache["passed"])]
         cached = len(jobs) - len(todo)
         for j in jobs:
@@ -287,7 +350,7 @@ class Runner:
                 for k in j[5] if len(j) > 5 else ():
                     self.cache["passed"].setdefault(k, self.cache["passed"][j[2]])
         self.save()
-        todo.sort(key=lambda j: -self.estimate(j[1]))
+        todo.sort(key=lambda j: (j[1] not in stop_kinds, -self.estimate(j[1])))
         total = sum(self.estimate(j[1]) for j in todo)
         longest = max((self.estimate(j[1]) for j in todo), default=0)
         # jobs run 1.5x slower with every core busy (measured); one long job can't be shared out
@@ -299,8 +362,14 @@ class Runner:
         failed = [0]
 
         def one(j):
+            if self.stopped:
+                with self.lock:
+                    self.dropped += 1
+                return False
             ok = self.run_command(*j)
             with self.lock:
+                if not ok and j[1] in stop_kinds:
+                    self.stopped = f"{j[1]} failed"
                 done[0] += 1
                 failed[0] += not ok
                 left[0] -= self.estimate(j[1])
@@ -310,6 +379,8 @@ class Runner:
 
         with ThreadPoolExecutor(self.workers) as ex:
             list(ex.map(one, todo))
+        if self.dropped:
+            print(f"  {self.stopped}: {self.dropped} jobs not started", flush=True)
         return failed[0]
 
 
@@ -344,6 +415,10 @@ def main() -> int:
     workers = int(opt("--jobs", max(1, (os.cpu_count() or 2) - 1)))
     out = Path(opt("--out", ROOT / "build" / "testrun")).resolve()
     out.mkdir(parents=True, exist_ok=True)
+    problems = preflight(tier)
+    if problems:
+        print("preflight failed (nothing run):\n" + "\n".join(f"  {p}" for p in problems))
+        return 1
     r = Runner(stock, out, workers, "--no-cache" not in opts, full_by_own=tier == "release")
     t0 = time.time()
     patches = mods()
@@ -367,7 +442,7 @@ def main() -> int:
             r.cache["passed"].pop(hkey, None)
         pre.append(("test_web_patcher", "web harness", hkey,
                     [PY, "-I", str(TOOLS / "test_web_patcher.py"), str(stock), str(harness)] + (["--update"] if update else [])
-                    + (["--no-cache"] if "--no-cache" in opts else []),
+                    + (["--no-cache"] if "--no-cache" in opts else []) + ["--jobs", str(workers)],
                     out / "logs" / "harness.txt"))
     def emu_jobs(targets: list[tuple[Path, bool]]) -> list[tuple]:
         """Every contained patch's emulator test on each (file, masterfx/synths in full mode)."""
@@ -396,7 +471,11 @@ def main() -> int:
     if r.full_skipped:
         print(f"  --quick instead of full mode (the patch's own files unchanged since a full pass): "
               f"{', '.join(r.full_skipped)}", flush=True)
-    failed = r.run_all(jobs)
+    failed = r.run_all(pre[:1])                # the layout test alone first (under a minute)
+    if failed:
+        r.stopped = "layout failed"
+    else:
+        failed = r.run_all(jobs[1:], stop_kinds={"web harness"})
     if update and hkey in r.cache["passed"]:
         # a pass with --update leaves expected.json holding what the harness checked: the
         # pass holds for the rewritten file too
@@ -405,7 +484,7 @@ def main() -> int:
 
     # 3. release and deep: the cover set of web mixes and the bundles in other orders,
     # from the harness's outputs (byte-identical to the web patcher's, which it checks)
-    if tier != "quick":
+    if tier != "quick" and not r.stopped:
         py = harness / "py"
         singles = [py / f"sel-{n}.ptf" for n in names]
         # the bundles test_layout.py builds in other orders (not the chained copies of a
@@ -431,7 +510,8 @@ def main() -> int:
 
     # 4. summary
     lines = [f"tier {tier}: {len(r.results)} jobs, {failed} failed, "
-             f"{sum(1 for x in r.results if x[3] == 'cached')} from the cache, {(time.time() - t0) / 60:.1f} min"]
+             f"{sum(1 for x in r.results if x[3] == 'cached')} from the cache, {(time.time() - t0) / 60:.1f} min"
+             + (f"; stopped early ({r.stopped}), the rest not run" if r.stopped else "")]
     lines += [f"FAIL  {w}: {k}  {n}  (log in {out / 'logs'})" for w, k, ok, n in r.results if not ok]
     (out / "summary.txt").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
