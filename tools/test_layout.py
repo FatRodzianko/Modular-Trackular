@@ -29,6 +29,8 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
   - resample alone, and first with patch/all's other patches after it in reverse order
     (its RAM moves to another region with all of them; an ITCM-image word, as swing's;
     patch/all has it last),
+  - songloop alone, after patch/all's patches, and first with them after it in reverse
+    order (ITCM hooks on the two preload calls; no site shared with patch/all's patches),
   - tracklen (ITCM hooks, 4 KB of RAM) alone, after patch/all's patches, and first with
     them after it in reverse order; and with page 3's other buttons (humanize,
     copypattern, both) in both orders, and with a copy of it that hooks only its two
@@ -373,6 +375,15 @@ def main() -> int:
     all_rs_rev_spec = outdir / "all-resample-reversed.json"
     all_rs_rev_spec.write_text(json.dumps(all_rs_rev, indent=2))
     pm = ROOT / "patch" / "tracklen" / "patch.json"
+    sl = ROOT / "patch" / "songloop" / "patch.json"
+    all_sl_list = all_rs_list + [pm, sl]
+    all_sl = dict(rev, name="all-songloop", include=[str(x) for x in all_sl_list], version="SLA")
+    all_sl_spec = outdir / "all-songloop.json"
+    all_sl_spec.write_text(json.dumps(all_sl, indent=2))
+    all_sl_rev = dict(rev, name="all-songloop-reversed", include=[str(x) for x in all_sl_list[::-1]],
+                      version="SLR")
+    all_sl_rev_spec = outdir / "all-songloop-reversed.json"
+    all_sl_rev_spec.write_text(json.dumps(all_sl_rev, indent=2))
     all_pm_list = all_rs_list + [pm]
     all_pm = dict(rev, name="all-tracklen", include=[str(x) for x in all_pm_list], version="PMA")
     all_pm_spec = outdir / "all-tracklen.json"
@@ -484,6 +495,9 @@ def main() -> int:
             ("tracklen alone (ITCM hooks)", pm, [pm], None, None),
             ("patch/all's patches, then tracklen", all_pm_spec, all_pm_list, "PMA", None),
             ("tracklen, then patch/all's patches reversed", all_pm_rev_spec, all_pm_list[::-1], "PMR", None),
+            ("songloop alone (ITCM hooks)", sl, [sl], None, None),
+            ("patch/all's patches, then songloop", all_sl_spec, all_sl_list, "SLA", None),
+            ("songloop, then patch/all's patches reversed", all_sl_rev_spec, all_sl_list[::-1], "SLR", None),
             *[(f"page 3's buttons: {name}", spec_path, specs, version, None)
               for version, (name, spec_path, specs) in pm_page3.items()],
             ("chained tail calls: tracklen, then a copy on its two b.w sites", pm_tail_chain,

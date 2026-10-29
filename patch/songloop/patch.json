@@ -1,0 +1,245 @@
+{
+  "name": "songloop",
+  "description": "Song Loop: select a block of Song positions (Rec on, Shift + Up/Down) and loop it with Play Selection; Continue Song plays on",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "bin": "build/songloop.bin",
+  "sym": "build/songloop.sym",
+  "rel": "build/songloop.rel",
+  "prebuilt_bin": "prebuilt/songloop.bin",
+  "prebuilt_sym": "prebuilt/songloop.sym",
+  "prebuilt_rel": "prebuilt/songloop.rel",
+  "ram_startup": true,
+  "branches": [
+    {
+      "at": "0x600AD2D0",
+      "old": "16f04efb",
+      "to": "mt_sl_song_next",
+      "next": "mt_sl_next_song_next",
+      "note": "pattern end: bl song_next_position 0x600c3970(fm) -> mt_sl_song_next (to the block's start when decided at the preload; while looping, a scheduled Performance off at 0x600ad2fc is cancelled as Loop Performance does)"
+    },
+    {
+      "at": "0x600FDD82",
+      "old": "01f013f8",
+      "to": "mt_sl_labels",
+      "next": "mt_sl_next_labels",
+      "note": "Song update 0x600fdd38: bl softkey labels 0x600fedac(song) -> mt_sl_labels (Play Selection / Continue Song; stock labels otherwise)"
+    },
+    {
+      "at": "0x601086FA",
+      "old": "17f0ddf8",
+      "to": "mt_sl_frame_a",
+      "next": "mt_sl_next_frame_a",
+      "note": "song control drawing, frame still: bl eve_line_width -> mt_sl_frame_a (the frame over the block)"
+    },
+    {
+      "at": "0x601088A4",
+      "old": "17f008f8",
+      "to": "mt_sl_frame_b",
+      "next": "mt_sl_next_frame_b",
+      "note": "song control drawing, frame gliding: bl eve_line_width -> mt_sl_frame_b"
+    },
+    {
+      "at": "0x60108520",
+      "old": "fff7f6fe",
+      "to": "mt_sl_list_icon_a",
+      "next": "mt_sl_next_list_icon_a",
+      "note": "song control: bl list icon 0x60108310 -> mt_sl_list_icon_a (|: :| next to the play position)"
+    },
+    {
+      "at": "0x60108818",
+      "old": "fff77afd",
+      "to": "mt_sl_list_icon_b",
+      "next": "mt_sl_next_list_icon_b",
+      "note": "song control: bl list icon 0x60108310 -> mt_sl_list_icon_b"
+    },
+    {
+      "at": "0x601089F2",
+      "old": "fff78dfc",
+      "to": "mt_sl_list_icon_c",
+      "next": "mt_sl_next_list_icon_c",
+      "note": "song control: bl list icon 0x60108310 -> mt_sl_list_icon_c"
+    },
+    {
+      "at": "0x60108B0C",
+      "old": "fff700fc",
+      "to": "mt_sl_list_icon_d",
+      "next": "mt_sl_next_list_icon_d",
+      "note": "song control: bl list icon 0x60108310 -> mt_sl_list_icon_d"
+    },
+    {
+      "at": "0x600CF9F0",
+      "old": "97f0d0fb",
+      "to": "mt_sl_status_sprintf",
+      "next": "mt_sl_next_status_sprintf",
+      "note": "status bar: bl sprintf -> mt_sl_status_sprintf (the repeat signs in place of the play icon)"
+    },
+    {
+      "at": "0x600FE20E",
+      "old": "03f0c9fd",
+      "to": "mt_sl_softkey_colors",
+      "next": "mt_sl_next_softkey_colors",
+      "note": "Song softkeys Undo..Pattern: bl disp_set_colors -> mt_sl_softkey_colors (greyed out while locked)"
+    },
+    {
+      "at": "0x60101ADE",
+      "old": "fff703ff",
+      "to": "mt_sl_load_fonts",
+      "next": "mt_sl_next_load_fonts",
+      "note": "disp_init: bl disp_load_fonts -> mt_sl_load_fonts (the repeat-sign glyphs and list icons)"
+    },
+    {
+      "at": "0x600C5F82",
+      "old": "3cf0b3f8",
+      "to": "mt_sl_font_set_a",
+      "next": "mt_sl_next_font_set_a",
+      "note": "bl disp_set_font_set -> mt_sl_font_set_a (glyphs again after a font reload)"
+    },
+    {
+      "at": "0x600CBEDE",
+      "old": "36f005f9",
+      "to": "mt_sl_font_set_b",
+      "next": "mt_sl_next_font_set_b",
+      "note": "bl disp_set_font_set -> mt_sl_font_set_b (glyphs again after a font reload)"
+    },
+    {
+      "at": "0x600ACD98",
+      "old": "22f016ff",
+      "to": "mt_sl_stop",
+      "next": "mt_sl_next_stop",
+      "note": "seq_stop 0x600acd90, its first call: bl 0x600cfbc8 -> mt_sl_stop (every stop ends the loop)"
+    },
+    {
+      "at": "0x600CC5EC",
+      "old": "00f06cfd",
+      "to": "mt_sl_ui_tick",
+      "next": "mt_sl_next_ui_tick",
+      "note": "ui_update: bl popup_update -> mt_sl_ui_tick (main loop: the next pattern's preload with track 1 not on Fwd in Performance)"
+    },
+    {
+      "at": "0x600FE7CA",
+      "old": "fff7b5ff",
+      "to": "mt_sl_change_a",
+      "next": "mt_sl_next_change_a",
+      "note": "Song softkey << Pattern: bl pattern change 0x600fe738 -> mt_sl_change_a (locked with a block)"
+    },
+    {
+      "at": "0x600FE7E2",
+      "old": "fff7a9ff",
+      "to": "mt_sl_change_b",
+      "next": "mt_sl_next_change_b",
+      "note": "Song softkey << Pattern: bl pattern change 0x600fe738 -> mt_sl_change_b"
+    },
+    {
+      "at": "0x600FE81C",
+      "old": "fff78cff",
+      "to": "mt_sl_change_c",
+      "next": "mt_sl_next_change_c",
+      "note": "Song softkey Pattern >>: bl pattern change 0x600fe738 -> mt_sl_change_c"
+    },
+    {
+      "at": "0x600FE836",
+      "old": "fff77fff",
+      "to": "mt_sl_change_d",
+      "next": "mt_sl_next_change_d",
+      "note": "Song softkey Pattern >>: bl pattern change 0x600fe738 -> mt_sl_change_d"
+    }
+  ],
+  "itcm_branches": [
+    {
+      "at": "0x23C4",
+      "old": "04f034fe",
+      "to": "mt_sl_peek_a",
+      "next": "mt_sl_next_peek_a",
+      "note": "seq tick, last row of track 1: bl song_peek_next 0x7030(fm) -> mt_sl_peek_a (the block's start at the block's end)"
+    },
+    {
+      "at": "0x2ABE",
+      "old": "04f0b7fa",
+      "to": "mt_sl_peek_b",
+      "next": "mt_sl_next_peek_b",
+      "note": "the second copy of that preload: bl song_peek_next 0x7030 -> mt_sl_peek_b"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x600FD948",
+      "old": "91950c60",
+      "to": "mt_sl_jog",
+      "next": "mt_sl_next_jog",
+      "thumb": true,
+      "note": "Song screen callback pool: jog 0x600c9590 -> mt_sl_jog (pattern column: moves, Shift + jog locked with a block)"
+    },
+    {
+      "at": "0x600FD94C",
+      "old": "3d860c60",
+      "to": "mt_sl_play",
+      "next": "mt_sl_next_play",
+      "thumb": true,
+      "note": "Song screen callback pool: Play 0x600c863c -> mt_sl_play (Shift + Play = the left softkey)"
+    },
+    {
+      "at": "0x600FD95C",
+      "old": "39aa0c60",
+      "to": "mt_sl_up",
+      "next": "mt_sl_next_up",
+      "thumb": true,
+      "note": "Song screen callback pool: Up 0x600caa38 -> mt_sl_up (pattern column: Shift selects)"
+    },
+    {
+      "at": "0x600FD960",
+      "old": "3da00c60",
+      "to": "mt_sl_down",
+      "next": "mt_sl_next_down",
+      "thumb": true,
+      "note": "Song screen callback pool: Down 0x600ca03c -> mt_sl_down (pattern column: Shift selects)"
+    },
+    {
+      "at": "0x600FD96C",
+      "old": "01e60f60",
+      "to": "mt_sl_softkey0",
+      "next": "mt_sl_next_softkey0",
+      "thumb": true,
+      "note": "Song screen callback pool: softkey 0 0x600fe600 -> mt_sl_softkey0 (Play Selection / Continue Song)"
+    },
+    {
+      "at": "0x600FD974",
+      "old": "c9dd0e60",
+      "to": "mt_sl_undo",
+      "next": "mt_sl_next_undo",
+      "thumb": true,
+      "note": "Song screen callback pool: softkey 2 Undo 0x600eddc8 -> mt_sl_undo (locked with a block)"
+    },
+    {
+      "at": "0x600FD978",
+      "old": "01e10f60",
+      "to": "mt_sl_add",
+      "next": "mt_sl_next_add",
+      "thumb": true,
+      "note": "Song screen callback pool: softkey 3 Add Slot 0x600fe100 -> mt_sl_add (locked with a block)"
+    },
+    {
+      "at": "0x600FD97C",
+      "old": "21e50f60",
+      "to": "mt_sl_delete",
+      "next": "mt_sl_next_delete",
+      "thumb": true,
+      "note": "Song screen callback pool: softkey 4 Delete Slot 0x600fe520 -> mt_sl_delete (locked with a block)"
+    },
+    {
+      "at": "0x600FD990",
+      "old": "5d990d60",
+      "to": "mt_sl_delete_key",
+      "next": "mt_sl_next_delete_key",
+      "thumb": true,
+      "note": "Song screen callback pool: Delete key 0x600d995c -> mt_sl_delete_key (pattern column: locked with a block)"
+    },
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "version": true,
+      "note": "version text 1.2.0-sl4"
+    }
+  ]
+}
