@@ -7,7 +7,7 @@ less robotic. How much (separately for timing and level), and whether levels cha
 at all, is set per project under
 Config → Project Settings → Humanize. Installed on its own, Config shows the firmware
 version as `1.2.0-hz9`. Together with all the other mods
-([`patch/all`](../all/patch.json)) it shows `1.2.0-MVL`.
+([`patch/all`](../all/patch.json)) it shows `1.2.0-SLA`.
 
 **Status:** tested on hardware.
 
@@ -173,7 +173,7 @@ The same test runs on `TrackerPlus_MTE.ptf`.
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
 Config → Firmware → the patched file. Config should show `1.2.0-hz9 Build 1504` (or
-`1.2.0-MVL Build 1504` for all mods).
+`1.2.0-SLA Build 1504` for all mods).
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Humanized patterns keep their
 FX and play the same on stock firmware. Stock firmware ignores the `humanize.bin`

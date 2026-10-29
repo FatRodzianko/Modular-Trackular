@@ -111,6 +111,14 @@
       "title": "Variable Track Length",
       "summary": "Each track of a pattern can have its own length (Pattern screen, More twice, hold Trk Len and turn the encoder). A shorter track loops its own steps and every track starts again together when the pattern ends; the steps past its length show its loop in grey. Live recording and Conditional Trigs follow the track's own loop. Saved per project; stock firmware plays every track the whole pattern.",
       "status": "Tested on hardware"
+    },
+    {
+      "id": "songloop",
+      "bit": 13,
+      "spec": "patch/songloop/patch.json",
+      "title": "Song Loop",
+      "summary": "Loop a block of Song positions. In the Song screen's pattern column, with Rec on, Shift+Down selects a block; Play Selection loops it (from its start when stopped, or once the song reaches it), Up/Down move it while it loops, and Continue Song plays it out and goes on. Repeat signs show the loop in the status bar and the Song list. Nothing is saved; Stop ends the loop.",
+      "status": "Tested on hardware"
     }
   ],
   "tested_builds": {
@@ -161,6 +169,8 @@
     "38860b39e6ca58102b137dbd14690b3c134d6e09aadb779cb23b887b9ff2ec18": "visualizer (1.2.0-vz6)",
     "5393e48e8bd23b1504ff0a8b75ee29ed1962fee1f19acb4a30bc705d99d0e5ac": "all twelve mods (1.2.0-MTZ)",
     "9ddb1fc889f69293cf15e5cd8910e15d97cf742b1684ab6c878c8f82d5a3a440": "condtrig (1.2.0-ct2)",
-    "babfded088d61424511b6a3edb0a384937f28458d0721f70c9e9c27670880ed3": "all thirteen mods (1.2.0-MVL)"
+    "babfded088d61424511b6a3edb0a384937f28458d0721f70c9e9c27670880ed3": "all thirteen mods (1.2.0-MVL)",
+    "403c76593d2e5f096893ddb2771dd7c90536b1dedc7f64352bf5c154c24ca935": "songloop (1.2.0-sl4)",
+    "643755cc94ba6f904298a4adbfcadd739925db8c50e0c719d34c0b8d3f79ad1b": "all fourteen mods (1.2.0-SLA)"
   }
 }

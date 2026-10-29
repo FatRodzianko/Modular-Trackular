@@ -5,8 +5,8 @@ song positions and play it in a loop, **Play Selection**, while you jam over it 
 decide what comes next; **Continue Song** plays the block out and goes on with the song.
 Installed on its own, Config shows the firmware version as `1.2.0-sl4`.
 
-**Status:** tested on hardware on its own (`1.2.0-sl4`); emulator-tested on its own and in
-`patch/all` (both orders). Not yet tested on hardware together with other mods.
+**Status:** tested on hardware on its own (`1.2.0-sl4`) and in `patch/all` (`1.2.0-SLA`);
+emulator-tested on its own and in `patch/all` (both orders).
 
 ## Using it
 

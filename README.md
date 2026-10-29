@@ -94,9 +94,9 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   it (from its start when stopped, or once the song reaches it), Up/Down move it while
   it loops, Continue Song plays it out and goes on. Repeat signs in the status bar and
   the Song list; Performance stays on while the block loops (as Loop Performance does
-  for one pattern). Tested on hardware on its own. See
+  for one pattern). Tested on hardware, on its own and in patch/all. See
   [patch/songloop/README.md](patch/songloop/README.md).
-- **all**: all thirteen mods above in one firmware (version text `1.2.0-MVL`), from
+- **all**: all fourteen mods above in one firmware (version text `1.2.0-SLA`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
@@ -140,7 +140,7 @@ page only offers a download when its output is byte-identical to what
 `tools/patch_ptf.py` makes. See "In your browser" in [docs/PATCHING.md](docs/PATCHING.md).
 
 Each mod can be installed on its own, or several can be combined into one firmware.
-`patch/all` combines all thirteen, and you can make your own mix, including
+`patch/all` combines all fourteen, and you can make your own mix, including
 patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.md).
 
 ## Layout
@@ -165,7 +165,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/resample/` | Live resampling: the pattern plays during a Sample Recorder recording (Play, or Shift+Rec); recordings after the loaded samples |
 | `patch/tracklen/` | Variable Track Length: a length per track and pattern, set with the Trk Len button, saved per project |
 | `patch/songloop/` | Song Loop: select a block of Song positions and loop it (Play Selection, Continue Song) |
-| `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample + tracklen in one firmware |
+| `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample + tracklen + songloop in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/headroom/` | Timing diagnostic: worst audio block and sequencer share in % of the measured block length, late blocks; its bundle specs (`all_headroom.json`, `all_tracklen_headroom.json`) |
 | `patch/versiontest/` | Version-text test patch |

@@ -751,10 +751,12 @@ export function selectionKey(manifest, ids) {
 
 // Which spec a selection uses: one mod's own, patch/all's, or a bundle of the mods in
 // the manifest's order with a 3-character version text from the selection's bits: a
-// character for bits 8 and up ("M" for none, "N" for bit 8, ... "Z" for 13, then "A"
-// to "L" for 14 to 25, then "0" to "5" for 26 to 31), then bits 0-7 as two hex digits.
-// Mixes of the first eight mods keep their "M" names, and mixes without bit 12 keep
-// theirs.
+// character for bits 8 to 12 ("M" for none, "N" for bit 8, ... "Z" for 13, then "A"
+// to "L" for 14 to 25, then "0" to "5" for 26 to 31), then bits 0-7 as two hex digits;
+// with bit 13 the last digit becomes a letter, "G" for 0 to "V" for F. Only capitals and
+// digits, so no two names differ only in case (Windows and the SD card ignore case).
+// Mixes of the first eight mods keep their "M" names, and mixes without bit 12 or 13
+// keep theirs.
 export function planSelection(manifest, allSpec, ids) {
   const chosen = manifest.patches.filter((p) => ids.includes(p.id));
   if (!chosen.length || chosen.length !== new Set(ids).size) throw new PatchError("unknown or empty selection");
@@ -765,10 +767,12 @@ export function planSelection(manifest, allSpec, ids) {
     return { kind: "all", key, specPath: manifest.all, spec: null };
   }
   const mask = chosen.reduce((m, p) => m | (1 << p.bit), 0);
-  const high = mask >> 8;
-  if (high > 31) throw new PatchError("selection code needs a character past 5");
+  const high = (mask >> 8) & 31;
+  if (mask >> 14) throw new PatchError("selection code has no room for bit 14");
   const letter = high <= 13 ? 0x4d + high : high <= 25 ? 0x41 + (high - 14) : 0x30 + (high - 26);
-  const version = String.fromCharCode(letter) + (mask & 0xff).toString(16).toUpperCase().padStart(2, "0");
+  const low = mask & 0xff;
+  const last = mask & (1 << 13) ? String.fromCharCode(0x47 + (low & 15)) : (low & 15).toString(16).toUpperCase();
+  const version = String.fromCharCode(letter) + (low >> 4).toString(16).toUpperCase() + last;
   const names = chosen.map((p) => p.id);
   const spec = {
     name: `mix-${version}`,

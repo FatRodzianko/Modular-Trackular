@@ -7,7 +7,7 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
     visualizer alone, ramdiag alone,
   - versiontest alone (pinned base; byte-identical to MT0),
   - patch/all (colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig,
-    synths, legato, copypattern, slicethru, resample, tracklen),
+    synths, legato, copypattern, slicethru, resample, tracklen, songloop),
   - colorsong, humanize and interpolate the other way round (interpolate, humanize,
     colorsong),
   - colorsong, humanize, interpolate and masterfx, both ways round, and with swing and
@@ -454,7 +454,8 @@ def main() -> int:
             ("synths alone", sy, [sy], None, None),
             ("ramdiag alone", rd, [rd], None, None),
             ("patch/all: colorsong, humanize, interpolate, masterfx, swing, visualizer, condtrig, synths, legato, "
-             "copypattern, slicethru, resample, tracklen", all_spec, [cs, hz, ip, mx, sw, vz, ct, sy, lg, cp, bt, rs, pm],
+             "copypattern, slicethru, resample, tracklen, songloop", all_spec,
+             [cs, hz, ip, mx, sw, vz, ct, sy, lg, cp, bt, rs, pm, sl],
              json.loads(all_spec.read_text())["version"], None),
             ("reversed: interpolate, humanize, colorsong", rev_spec, [ip, hz, cs], "MTR", None),
             ("colorsong, humanize, interpolate, masterfx", with_mx_spec, [cs, hz, ip, mx], "MTX", None),
