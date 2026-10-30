@@ -1,5 +1,5 @@
-"""Check the resample patch (phase 3: the buffer above the loaded samples, and Play
-during a recording with the engine on).
+"""Check the resample patch (the buffer above the loaded samples, Play and Shift+Rec
+with the engine on, and rs5's Tracker Audio and Record Tracker).
 
   python tools/emu/test_resample.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf>
 
@@ -9,7 +9,8 @@ firmware's record start (0x600f9074, its screen calls stubbed) and the audio eng
 audio interrupt runs them) in the patched and the stock firmware side by side. The
 recorder's entry is replayed with its stock calls; Play is pressed through the pool
 word the recorder binds (0x600fa4ac), and the stock sequencer ticks a pattern.
-docs/LIVE_RESAMPLING_PLAN.md has the design.
+docs/LIVE_RESAMPLING_PLAN.md and docs/RESAMPLE_SOURCE_PLAN.md have the design. Sections
+6-11 run with Tracker Audio on (set in the patch's RAM), as rs4 behaved without it.
 
 1. Sites: the record start's buffer call (0x600f90d2), the Play handler's pool word,
    the recorder's update slot and the ITCM image's "recording?" word point into the
@@ -52,6 +53,29 @@ docs/LIVE_RESAMPLING_PLAN.md has the design.
    No pattern when the buffer can't be moved, after a count-in that ended without a
    recording, with garbage or a stale arm in RAM; a pattern already playing silently
    starts again from its start. Stock: Shift+Rec is plain Rec. Writes and cost.
+12. Tracker Audio and Record Tracker (rs5): the new sites point into the patch. The
+   labels: slots 2 and 3 show Trk Audio / Trk Record with Line In, Trk Audio alone with
+   Mic and USB, nothing with Radio or outside the setup. The slot buttons toggle in the
+   setup and hand every other press to stock (Radio, a release, a pop-up, the count-in,
+   a recording); Record Tracker on turns Tracker Audio on, Tracker Audio off turns
+   Record Tracker off and stops a pattern Play started. Tracker Audio off: Play,
+   Shift+Rec and Play in the count-in are stock. On: Play in the setup is heard (as
+   stock given the same steps by hand), Rec over it keeps it playing, or stops it when
+   the buffer can't be moved. Record Tracker: the recording holds the input plus the
+   master one block later (Monitor off; clipped), or the master alone (Monitor on,
+   which holds the input), and the output is the same as without it; not with Mic. The
+   stop hands the master's queues back; the recorder's start resets the state. Writes
+   and cost. The count-in's last click (the preview player, started in the count-in's
+   last tick) isn't recorded: its master input is muted from the count-in's end while
+   Record Tracker mixes, and given back after.
+13. resample.bin (rs6, rs7): both settings per project, through the Pattern screen's and the
+   recorder's update hooks with a fake SD card: Off without a file, a change written
+   once a while later, another project's own file, a damaged file, Record Tracker alone
+   in a file (Tracker Audio with it), no file I/O by the recorder during a recording or
+   its count-in, a load while the setup shows redraws the slots; Save As and new
+   projects through the firmware's save request (project_save.save_as_checks). rs7: the
+   project screen's update ticks too, so New Project then Save As at once saves the
+   new project's Off; a new project's reset redraws the recorder's slots.
 """
 from __future__ import annotations
 
@@ -69,14 +93,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from patch_ptf import bl_target  # noqa: E402
 from layout import patch_code, patch_ram  # noqa: E402
 import synth_rig as sr  # noqa: E402
-from machine import STACK_TOP  # noqa: E402
+from machine import STACK_TOP, Machine  # noqa: E402
+from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
+from project_save import save, save_as_checks  # noqa: E402
 
 ENGINE = sr.ENGINE
 REC = 0x20027F28                    # the recorder object
 SCR = 0x20026100                    # the Sample Recorder screen
 SCR_SOURCE = 0x78                   # 0 Line In, 1 Radio, 2 Mic LG, 3 Mic HG, 4 USB
 REC_START = 0x600F9074              # start recording (screen method)
-REC_START_STUBS = (0x600FD210, 0x600FC998, 0x600F8E3C, 0x60119414)   # its screen/UI calls
+BINDER = 0x600F8E3C                 # the recorder's button binder
+REC_START_STUBS = (0x600FD210, 0x600FC998, BINDER, 0x60119414)   # its screen/UI calls
 BUF_SITE = 0x600F90D2
 REC_STOP, REC_CHANNEL, REC_LENGTH = 0x6010C944, 0x6010CA68, 0x6010CA8C
 REC_FRAMES = 0x20027F24             # frames per channel the recorder has room for
@@ -89,8 +116,11 @@ BANK, BANK_SIZE = 0x8026A000, 0x03C00000
 BANK_TOTAL, BANK_USED = 0x20204F44, 0x20204F48
 SPRINTF, FMT_LITERAL = 0x60167194, 0x600CBF9C
 STACK = (STACK_TOP - 0x10000, STACK_TOP)
-RS_MAGIC = 0x5352544D
+RS_MAGIC = 0x3853524D               # "MRS8"
+RS_SIZE = 40                        # the patch's RAM: magic, moved, opened, armed, ran, buf, size, audio, record,
+                                    # mix, pad, resample.bin's bookkeeping, the muted preview gains
 RS_OPENED = 5                       # the "gates open" byte in the patch's RAM
+RS_RAN, RS_AUDIO, RS_RECORD, RS_MIX, RS_MUTED = 7, 16, 17, 18, 19
 MIN_BYTES_PER_CH = 10 * 44100 * 2   # 10 seconds of 16-bit samples
 PLAY_WORD = 0x600FA4AC              # pool word: the recorder's Play handler (0x600d07b5)
 STOCK_PLAY = 0x600D07B4
@@ -98,8 +128,11 @@ REC_WORD = 0x600F9000               # pool word: the recorder's Rec handler (0x6
 QUEUES_SITE = 0x600F90D8            # the record start's bl 0x6010c890 (the record queues' start)
 RS_ARMED = 6                        # the "start the pattern with the recording" byte
 PREROLL = 0x2002061C + 0xE7         # settings: Pre Roll (1 = on), 0x600ad400
+METRONOME_VOLUME = 0xEA             # settings byte: the click's gain table index (0 in the rig: silent)
 COUNTIN_DONE_CB = 0x600F8605        # seq+0x6fc, set by the recorder's start
+COUNTIN_DONE_WORD = 0x600FA490      # ... from this pool word (rs8 hooks it)
 SCR_ACTIVE, SCR_COUNTIN_DONE = 0xB4D, 0xBF8
+SCR_MODE, SCR_MONITOR = 0x76, 0x7E
 UPDATE_WORD = 0x60042C54            # the Sample Recorder's vtable: update (0x600fafe9)
 STOCK_UPDATE = 0x600FAFE8
 IS_REC_WORD = 0x601ACC28            # ITCM image: the literal of the thunk 0x1f540 (rec+0x2c)
@@ -132,7 +165,7 @@ def check(ok: bool, what: str) -> None:
 class Rig:
     """One firmware (patched or stock): the audio engine, the recorder, a codec input."""
 
-    def __init__(self, ptf: Path, patched: bool):
+    def __init__(self, ptf: Path, patched: bool, real_binder: bool = False):
         self.s = s = sr.SynthRig(ptf)
         self.m = m = s.m
         self.patched = patched
@@ -158,7 +191,8 @@ class Rig:
         self.inbuf = m.alloc(128 * 4)
         m.write(self.inbuf, b"".join(struct.pack("<hh", 1000, -1000) for _ in range(128)))
         for a in REC_START_STUBS:
-            m.stub_function(a, lambda mm: 0)
+            if not (real_binder and a == BINDER):      # the button binder needs a button object (Ui)
+                m.stub_function(a, lambda mm: 0)
         m.w32(BANK_TOTAL, BANK_SIZE)
 
     def start(self, used: int, source: int = 0, total: int = BANK_SIZE) -> tuple[int, int, int]:
@@ -271,7 +305,7 @@ def garbage_checks(p: Rig) -> None:
     print("the patch's RAM full of garbage")
     rnd = random.Random(3)
     for k in range(3):
-        p.m.write(p.ram, bytes(rnd.randrange(256) for _ in range(16)))
+        p.m.write(p.ram, bytes(rnd.randrange(256) for _ in range(RS_SIZE)))
         got = p.start(1 << 20)
         p.stop()
         want = expected(1 << 20, 2)
@@ -322,7 +356,7 @@ def write_checks(p: Rig) -> None:
 
     def on_write(uc, access, a, size, value, user):
         pc = uc.reg_read(UC_ARM_REG_PC)
-        if lo <= pc < hi and not (p.ram <= a < p.ram + 16 or STACK[0] <= a < STACK[1]):
+        if lo <= pc < hi and not (p.ram <= a < p.ram + RS_SIZE or STACK[0] <= a < STACK[1]):
             stray.append((hex(pc), hex(a)))
 
     def on_code(uc, a, size, user):
@@ -339,7 +373,7 @@ def write_checks(p: Rig) -> None:
     m.uc.hook_del(hw)
     m.uc.hook_del(hc)
     check(not stray, f"40 record starts: no write by the patch outside its RAM and the stack {stray[:3]}")
-    check(worst <= 80, f"the hook runs at most {worst} instructions of its own per record start")
+    check(worst <= 150, f"the hooks run at most {worst} instructions of their own per record start")
 
 
 # ---- 6..10: Play during a recording ---------------------------------------------------
@@ -358,13 +392,17 @@ class Session(Rig):
     0 of a 16-step pattern, sends and mix levels away from their defaults; the
     sequencer ticks TICKS_PER_BLOCK times before every audio block."""
 
-    def __init__(self, ptf: Path, patched: bool, monitor: bool | None = None, inp: tuple[int, int] = (0, 0)):
-        super().__init__(ptf, patched)
+    def __init__(self, ptf: Path, patched: bool, monitor: bool | None = None, inp: tuple[int, int] = (0, 0),
+                 audio: bool = True, record: bool = False, real_binder: bool = False):
+        super().__init__(ptf, patched, real_binder)
         m = self.m
+        if patched:                                     # the user's settings (as the slot buttons set them)
+            m.write(self.ram, struct.pack("<I4B2I4B", RS_MAGIC, 0, 0, 0, 0, 0, 0, audio, record, 0, 0))
+        self.monitor = monitor
         m.w8(SETTINGS + 0x2C, 2)                        # MIDI out: jack
         self.shift = 0
         m.stub_function(SHIFT_HELD, lambda mm: self.shift)
-        m.w32(SEQ + 0x6FC, COUNTIN_DONE_CB)             # as the recorder's start sets it
+        m.w32(SEQ + 0x6FC, m.r32(COUNTIN_DONE_WORD))    # as the recorder's start sets it (0x600fa29c)
         m.stub_function(STOCK_UPDATE, lambda mm: 0)     # the recorder's own update (screen work)
         m.write(self.inbuf, b"".join(struct.pack("<hh", *inp) for _ in range(128)))
         for i in range(2):
@@ -428,6 +466,7 @@ class Session(Rig):
         for c in ENTRY_CALLS:
             m.call(c[0], *(c[1:] or (ENGINE,)), max_insns=20_000_000)
         m.call(0x600B30EC, ENGINE, 0x56 if monitor else 0)   # line-in level: Monitor
+        m.w8(SCR + SCR_MONITOR, 0 if monitor else 1)   # the screen's Monitor (0 = on)
 
     def open_by_hand(self) -> None:
         """What the patch does on Play, done with the stock calls (stock firmware)."""
@@ -621,7 +660,8 @@ def engine_on_checks(ptf: Path, stock: Path) -> None:
           f"the delay and reverb buffers hold leftovers no larger than stock's (max {ours}, stock {theirs})")
     p.update()
     check(not p.opened() and not p.playing(), "a second update changes nothing")
-    p.play()                                            # the crop screen's Play: stock
+    p.m.w8(SCR + SCR_MODE, 1)                           # the stop shows the crop screen
+    p.play()                                            # its Play: stock
     check(not p.opened() and p.m.uc.mem_read(BLOCKED, 48) != bytes(48), "Play after the recording: the gates stay shut")
 
 
@@ -660,12 +700,13 @@ def stock_cases(ptf: Path, stock: Path) -> None:
     print("stock where the engine isn't asked for")
     outs = []
     for ptf_, patched in ((ptf, True), (stock, False)):
-        r = Session(ptf_, patched, monitor=False)
+        r = Session(ptf_, patched, monitor=False, audio=False)
         r.play()                                        # the recorder open, no recording
         outs.append((r.run(30), r.opened(), r.m.uc.mem_read(BLOCKED, 48) != bytes(48), len(r.m.events)))
     (po, popen, pblk, pmidi), (so, _, sblk, smidi) = outs
     check(not popen and pblk and same(po, so)[0] and pmidi == smidi and pmidi > 0,
-          f"Play with no recording: the gates stay shut, output and MIDI as stock (peak {peak(*po)}, MIDI {pmidi})")
+          f"Tracker Audio off, Play with no recording: the gates stay shut, output and MIDI as stock "
+          f"(peak {peak(*po)}, MIDI {pmidi})")
     r = Session(ptf, True, monitor=False)
     r.start(BANK_SIZE - 0x1000)                         # less than 10 s free: stock's buffer
     r.play()
@@ -693,7 +734,7 @@ def cost_checks(ptf: Path, stock: Path) -> None:
         stray = []
         allowed = [(pl + 0x798, pl + 0x79C) for pl in PLAYERS] + [(ENGINE + 0x1A48, ENGINE + 0x1A54)]
         if patched:
-            allowed += [(r.ram, r.ram + 16), STACK]
+            allowed += [(r.ram, r.ram + RS_SIZE), STACK]
 
             def on_write(uc, access, a, size, value, user):
                 pc = uc.reg_read(UC_ARM_REG_PC)
@@ -718,7 +759,7 @@ def cost_checks(ptf: Path, stock: Path) -> None:
             r.m.uc.hook_del(hw)
             check(not stray, f"Play, 24 blocks and the closing update: no write by the patch outside its RAM, "
                              f"the stack and the send flags {stray[:3]}")
-            check(own[0] // blocks <= 20, f"the patch's own instructions per block: {own[0] // blocks}")
+            check(own[0] // blocks <= 80, f"the patch's own instructions per block: {own[0] // blocks}")
     normal, rec = counts
     check(rec <= normal * 1.03, f"a block of the engine-on recording: {rec:,} instructions, normal playback {normal:,} "
                                 f"({(rec / normal - 1) * 100:+.1f}%)")
@@ -826,7 +867,7 @@ def shift_rec_checks(ptf: Path, stock: Path) -> None:
     rnd = random.Random(5)
     for k in range(3):
         p = Session(ptf, True, monitor=False)
-        p.m.write(p.ram, bytes(rnd.randrange(256) for _ in range(16)))
+        p.m.write(p.ram, bytes(rnd.randrange(256) for _ in range(RS_SIZE)))
         p.rec_press()
         check(p.recording() and not p.playing() and not p.opened(), f"garbage RAM {k + 1}, plain Rec: no pattern")
     p = Session(ptf, True, monitor=False)
@@ -837,9 +878,10 @@ def shift_rec_checks(ptf: Path, stock: Path) -> None:
     p.rec_press()
     check(p.recording() and not p.playing() and not p.opened(), "a stale arm, then plain Rec: no pattern")
 
-    p = Session(ptf, True, monitor=False)
-    p.play()                                        # stock: the pattern plays silently in the setup
+    p = Session(ptf, True, monitor=False, audio=False)
+    p.play()                                        # Tracker Audio off: the pattern plays silently in the setup
     p.run(10)
+    p.m.w8(p.ram + RS_AUDIO, 1)
     n = len(p.m.events)
     p.rec_press(shift=1)
     check(p.recording() and p.opened() and p.playing(), "Shift+Rec over a silently playing pattern: gates open, playing")
@@ -850,10 +892,17 @@ def shift_rec_checks(ptf: Path, stock: Path) -> None:
           f"... and the pattern starts again from its start with the recording (peak {peak(*out)}, first "
           f"note-on {starts[0] if starts else None} ticks after)")
 
-    s = Session(stock, False, monitor=False)
-    s.rec_press(shift=1)
-    out = s.run(20)
-    check(s.recording() and not s.playing() and peak(*out) == 0, "stock: Shift+Rec is plain Rec")
+    for label, ptf_, patched in (("stock", stock, False), ("Tracker Audio off", ptf, True)):
+        s = Session(ptf_, patched, monitor=False, audio=False)
+        s.rec_press(shift=1)
+        out = s.run(20)
+        check(s.recording() and not s.playing() and peak(*out) == 0 and not s.opened(),
+              f"{label}: Shift+Rec is plain Rec")
+    s = Session(ptf, True, monitor=False, audio=False)
+    s.rec_press(preroll=1)
+    s.play()
+    check(s.playing() and not s.armed() and not s.opened(),
+          "Tracker Audio off, Play during the count-in: the stock handler starts the pattern (silent), not armed")
 
     # writes and cost of the two new hooks
     p = Session(ptf, True, monitor=False)
@@ -864,7 +913,7 @@ def shift_rec_checks(ptf: Path, stock: Path) -> None:
 
     def on_write(uc, access, a, size, value, user):
         pc = uc.reg_read(UC_ARM_REG_PC)
-        if lo <= pc < hi and not (p.ram <= a < p.ram + 16 or STACK[0] <= a < STACK[1]
+        if lo <= pc < hi and not (p.ram <= a < p.ram + RS_SIZE or STACK[0] <= a < STACK[1]
                                   or any(x <= a < y for x, y in sends)):
             stray.append((hex(pc), hex(a)))
 
@@ -879,6 +928,520 @@ def shift_rec_checks(ptf: Path, stock: Path) -> None:
     m.uc.hook_del(hc)
     check(not stray, f"Shift+Rec with a count-in: no write by the patch outside its RAM, the stack and the send flags {stray[:3]}")
     check(n_ins[0] <= 400, f"the patch's own instructions for it: {n_ins[0]}")
+
+
+# ---- 12. Tracker Audio and Record Tracker (rs5) -------------------------------------------
+
+LABEL_SITES = (0x600F99E2, 0x600F9A3A, 0x600F9AB6, 0x600FCBD4)   # bl 0x600fbc40(scr)
+STOCK_LABELS = 0x600FBC40
+COPY_SITE = 0x6010C6F6               # the record copy loop: bl 0x6010c7c8(dst, src, 0x100)
+SLOT_WORDS = (0x600F8E24, 0x600F8E28)   # the setup's button binder (0x600f8db4): pool words, slots 2 and 3
+STOCK_SLOT = (0x600F86AC, 0x600F8A4C)   # its stock press handlers (Radio only in the setup)
+CROP_SLOT = (0x600F8B1C, 0x600F8AA8)    # the recorder's binder's (0x600f8e3c) handlers, outside the setup
+DISPATCH, BUTTONS_PTR = 0x600CF7B4, 0x200209E0
+START_WORD, STOCK_START = 0x60042C58, 0x600FA228
+CTL_TEXT, CTL_TEXT2, CTL_REFRESH = 0x60101D5C, 0x60101D74, 0x60101E84
+SLOT_IDS = {0x5F: 7, 0x60: 8}        # the label controls' ids the screen keeps at +0x5f / +0x60
+MASTER_Q = (ENGINE + 0x1E58, ENGINE + 0x2248)
+PREVIEW_GAINS = tuple(ENGINE + mixer + off for mixer in (0x2508, 0x2574) for off in (0x2C, 0x48))
+# the master mixers' input 5 (the preview): its gain, and the gain it ramps from
+REC_Q = (REC + 0x20, REC + 0x24)     # words: the input queues
+Q_ACTIVE, Q_AVAILABLE = 0x46, 0x600364EC
+
+
+class Ui(Session):
+    """A Session whose display calls and stock slot handlers are recorded, not run. The
+    buttons are bound by the recorder's own binder (0x600f8e3c, which calls the setup's
+    binder 0x600f8db4 in the setup) into a button object made here, and pressed through
+    the stock dispatcher (0x600cf7b4: blocked table, then the binding's kind)."""
+
+    def __init__(self, ptf: Path, audio: bool = False, record: bool = False):
+        super().__init__(ptf, True, monitor=False, audio=audio, record=record, real_binder=True)
+        m = self.m
+        self.drawn: list[tuple] = []
+        self.stock_calls: list[tuple] = []
+        for off, cid in SLOT_IDS.items():
+            m.w8(SCR + off, cid)
+        m.stub_function(CTL_TEXT, lambda mm: self.drawn.append(("text", mm.arg(1), mm.cstr(mm.arg(2)))))
+        m.stub_function(CTL_TEXT2, lambda mm: self.drawn.append(("text2", mm.arg(1), mm.cstr(mm.arg(2)))))
+        m.stub_function(CTL_REFRESH, lambda mm: self.drawn.append(("refresh", mm.arg(1))))
+        m.stub_function(STOCK_LABELS, lambda mm: self.stock_calls.append(("labels",)))
+        for k, a in enumerate(STOCK_SLOT):
+            m.stub_function(a, lambda mm, k=k: self.stock_calls.append(("slot", k + 2)))
+        for k, a in enumerate(CROP_SLOT):
+            m.stub_function(a, lambda mm, k=k: self.stock_calls.append(("crop", k + 2, mm.arg(0))))
+        n = 0x40                                        # the button object: counts, then its tables
+        self.buttons = obj = m.alloc(0x40)
+        m.write(obj, bytes(0x40))
+        m.write(obj + 4, bytes([n, n, n]))
+        for off, size in ((8, n), (0xC, n), (0x10, n), (0x18, 16 * n), (0x1C, 20 * n)):
+            t = m.alloc(size)
+            m.write(t, bytes(size))
+            m.w32(obj + off, t)
+        m.w32(BUTTONS_PTR, obj)
+        m.stub_function(STOCK_START, lambda mm: self.stock_calls.append(("start",)))
+
+    def labels(self, site: int = LABEL_SITES[0]) -> list[tuple]:
+        self.drawn.clear()
+        self.m.call(bl_target(self.m.image, 0x60030000, site), SCR, max_insns=1_000_000)
+        return list(self.drawn)
+
+    def bind(self) -> None:
+        self.m.call(BINDER, SCR, max_insns=5_000_000)
+
+    def press(self, slot: int, state: int = 1) -> list[tuple]:
+        """The button under `slot`, bound as the screen binds it now, then pressed (1) or released (0)."""
+        self.bind()
+        self.drawn.clear()
+        self.m.call(DISPATCH, self.buttons, slot - 1, state, max_insns=20_000_000)
+        return list(self.drawn)
+
+    def settings(self) -> tuple[int, int]:
+        return self.m.uc.mem_read(self.ram + RS_AUDIO, 1)[0], self.m.uc.mem_read(self.ram + RS_RECORD, 1)[0]
+
+
+def slot_text(drawn: list[tuple]) -> dict[int, tuple[str, str]]:
+    out = {}
+    for d in drawn:
+        if d[0] == "text":
+            out[d[1]] = (d[2], out.get(d[1], ("", ""))[1])
+        elif d[0] == "text2":
+            out[d[1]] = (out.get(d[1], ("", ""))[0], d[2])
+    return out
+
+
+def queue_state(m) -> list[tuple[int, int]]:
+    return [(m.uc.mem_read(q + Q_ACTIVE, 1)[0], m.call(Q_AVAILABLE, q)) for q in MASTER_Q]
+
+
+def tracker_checks(ptf: Path, stock: Path) -> None:
+    print("Tracker Audio and Record Tracker")
+    u = Ui(ptf)
+    lo, hi = u.code
+    image = u.m.image
+    for at in LABEL_SITES + (COPY_SITE,):
+        t = bl_target(image, 0x60030000, at)
+        check(lo <= t < hi, f"bl at {at:#x} branches into the patch ({t:#x})")
+    for at in SLOT_WORDS + (START_WORD,):
+        w = struct.unpack_from("<I", image, at - 0x60030000)[0]
+        check(lo <= (w & ~1) < hi and w & 1, f"word {at:#x} points into the patch ({w:#x})")
+
+    # the labels
+    want = {7: ("Trk Audio", "Off"), 8: ("Trk Record", "Off")}
+    for k, site in enumerate(LABEL_SITES):
+        u.stock_calls.clear()
+        got = u.labels(site)
+        check(u.stock_calls == [("labels",)] and slot_text(got) == want and ("refresh", 7) in got and ("refresh", 8) in got,
+              f"label site {k + 1}: stock's labels, then slot 2 {want[7]} and slot 3 {want[8]} {slot_text(got)}")
+    for source, label, w in ((2, "Mic LG", {7: ("Trk Audio", "Off"), 8: ("", "")}),
+                             (4, "USB", {7: ("Trk Audio", "Off"), 8: ("", "")}),
+                             (1, "Radio", {})):
+        u.m.w8(SCR + SCR_SOURCE, source)
+        got = slot_text(u.labels())
+        check(got == w, f"{label}: {got or 'nothing drawn (stock)'}")
+    u.m.w8(SCR + SCR_SOURCE, 0)
+    u.m.w8(SCR + SCR_MODE, 1)
+    check(not u.labels(), "outside the setup (crop screen): nothing drawn")
+    u.m.w8(SCR + SCR_MODE, 0)
+    rnd = random.Random(12)
+    u.m.write(u.ram, bytes(rnd.randrange(256) for _ in range(RS_SIZE)))
+    got = slot_text(u.labels())
+    check(u.m.r32(u.ram) == RS_MAGIC and u.settings() == (0, 0) and got == want,
+          "garbage RAM: the labels initialize it, both Off")
+
+    # the slot buttons
+    u.stock_calls.clear()
+    got = slot_text(u.press(2))
+    check(u.settings() == (1, 0) and got == {7: ("Trk Audio", "On"), 8: ("Trk Record", "Off")} and not u.stock_calls,
+          f"slot 2 pressed: Tracker Audio On, redrawn, stock's handler not called {got}")
+    got = slot_text(u.press(3))
+    check(u.settings() == (1, 1) and got[8] == ("Trk Record", "On"), "slot 3 pressed: Record Tracker On")
+    u.press(2)
+    check(u.settings() == (0, 0), "Tracker Audio off turns Record Tracker off")
+    got = slot_text(u.press(3))
+    check(u.settings() == (1, 1) and got == {7: ("Trk Audio", "On"), 8: ("Trk Record", "On")},
+          "Record Tracker on (Tracker Audio off) turns Tracker Audio on")
+    u.press(3)
+    check(u.settings() == (1, 0), "Record Tracker off leaves Tracker Audio on")
+    v = Ui(ptf)
+    v.bind()
+    tab = v.m.r32(v.buttons + 0x1C)
+    for slot in (2, 3):
+        e = tab + 20 * (slot - 1)
+        kind, cb = v.m.uc.mem_read(e, 1)[0], v.m.r32(e + 4)
+        check(kind == 1 and lo <= (cb & ~1) < hi,
+              f"the setup's binding of slot {slot}: press-only (kind {kind}), to the patch ({cb:#x})")
+    cases = (("a release", 2, 0, lambda m: None, []),
+             ("Radio", 2, 1, lambda m: m.w8(SCR + SCR_SOURCE, 1), [("slot", 2)]),
+             ("slot 3 with Mic HG", 3, 1, lambda m: m.w8(SCR + SCR_SOURCE, 3), [("slot", 3)]),
+             ("a pop-up (+0xbbc)", 2, 1, lambda m: m.w8(SCR + 0xBBC, 1), [("slot", 2)]),
+             ("a pop-up (+0xbbf)", 2, 1, lambda m: m.w8(SCR + 0xBBF, 1), [("slot", 2)]),
+             ("a pop-up (+0xbbd)", 2, 1, lambda m: m.w8(SCR + 0xBBD, 1), [("slot", 2)]),
+             ("a pop-up (+0xbba: the recorder's own binding)", 2, 1, lambda m: m.w8(SCR + 0xBBA, 1), [("crop", 2, 1)]),
+             ("the count-in", 2, 1, lambda m: m.w8(SCR + SCR_ACTIVE, 1), [("slot", 2)]),
+             ("a recording", 3, 1, lambda m: m.w8(REC + 0x2C, 1), [("slot", 3)]),
+             ("the crop screen", 2, 1, lambda m: m.w8(SCR + SCR_MODE, 1), [("crop", 2, 1)]))
+    for label, slot, state, setup, calls in cases:
+        v = Ui(ptf, audio=True)
+        setup(v.m)
+        drawn = v.press(slot, state)
+        check(v.settings() == (1, 0) and not drawn and v.stock_calls == calls,
+              f"{label}: slot {slot} {'goes to stock: ' + str(calls) if calls else 'calls nothing'}, the settings unchanged")
+
+    # Play in the setup
+    ref = Session(stock, False, monitor=False)          # stock: the entry, the gates opened by hand, Play
+    ref.open_by_hand()
+    ref.play()
+    want_out = ref.run(SOUND_BLOCKS)
+    p = Session(ptf, True, monitor=False)
+    p.play()
+    check(p.opened() and p.playing(), "Tracker Audio on, Play in the setup: the gates open, the pattern plays")
+    got_out = p.run(SOUND_BLOCKS)
+    ok, d = same(got_out, want_out)
+    check(ok and peak(*want_out) > 5000, f"... heard: as stock given the same steps by hand (max diff {d})")
+    p.rec_press()
+    check(p.recording() and p.moved() and p.opened() and p.playing(),
+          "plain Rec over it: the recording moved, the gates stay open, the pattern plays on")
+    out = p.run(SOUND_BLOCKS)
+    left, right = p.recorded()
+    check(peak(*out) > 5000 and len(left) > 0 and not left.any() and not right.any(),
+          f"... heard (peak {peak(*out)}), and Record Tracker off records the input only (silent)")
+    p.stop()
+    p.update()
+    check(not p.opened() and not p.playing(), "the stop: the pattern stops, the gates close")
+    p = Session(ptf, True, monitor=False)
+    p.play()
+    p.rec_press(used=BANK_SIZE)
+    out = p.run(20)
+    check(p.recording() and not p.moved() and not p.opened() and not p.playing() and peak(*out) == 0,
+          "Rec over it when the buffer can't be moved: the gates close, the pattern stops, silence (as stock)")
+    p = Ui(ptf, audio=True)
+    p.play()
+    p.run(5)
+    p.press(2)
+    check(p.settings() == (0, 0) and not p.opened() and not p.playing(),
+          "Tracker Audio off while Play runs in the setup: the gates close, the pattern stops")
+
+    # Record Tracker
+    for monitor in (False, True):
+        name = f"Monitor {'on' if monitor else 'off'}"
+        base = Session(ptf, True, monitor=monitor, inp=(1000, -1000))
+        base.rec_press(shift=1)
+        base_out = base.run(SOUND_BLOCKS)
+        r = Session(ptf, True, monitor=monitor, inp=(1000, -1000), record=True)
+        r.rec_press(shift=1)
+        check(r.recording() and r.playing() and r.m.uc.mem_read(r.ram + RS_MIX, 1)[0] == 1
+              and [a for a, _ in queue_state(r.m)] == [1, 1],
+              f"{name}, Record Tracker, Shift+Rec: recording, the pattern plays, the master's queues on")
+        out = r.run(SOUND_BLOCKS)
+        ok, d = same(out, base_out)
+        check(ok, f"{name}: the output is the same as with Record Tracker off (max diff {d})")
+        # The rig reads the output sink's DMA buffer, which plays a block after the master
+        # mixer made it: frame i of the recording is frame i + 128 of what the rig read.
+        rec = r.recorded()
+        n = len(rec[0])
+        good = n >= (SOUND_BLOCKS - 2) * 128 and peak(rec[0].astype(int) - 1000) > 5000
+        for ch, (inp, o) in enumerate(zip((1000, -1000), out)):
+            src = o[128:n + 128].astype(int)
+            exp = src if monitor else np.clip(src + inp, -32768, 32767)
+            good = good and len(exp) == n and np.array_equal(rec[ch].astype(int), exp)
+        check(good, f"{name}: the recording ({n} frames) is " + ("the output" if monitor else "the input + the output")
+              + ", both channels, every frame from the first, in step with the jacks")
+        r.stop()
+        r.update()
+        check(r.m.uc.mem_read(r.ram + RS_MIX, 1)[0] == 0 and queue_state(r.m) == [(0, 0), (0, 0)]
+              and not r.opened() and not r.playing(),
+              f"{name}: the stop hands the master's queues back (off, empty), the gates close")
+        r.run(5)
+        check(queue_state(r.m) == [(0, 0), (0, 0)], "... and they stay empty")
+
+    r = Session(ptf, True, monitor=False, inp=(1000, -1000), record=True)
+    r.rec_press(shift=1)
+    r.run(5)
+    r.stop()                                        # no update after it (the screen left, say)
+    r.idle(1)
+    check(r.m.uc.mem_read(r.ram + RS_MIX, 1)[0] == 0 and queue_state(r.m) == [(0, 0), (0, 0)],
+          "a stop the recorder's update doesn't see: the next audio block hands the master's queues back")
+
+    r = Session(ptf, True, monitor=False, inp=(30000, -30000), record=True)
+    r.rec_press(shift=1)
+    out = r.run(40)
+    rec = r.recorded()
+    n = len(rec[0])
+    exp = [np.clip(o[128:n + 128].astype(int) + inp, -32768, 32767) for o, inp in zip(out, (30000, -30000))]
+    clipped = sum(int(np.count_nonzero(np.abs(o[128:n + 128].astype(int) + inp) > 32767)) for o, inp in zip(out, (30000, -30000)))
+    check(clipped > 0 and all(len(e) == n and np.array_equal(x.astype(int), e) for x, e in zip(rec, exp)),
+          f"Monitor off, a loud input (30000 / -30000): the sum is clipped to 16 bits ({clipped} frames), not wrapped")
+
+    r = Session(ptf, True, monitor=False, inp=(1000, -1000), record=True)
+    r.rec_press()
+    r.run(5)
+    r.play()
+    r.run(SOUND_BLOCKS)
+    left, _ = r.recorded()
+    check(peak(left[5 * 128:].astype(int) - 1000) > 5000 and np.all(left[:5 * 128] == 1000),
+          "Record Tracker, Rec then Play: the input alone until Play, then the pattern too")
+    r = Session(ptf, True, monitor=False, inp=(1000, -1000), record=True)
+    r.rec_press(source=2, shift=1)
+    r.run(20)
+    left, _ = r.recorded()
+    check(r.recording() and r.m.uc.mem_read(r.ram + RS_MIX, 1)[0] == 0 and queue_state(r.m)[0][0] == 0
+          and len(left) > 0 and bool(np.all(left == 1000)),
+          "Record Tracker with Mic LG: not mixed (the input only), the master's queues untouched")
+    r = Session(ptf, True, monitor=False, inp=(1000, -1000), audio=False, record=True)
+    r.rec_press(shift=1)
+    r.run(20)
+    check(r.m.uc.mem_read(r.ram + RS_MIX, 1)[0] == 0 and not r.playing(),
+          "Record Tracker set but Tracker Audio off (only by RAM): not mixed, no pattern")
+    r = Session(ptf, True, monitor=False, inp=(1000, -1000), record=True)
+    r.rec_press(used=BANK_SIZE, shift=1)
+    r.run(5)
+    check(r.m.uc.mem_read(r.ram + RS_MIX, 1)[0] == 0 and queue_state(r.m)[0][0] == 0,
+          "Record Tracker, the buffer not moved: not mixed")
+
+    # the recorder's start
+    u = Ui(ptf, audio=True, record=True)
+    u.rec_press(shift=1)
+    u.run(3)
+    u.m.w8(u.ram + RS_ARMED, 1)
+    u.stock_calls.clear()
+    u.m.call(u.m.r32(START_WORD), SCR, 0, max_insns=20_000_000)
+    st = bytes(u.m.uc.mem_read(u.ram, RS_SIZE))
+    check(u.stock_calls == [("start",)] and st[5:8] == bytes(3) and st[RS_MIX] == 0 and u.settings() == (1, 1)
+          and queue_state(u.m) == [(0, 0), (0, 0)],
+          "the recorder's start: gates, arm and recording cleared, the master's queues handed back, "
+          "the settings kept, then stock's start")
+
+    # the count-in's click: the preview player, master input 5. The sequencer's click
+    # (ITCM 0x42e4) sets its gain to the metronome volume and starts it; the last one
+    # starts in the tick that ends the count-in. The master's record queues update
+    # before the master mixers, so a take's first master block was mixed before the
+    # record start (rs7 muted at the record start: the click's first block was recorded).
+    def take(record: bool, volume: int, monitor: bool = False):
+        r = Session(ptf, True, monitor=monitor, record=record)
+        m = r.m
+        m.w8(SETTINGS + METRONOME_VOLUME, volume)
+        r.rec_press(preroll=1, shift=1)
+        out = []
+        while not r.scr(SCR_COUNTIN_DONE):          # audio blocks during the count-in
+            out.append(r.run(1)[0])
+        out.append(r.run(1)[0])                     # the main loop's update comes a block later
+        m.call(REC_START, SCR, max_insns=5_000_000)  # as the update does (bl at 0x600fb1fa)
+        during = [m.r32(g) for g in PREVIEW_GAINS]
+        tail = r.run(12)[0]
+        rec = r.recorded()
+        r.stop()
+        r.update()
+        return np.concatenate(out), tail, rec, during, [m.r32(g) for g in PREVIEW_GAINS], r
+
+    _, t_quiet, _, _, _, _ = take(False, 0)
+    _, t_click, _, _, off_after, _ = take(False, 0x56)
+    d = int(np.abs(t_click[:1024].astype(int) - t_quiet[:1024]).max())
+    check(d > 1000, f"Record Tracker off, metronome on: the count-in's last click sounds into the take's start "
+                    f"(max diff {d})")
+    for monitor in (False, True):
+        name = f"Monitor {'on' if monitor else 'off'}"
+        _, _, rec0, _, _, _ = take(True, 0, monitor)
+        _, tail1, rec1, during1, after1, r1 = take(True, 0x56, monitor)
+        check(r1.m.uc.mem_read(r1.ram + RS_MIX, 1)[0] == 0 and len(rec1[0]) > 0
+              and all(np.array_equal(a, b) for a, b in zip(rec0, rec1)),
+              f"{name}, Record Tracker: the recording is the same with the metronome on as off "
+              f"({len(rec1[0])} frames): no click")
+        check(during1 == [0, 0, 0, 0],
+              f"{name}: the preview's master input muted while it records {[hex(g) for g in during1]}")
+        check(after1[0::2] == off_after[0::2] and after1[0] != 0,
+              f"{name}: at the stop the preview's gain is the metronome volume again "
+              f"{[hex(g) for g in after1[0::2]]}, as stock leaves it")
+    # a count-in that ends without a mix (the buffer can't be moved): the gain given back
+    r = Session(ptf, True, monitor=False, record=True)
+    r.m.w8(SETTINGS + METRONOME_VOLUME, 0x56)
+    r.rec_press(used=BANK_SIZE, preroll=1, shift=1)
+    while not r.scr(SCR_COUNTIN_DONE):
+        r.run(1)
+    muted = r.m.uc.mem_read(r.ram + RS_MUTED, 1)[0]
+    r.m.call(REC_START, SCR, max_insns=5_000_000)
+    check(muted == 1 and r.recording() and r.m.uc.mem_read(r.ram + RS_MIX, 1)[0] == 0
+          and r.m.uc.mem_read(r.ram + RS_MUTED, 1)[0] == 0 and r.m.r32(PREVIEW_GAINS[0]) == off_after[0],
+          "Record Tracker, a count-in, the buffer not moved (no mix): muted at the count-in's end, given back "
+          "at the record start")
+    r = Session(ptf, True, monitor=False, record=True)
+    r.m.w8(SETTINGS + METRONOME_VOLUME, 0x56)
+    r.rec_press(preroll=1, shift=1)
+    while not r.scr(SCR_COUNTIN_DONE):
+        r.run(1)
+    r.m.w8(SCR + SCR_ACTIVE, 0)                     # the count-in ended without a recording
+    r.update()
+    check(r.m.uc.mem_read(r.ram + RS_MUTED, 1)[0] == 0 and r.m.r32(PREVIEW_GAINS[0]) == off_after[0],
+          "a count-in that ends without a recording: the update gives the preview's gain back")
+    r = Session(ptf, True, monitor=False, record=False)
+    r.m.w8(SETTINGS + METRONOME_VOLUME, 0x56)
+    r.rec_press(preroll=1, shift=1)
+    while not r.scr(SCR_COUNTIN_DONE):
+        r.run(1)
+    check(r.m.uc.mem_read(r.ram + RS_MUTED, 1)[0] == 0 and r.m.r32(PREVIEW_GAINS[0]) != 0,
+          "Record Tracker off: the count-in's end leaves the preview alone")
+
+    # writes and cost
+    r = Session(ptf, True, monitor=False, inp=(1000, -1000), record=True)
+    m = r.m
+    ch0, ch1 = 0, 0
+    allowed = ([(pl + 0x798, pl + 0x79C) for pl in PLAYERS] + [(ENGINE + 0x1A48, ENGINE + 0x1A54)]
+               + [(r.ram, r.ram + RS_SIZE), STACK] + [(q, q + 0x50) for q in MASTER_Q])
+    allowed += [(m.r32(a), m.r32(a) + 0x50) for a in REC_Q]
+    allowed += [(g, g + 4) for g in PREVIEW_GAINS]
+    stray, own = [], [0]
+
+    def on_write(uc, access, a, size, value, user):
+        pc = uc.reg_read(UC_ARM_REG_PC)
+        if lo <= pc < hi and not any(x <= a < y for x, y in allowed) and not BANK + PLAY_USED <= a < BANK + BANK_SIZE:
+            stray.append((hex(pc), hex(a)))
+    hw = m.uc.hook_add(UC_HOOK_MEM_WRITE, on_write)
+    r.rec_press(shift=1)
+    r.run(4)
+    hc = m.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s_, u_: own.__setitem__(0, own[0] + 1), begin=lo, end=hi - 1)
+    blocks = 16
+    r.run(blocks)
+    m.uc.hook_del(hc)
+    r.stop()
+    r.update()
+    m.uc.hook_del(hw)
+    check(not stray, f"Record Tracker, a take: no write by the patch outside its RAM, the stack, the send flags, "
+                     f"the record queues and the recording {stray[:3]}")
+    check(own[0] // blocks <= 1200, f"the patch's own instructions per block with Record Tracker: {own[0] // blocks}")
+
+
+# ---- 13. resample.bin (rs6, rs7) ---------------------------------------------------------------
+
+PATTERN_UPDATE_SLOT, PATTERN_UPDATE, PATTERN_SCREEN = 0x600403DC, 0x600E1F98, 0x20021770
+PROJECT_UPDATE_SLOT, PROJECT_UPDATE = 0x6004193C, 0x600EAD58
+FILE_MAGIC = b"RSM1"
+SAVE_DELAY = 25
+
+
+def fnv1a(data: bytes) -> int:
+    h = 2166136261
+    for b in data:
+        h = (h ^ b) * 16777619 & 0xFFFFFFFF
+    return h
+
+
+def rsm1(v: tuple[int, int]) -> bytes:
+    data = bytes([v[0] | v[1] << 1, 0, 0, 0])
+    return FILE_MAGIC + data + struct.pack("<I", fnv1a(data))
+
+
+def file_checks(ptf: Path) -> None:
+    print("settings file (resample.bin), through the Pattern screen's and the recorder's update hooks")
+    m = Machine(ptf)
+    fs = FakeFS(m, Path("."))
+    ram = patch_ram(ptf, "resample")
+    m.stub_function(PATTERN_UPDATE, lambda mm: 0)
+    m.stub_function(STOCK_UPDATE, lambda mm: 0)
+    m.stub_function(PROJECT_UPDATE, lambda mm: 0)
+    drawn = []
+    m.stub_function(CTL_TEXT2, lambda mm: drawn.append((mm.arg(1), mm.cstr(mm.arg(2)))))
+    for off, cid in SLOT_IDS.items():
+        m.w8(SCR + off, cid)
+    pat_hook, rec_hook, prj_hook = m.r32(PATTERN_UPDATE_SLOT), m.r32(UPDATE_WORD), m.r32(PROJECT_UPDATE_SLOT)
+
+    def tick(n=1, hook=None):
+        for _ in range(n):
+            m.call(hook or pat_hook, PATTERN_SCREEN if hook is None else SCR, max_insns=5_000_000)
+
+    def values():
+        return m.uc.mem_read(ram + RS_AUDIO, 1)[0], m.uc.mem_read(ram + RS_RECORD, 1)[0]
+
+    def put(v):
+        m.w8(ram + RS_AUDIO, v[0])
+        m.w8(ram + RS_RECORD, v[1])
+
+    def path(name):
+        return f"Projects/User/{name}/resample.bin"
+
+    def writes():
+        return len([x for x in fs.log if "resample.bin mode 3" in x])
+
+    def io():
+        return len([x for x in fs.log if "resample.bin" in x])
+
+    fs.set_project(Path("."), "A", "Projects/User")
+    tick()
+    check(values() == (0, 0), "project without resample.bin: both Off")
+    tick(SAVE_DELAY + 5)
+    check(writes() == 0, "nothing written while nothing changed")
+    put((1, 1))
+    tick(SAVE_DELAY - 2, rec_hook)
+    check(writes() == 0, "no write right after a change")
+    tick(5, rec_hook)
+    check(writes() == 1 and fs.overlay.get(path("A")) == rsm1((1, 1)),
+          "the change is written once, a while later, from the recorder's update (RSM1, 12 bytes)")
+    fs.set_project(Path("."), "B", "Projects/User")
+    tick()
+    check(values() == (0, 0), "another project without the file: both Off")
+    fs.set_project(Path("."), "A", "Projects/User")
+    tick()
+    check(values() == (1, 1), "back to the first project: both On")
+    good = fs.overlay[path("A")]
+    fs.overlay[path("A")] = good[:11] + bytes([good[11] ^ 1])
+    fs.set_project(Path("."), "B", "Projects/User")
+    tick()
+    fs.set_project(Path("."), "A", "Projects/User")
+    tick()
+    check(values() == (0, 0), "damaged file: both Off")
+    fs.overlay[path("A")] = rsm1((0, 1))
+    fs.set_project(Path("."), "B", "Projects/User")
+    tick()
+    fs.set_project(Path("."), "A", "Projects/User")
+    tick()
+    check(values() == (1, 1), "a file with Record Tracker alone: Tracker Audio on with it")
+    fs.overlay[path("A")] = good
+
+    # the recorder: a load while the setup shows redraws the slots; no file I/O in a take
+    fs.put(path("C"), rsm1((1, 0)))
+    fs.set_project(Path("."), "C", "Projects/User")
+    drawn.clear()
+    tick(1, rec_hook)
+    check(values() == (1, 0) and (SLOT_IDS[0x5F], "On") in drawn,
+          f"opened from the recorder's update: its file read, the slots redrawn {drawn}")
+    put((0, 0))
+    m.w8(REC + 0x2C, 1)                             # recording
+    n = io()
+    tick(SAVE_DELAY * 2, rec_hook)
+    m.w8(REC + 0x2C, 0)
+    m.w8(SCR + SCR_ACTIVE, 1)                       # counting in
+    tick(SAVE_DELAY * 2, rec_hook)
+    check(io() == n, "the recorder's update during a recording or its count-in: no file I/O")
+    m.w8(SCR + SCR_ACTIVE, 0)
+    tick(SAVE_DELAY + 2, rec_hook)
+    check(fs.overlay.get(path("C")) == rsm1((0, 0)), "after it: the change written")
+    m.write(PROJECT_NAME, b"\0")
+    tick()
+    put((1, 0))
+    n = writes()
+    tick(SAVE_DELAY * 2)
+    check(writes() == n, "project without a name: nothing written")
+
+    # rs7 (hardware, rs6): New Project from an On project, then the recorder or a save
+    # with no Pattern screen in between
+    fs.put(path("D"), rsm1((1, 1)))
+    fs.set_project(Path("."), "D", "Projects/User")
+    tick(1, rec_hook)
+    fs.set_project(Path("."), "New Project", "")    # as the firmware's new project 0x60117c8c
+    drawn.clear()
+    tick(1, rec_hook)
+    check(values() == (0, 0) and (SLOT_IDS[0x5F], "Off") in drawn and (SLOT_IDS[0x60], "Off") in drawn,
+          f"New Project, then the recorder: both Off, the slots redrawn {drawn}")
+    fs.set_project(Path("."), "D", "Projects/User")
+    tick(1, prj_hook)
+    check(values() == (1, 1), "the project screen's update: a project's file read")
+    fs.set_project(Path("."), "New Project", "")
+    tick(1, prj_hook)
+    check(values() == (0, 0), "New Project, the project screen's update: both Off")
+    save(m, lambda n=1: tick(n, prj_hook), "NP1", settle=SAVE_DELAY * 2 + 5)
+    check(m.cstr(PROJECT_NAME) == "NP1" and values() == (0, 0) and fs.overlay.get(path("NP1")) == rsm1((0, 0)),
+          "New Project, then Save As at once (only the project screen's update): saved Off")
+
+    save_as_checks(check, m, fs, tick, "resample.bin", values, put, (0, 0), (1, 1), (1, 0), rsm1, SAVE_DELAY)
 
 
 def main() -> int:
@@ -898,6 +1461,8 @@ def main() -> int:
     stock_cases(ptf, stock)
     cost_checks(ptf, stock)
     shift_rec_checks(ptf, stock)
+    tracker_checks(ptf, stock)
+    file_checks(ptf)
     print(f"{len(failures)} failure(s)")
     return 1 if failures else 0
 

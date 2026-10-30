@@ -101,7 +101,7 @@
       "bit": 11,
       "spec": "patch/resample/patch.json",
       "title": "Live Resampling",
-      "summary": "The Sample Recorder can record with the pattern playing: press Play after Rec, or start the recording with Shift+Rec (after the count-in, if Pre Roll is on). Samples and synths play at the mix levels with delay and reverb; stopping the recording stops the pattern. Recordings go after the loaded samples, so they stay intact. Otherwise the recorder is stock.",
+      "summary": "Two buttons in the Sample Recorder's setup. Trk Audio: hear the pattern there (Play, or Shift+Rec to start it with the recording, after the count-in if Pre Roll is on), samples and synths at the mix levels with delay and reverb; stopping the recording stops the pattern. Trk Record: record it too, Line In plus the tracker, with no cable. Saved per project; with both Off the recorder is stock. Recordings go after the loaded samples, so they stay intact.",
       "status": "Tested on hardware"
     },
     {
@@ -171,6 +171,8 @@
     "9ddb1fc889f69293cf15e5cd8910e15d97cf742b1684ab6c878c8f82d5a3a440": "condtrig (1.2.0-ct2)",
     "babfded088d61424511b6a3edb0a384937f28458d0721f70c9e9c27670880ed3": "all thirteen mods (1.2.0-MVL)",
     "403c76593d2e5f096893ddb2771dd7c90536b1dedc7f64352bf5c154c24ca935": "songloop (1.2.0-sl4)",
-    "643755cc94ba6f904298a4adbfcadd739925db8c50e0c719d34c0b8d3f79ad1b": "all fourteen mods (1.2.0-SLA)"
+    "643755cc94ba6f904298a4adbfcadd739925db8c50e0c719d34c0b8d3f79ad1b": "all fourteen mods (1.2.0-SLA)",
+    "b7f2056a34bc3b476ce433d7a7b8d91b76fca7c536dd944cffdc408537347653": "resample (1.2.0-rs8)",
+    "ce41aa1e9f8053b56855abe977d11aebca8122ae5d2597f10470ae8d8b34c574": "all fourteen mods (1.2.0-MR8)"
   }
 }

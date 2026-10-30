@@ -570,6 +570,8 @@ starts.
      143 jobs, 0 failed, 2.9 min (141 from the cache).
 7. **Resample source (extra, only if the user asks once 1–6 work).** Trace the
    recorder's source list, add the entry, hook the two queue accessor BLs (section 4.5).
+   Feasibility and the build plan: [RESAMPLE_SOURCE_PLAN.md](RESAMPLE_SOURCE_PLAN.md)
+   (no accessor hooks needed: the queue start keeps preset queues).
 
 ## 9. Hardware check (the user, after phase 5; about 15 minutes)
 

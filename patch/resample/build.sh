@@ -32,7 +32,12 @@ link() {                               # link <linker script> <elf> <map>
         -nostdlib -nostartfiles -T "$1" -Wl,--gc-sections \
         -Wl,--undefined=mt_rs_rec_buffer -Wl,--undefined=mt_rs_play_button -Wl,--undefined=mt_rs_update \
         -Wl,--undefined=mt_rs_is_recording -Wl,--undefined=mt_rs_rec_button \
-        -Wl,--undefined=mt_rs_rec_started -Wl,--undefined=mt_version_fmt \
+        -Wl,--undefined=mt_rs_rec_started -Wl,--undefined=mt_rs_start -Wl,--undefined=mt_rs_copy \
+        -Wl,--undefined=mt_rs_labels1 -Wl,--undefined=mt_rs_labels2 -Wl,--undefined=mt_rs_labels3 \
+        -Wl,--undefined=mt_rs_labels4 -Wl,--undefined=mt_rs_slot2_button -Wl,--undefined=mt_rs_slot3_button \
+        -Wl,--undefined=mt_rs_pattern_update -Wl,--undefined=mt_rs_save_name \
+        -Wl,--undefined=mt_rs_project_update -Wl,--undefined=mt_rs_countin_done \
+        -Wl,--undefined=mt_version_fmt \
         -Wl,-Map="$3" "$OUT/resample.o" -o "$2"
 }
 link "$HERE/link.ld" "$OUT/resample.elf" "$OUT/resample.map"

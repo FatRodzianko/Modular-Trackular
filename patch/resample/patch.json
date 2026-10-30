@@ -1,6 +1,6 @@
 {
   "name": "resample",
-  "description": "Live resampling: the Sample Recorder records into the sample bank's free space; Play during a recording, or a recording started with Shift+Rec, plays the pattern with the engine on",
+  "description": "Live resampling: the Sample Recorder records into the sample bank's free space; Tracker Audio and Record Tracker in the setup's slots 2 and 3 let the pattern be heard (Play, Shift+Rec, Play during a recording) and recorded with Line In",
   "firmware": "TrackerPlus 1.2.0",
   "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
   "bin": "build/resample.bin",
@@ -23,6 +23,48 @@
       "to": "mt_rs_rec_started",
       "next": "mt_rs_next_rec_started",
       "note": "record start 0x600f9074: bl 0x6010c890(rec), the record queues' start (from Rec and from the count-in's end) -> mt_rs_rec_started (Shift+Rec: open the gates, play the pattern)"
+    },
+    {
+      "at": "0x600F99E2",
+      "old": "02f02df9",
+      "to": "mt_rs_labels1",
+      "next": "mt_rs_next_labels1",
+      "note": "bl 0x600fbc40(scr), the setup's slot 2-4 labels for every source but Radio -> mt_rs_labels1 (draws Tracker Audio and Record Tracker after it)"
+    },
+    {
+      "at": "0x600F9A3A",
+      "old": "02f001f9",
+      "to": "mt_rs_labels2",
+      "next": "mt_rs_next_labels2",
+      "note": "bl 0x600fbc40(scr), the setup's slot 2-4 labels for every source but Radio -> mt_rs_labels2 (draws Tracker Audio and Record Tracker after it)"
+    },
+    {
+      "at": "0x600F9AB6",
+      "old": "02f0c3f8",
+      "to": "mt_rs_labels3",
+      "next": "mt_rs_next_labels3",
+      "note": "bl 0x600fbc40(scr), the setup's slot 2-4 labels for every source but Radio -> mt_rs_labels3 (draws Tracker Audio and Record Tracker after it)"
+    },
+    {
+      "at": "0x600FCBD4",
+      "old": "fff734f8",
+      "to": "mt_rs_labels4",
+      "next": "mt_rs_next_labels4",
+      "note": "bl 0x600fbc40(scr), the setup's slot 2-4 labels for every source but Radio -> mt_rs_labels4 (draws Tracker Audio and Record Tracker after it)"
+    },
+    {
+      "at": "0x6010C6F6",
+      "old": "00f067f8",
+      "to": "mt_rs_copy",
+      "next": "mt_rs_next_copy",
+      "note": "the record copy loop (audio interrupt): bl 0x6010c7c8(dst, src, 0x100), one input block into the recording -> mt_rs_copy (with Record Tracker: adds the master's matching block)"
+    },
+    {
+      "at": "0x60114EAA",
+      "old": "52f094fa",
+      "to": "mt_rs_save_name",
+      "next": "mt_rs_next_save_name",
+      "note": "save request 0x60114e34, Save As only: bl strncpy(fm+0x340, name, 0x21) -> mt_rs_save_name (Tracker Audio and Record Tracker go with the project to its new name)"
     }
   ],
   "words": [
@@ -59,11 +101,59 @@
       "note": "ITCM image (copied to ITCM 0x1f544 at boot): the literal of the thunk 0x1f540 that engine_block_update (0x41d8) asks, rec+0x2c 0x6010c889 -> mt_rs_is_recording (no early return while the gates are open)"
     },
     {
+      "at": "0x600F8E24",
+      "old": "ad860f60",
+      "to": "mt_rs_slot2_button",
+      "next": "mt_rs_next_slot2_button",
+      "thumb": true,
+      "note": "the setup's button binder 0x600f8db4: pool word for slot 2's press handler 0x600f86ad (Radio only in the setup) -> mt_rs_slot2_button (Tracker Audio)"
+    },
+    {
+      "at": "0x600F8E28",
+      "old": "4d8a0f60",
+      "to": "mt_rs_slot3_button",
+      "next": "mt_rs_next_slot3_button",
+      "thumb": true,
+      "note": "the setup's button binder 0x600f8db4: pool word for slot 3's press handler 0x600f8a4d (Radio only in the setup) -> mt_rs_slot3_button (Record Tracker)"
+    },
+    {
+      "at": "0x60042C58",
+      "old": "29a20f60",
+      "to": "mt_rs_start",
+      "next": "mt_rs_next_start",
+      "thumb": true,
+      "note": "Sample Recorder vtable, start 0x600fa229 -> mt_rs_start (a new visit starts with the gates shut)"
+    },
+    {
+      "at": "0x600403DC",
+      "old": "991f0e60",
+      "to": "mt_rs_pattern_update",
+      "next": "mt_rs_next_pattern_update",
+      "thumb": true,
+      "note": "Pattern screen vtable: update method 0x600e1f99 -> mt_rs_pattern_update (resample.bin load/save)"
+    },
+    {
+      "at": "0x6004193C",
+      "old": "59ad0e60",
+      "to": "mt_rs_project_update",
+      "next": "mt_rs_next_project_update",
+      "thumb": true,
+      "note": "project screen vtable: update method 0x600ead59 -> mt_rs_project_update (resample.bin: a new project seen before its first save)"
+    },
+    {
+      "at": "0x600FA490",
+      "old": "05860f60",
+      "to": "mt_rs_countin_done",
+      "next": "mt_rs_next_countin_done",
+      "thumb": true,
+      "note": "the recorder start's pool word for the count-in's end callback 0x600f8605 (seq+0x6fc) -> mt_rs_countin_done (Record Tracker: mutes the last click)"
+    },
+    {
       "at": "0x600CBF9C",
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-rs4"
+      "note": "version text 1.2.0-rs8"
     }
   ]
 }
