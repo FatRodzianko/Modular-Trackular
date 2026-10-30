@@ -92,3 +92,37 @@ def save_as_checks(check, m, fs, tick, fname: str, get, put, default, a, b, enco
     fs.set_project(Path("."), "SA2", WHERE)
     tick(2)
     check(get() == a, "a project reopened, its name cleared and restored on the way: its own file's settings")
+
+
+PROJECT_UPDATE_SLOT, PROJECT_UPDATE = 0x6004193C, 0x600EAD58    # project screen vtable: update 0x600ead59
+
+
+def new_project_checks(check, m, fs, tick, fname: str, get, default, a, encode, delay: int) -> None:
+    """New Project, then Save As at once, both on the project screen: the new project
+    saves the defaults, not the old project's settings (resample rs6's bug). Only the
+    project screen's update (stubbed stock method, any patch hook chained in front) runs
+    from New Project until the save is done; then tick() (the patch's usual screen)."""
+    def path(name):
+        return f"{WHERE}/{name}/{fname}"
+
+    print(f"New Project then Save As on the project screen ({fname})")
+    m.stub_function(PROJECT_UPDATE, lambda mm: 0)
+    hook, screen = m.r32(PROJECT_UPDATE_SLOT), m.alloc(64)
+
+    def project_tick(n=1):
+        for _ in range(n):
+            m.call(hook, screen, max_insns=50_000_000)
+
+    settle = delay * 2 + 5
+    fs.put(path("NPA"), encode(a))
+    fs.set_project(Path("."), "NPA", WHERE)
+    tick(2)
+    check(get() == a, "a project with its own file: its settings")
+    fs.set_project(Path("."), "New Project", "")    # as the firmware's new project 0x60117c8c
+    project_tick()
+    check(get() == default, "New Project, only the project screen's update since: the defaults")
+    ok = save(m, project_tick, "NP1", settle=settle)
+    tick(settle)
+    check(ok and m.cstr(PROJECT_NAME) == "NP1" and get() == default and fs.overlay.get(path("NP1")) == encode(default),
+          "then Save As at once, then the patch's own screen: the defaults, written to the new folder "
+          f"(now {get()}, file {'none' if fs.overlay.get(path('NP1')) is None else fs.overlay.get(path('NP1')).hex()})")

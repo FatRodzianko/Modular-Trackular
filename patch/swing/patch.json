@@ -57,6 +57,14 @@
       "note": "ITCM image (copied to ITCM 0x1f81c at boot): the word seq_tick's veneer jumps through to seq_advance_step 0x600ad011 -> mt_sw_advance_step (the global swing again when a pattern starts)"
     },
     {
+      "at": "0x6004193C",
+      "old": "59ad0e60",
+      "to": "mt_sw_project_update",
+      "next": "mt_sw_next_project_update",
+      "thumb": true,
+      "note": "project screen vtable: update method 0x600ead59 -> mt_sw_project_update (a new project seen before its first save)"
+    },
+    {
       "at": "0x600403DC",
       "old": "991f0e60",
       "to": "mt_sw_pattern_update",
@@ -77,7 +85,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-sw2"
+      "note": "version text 1.2.0-sw3"
     }
   ]
 }

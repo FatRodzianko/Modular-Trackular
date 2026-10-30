@@ -59,7 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
 from layout import patch_code, patch_ram  # noqa: E402
 from machine import Machine  # noqa: E402
-from project_save import save_as_checks  # noqa: E402
+from project_save import new_project_checks, save_as_checks  # noqa: E402
 from song_grid import PATTERN_DATA_SIZE  # noqa: E402
 
 SEQ = 0x20017274                    # bytes 0..3: selection rectangle; +0x14: pattern data
@@ -675,6 +675,8 @@ def file_checks(ptf: Path) -> None:
 
     save_as_checks(check, m, fs, tick, "humanize.bin", values, lambda v: m.write(HZ_VALUE, bytes(v)),
                    DEFAULT_VALUES, bytes([4, 1, 69, 69, 7]), bytes([14, 0, 29, 9, 2]), hhz2, SAVE_DELAY)
+    new_project_checks(check, m, fs, tick, "humanize.bin", values, DEFAULT_VALUES, bytes([4, 1, 69, 69, 7]), hhz2,
+                       SAVE_DELAY)
     total = sum(calls.values())
     check(calls["pattern"] > 0 and calls["config"] > 0 and total == calls["pattern"] + calls["config"],
           f"stock update methods ran on every call ({calls['pattern']} + {calls['config']})")

@@ -101,6 +101,14 @@
       "note": "Sample Playback screen vtable: update method 0x600f6071 -> mt_bt_playback_update (slicethru.bin load/save; the list redrawn after a load)"
     },
     {
+      "at": "0x6004193C",
+      "old": "59ad0e60",
+      "to": "mt_bt_project_update",
+      "next": "mt_bt_next_project_update",
+      "thumb": true,
+      "note": "project screen vtable: update method 0x600ead59 -> mt_bt_project_update (a new project seen before its first save)"
+    },
+    {
       "at": "0x600403DC",
       "old": "991f0e60",
       "to": "mt_bt_pattern_update",
@@ -121,7 +129,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-bt5"
+      "note": "version text 1.2.0-bt6"
     }
   ]
 }

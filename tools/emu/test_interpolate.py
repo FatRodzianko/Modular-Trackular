@@ -61,7 +61,7 @@ from patch_ptf import bl_target  # noqa: E402
 from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
 from layout import patch_code, patch_ram  # noqa: E402
 from machine import Machine  # noqa: E402
-from project_save import save_as_checks  # noqa: E402
+from project_save import new_project_checks, save_as_checks  # noqa: E402
 from seq_timing import PROJECT, SEQ, SEQ_PLAY_FROM, SETTINGS, make, pattern, set_step  # noqa: E402
 
 APP, APP_AUDIO_BLOCK = 0x200170E0, 0x600AA7C8
@@ -704,6 +704,7 @@ def file_checks(ptf: Path) -> None:
 
     save_as_checks(check, m, fs, tick, "interpolate.bin", values, put, (0, 0), (1, 1), (0, 1),
                    lambda v: hip1(*v), SAVE_DELAY)
+    new_project_checks(check, m, fs, tick, "interpolate.bin", values, (0, 0), (1, 1), lambda v: hip1(*v), SAVE_DELAY)
     check(calls["pattern"] > 0 and calls["config"] > 0, f"stock update methods ran ({calls})")
 
 

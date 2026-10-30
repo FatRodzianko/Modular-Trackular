@@ -76,7 +76,7 @@ from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
 from layout import patch_code  # noqa: E402
 from machine import Machine  # noqa: E402
 from patch_ptf import bl_target  # noqa: E402
-from project_save import save_as_checks  # noqa: E402
+from project_save import new_project_checks, save_as_checks  # noqa: E402
 
 B = tf.BLOCK
 REVERB = tf.REVERB
@@ -973,6 +973,8 @@ def file_checks(ptf: Path) -> None:
 
     save_as_checks(check, m, fs, tick, "masterfx.bin", lambda: (value(), delay()), put, (0, 0), (1, 1), (3, 2),
                    lambda v: hmf1(*v), SAVE_DELAY)
+    new_project_checks(check, m, fs, tick, "masterfx.bin", lambda: (value(), delay()), (0, 0), (1, 1),
+                       lambda v: hmf1(*v), SAVE_DELAY)
     check(calls["pattern"] > 0 and calls["config"] > 0, f"stock update methods ran ({calls})")
 
 

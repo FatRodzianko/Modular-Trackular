@@ -97,7 +97,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   the Song list; Performance stays on while the block loops (as Loop Performance does
   for one pattern). Tested on hardware, on its own and in patch/all. See
   [patch/songloop/README.md](patch/songloop/README.md).
-- **all**: all fourteen mods above in one firmware (version text `1.2.0-MR8`), from
+- **all**: all fourteen mods above in one firmware (version text `1.2.0-MNP`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for

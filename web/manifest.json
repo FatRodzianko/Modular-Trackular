@@ -173,6 +173,12 @@
     "403c76593d2e5f096893ddb2771dd7c90536b1dedc7f64352bf5c154c24ca935": "songloop (1.2.0-sl4)",
     "643755cc94ba6f904298a4adbfcadd739925db8c50e0c719d34c0b8d3f79ad1b": "all fourteen mods (1.2.0-SLA)",
     "b7f2056a34bc3b476ce433d7a7b8d91b76fca7c536dd944cffdc408537347653": "resample (1.2.0-rs8)",
-    "ce41aa1e9f8053b56855abe977d11aebca8122ae5d2597f10470ae8d8b34c574": "all fourteen mods (1.2.0-MR8)"
+    "ce41aa1e9f8053b56855abe977d11aebca8122ae5d2597f10470ae8d8b34c574": "all fourteen mods (1.2.0-MR8)",
+    "1244a4e02dd10dd79369f5c30b0139cfb7e11cec8bd495354e4e24a9498491d6": "swing (1.2.0-sw3)",
+    "c85f5fa05d83dc6570e54fa38a8485659db1951fe12113fbfa72304cb78439c5": "humanize (1.2.0-h10)",
+    "bb08491d9c5b2949bacd2c6433e668bc5e33d6a22e2850bfa5b377a763984bb0": "interpolate (1.2.0-ip8)",
+    "fa24cdc2ae1e96f73a46d3a3e7e510280b03108ad0feb0796b2b2672900798b7": "masterfx (1.2.0-mf8)",
+    "e5c3a47b684a92b8277813444dda7a327ddc6886baa9a09ec7f54cc585dcf20c": "slicethru (1.2.0-bt6)",
+    "d4c22592906cf68d57e27f337e4c7dae082388eca148c34d0a67a76e0fe6c1ec": "all fourteen mods (1.2.0-MNP)"
   }
 }

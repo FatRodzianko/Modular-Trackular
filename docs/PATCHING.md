@@ -38,7 +38,7 @@ Python command below does, without installing anything:
    one in step 1) and the image's, and refuses anything else, including a file that's
    already patched.
 2. Tick the mods you want. One mod gives its own build, "Select all" gives the
-   `patch/all` bundle (all fourteen, `1.2.0-MR8`), and any other mix gets a version text
+   `patch/all` bundle (all fourteen, `1.2.0-MNP`), and any other mix gets a version text
    that says which mods are in it: `M` plus two hex digits for colorsong 01, humanize 02,
    interpolate 04, masterfx 08, swing 10, visualizer 20, condtrig 40 and synths 80
    (colorsong + swing is `1.2.0-M11`); `N` instead of `M` when legato is in it
@@ -81,15 +81,19 @@ must be byte-identical to these builds:
 | Patch | Output file | Version text in Config | On hardware | Output SHA-256 |
 |---|---|---|---|---|
 | colorsong | `TrackerPlus_c11.ptf` | `1.2.0-c11` | tested | `cc9119abe627d994ba6010bfe0db59129e3f494611dbc8c1e5c68fcf0653ebc6` |
-| humanize | `TrackerPlus_hz9.ptf` | `1.2.0-hz9` | tested | `1b4585815fa0c66b5689135375f2da8e7bfec57cce6f5cf2e62592f4c4765626` |
+| humanize | `TrackerPlus_h10.ptf` | `1.2.0-h10` | tested | `c85f5fa05d83dc6570e54fa38a8485659db1951fe12113fbfa72304cb78439c5` |
+| the previous humanize (New Project then an immediate Save As kept the previous project's settings) | `TrackerPlus_hz9.ptf` | `1.2.0-hz9` | tested | `1b4585815fa0c66b5689135375f2da8e7bfec57cce6f5cf2e62592f4c4765626` |
 | the previous humanize (Save As dropped the settings) | `TrackerPlus_hz8.ptf` | `1.2.0-hz8` | tested (with colorsong and interpolate) | `ec3c30fda0d186299e39cce2be48031303f3bc0583fd1e8803600b500bf4b46f` |
-| interpolate | `TrackerPlus_ip7.ptf` | `1.2.0-ip7` | tested | `8200a81f3de0c395e4dab97c273def7125f6890d2e1147d33cd66bb9f6841f33` |
+| interpolate | `TrackerPlus_ip8.ptf` | `1.2.0-ip8` | tested | `bb08491d9c5b2949bacd2c6433e668bc5e33d6a22e2850bfa5b377a763984bb0` |
+| the previous interpolate (New Project then an immediate Save As kept the previous project's settings) | `TrackerPlus_ip7.ptf` | `1.2.0-ip7` | tested | `8200a81f3de0c395e4dab97c273def7125f6890d2e1147d33cd66bb9f6841f33` |
 | the previous interpolate (slower look-up) | `TrackerPlus_ip6.ptf` | `1.2.0-ip6` | tested | `598dc01fb55ec0549c9809d2a14702e591354f29a07c0ad7d7401d405171391e` |
 | the previous interpolate (Save As dropped the settings) | `TrackerPlus_ip5.ptf` | `1.2.0-ip5` | tested (with colorsong and humanize) | `f3d98eb18f5852dc718d41ba9311e813d056d1ab5b37b1252e87cf0341c0942a` |
-| masterfx | `TrackerPlus_mf7.ptf` | `1.2.0-mf7` | tested | `7149651eda407e0bbbe7d84ea947ae3d1ee0035989cb63d0c59bf6779080fe9f` |
+| masterfx | `TrackerPlus_mf8.ptf` | `1.2.0-mf8` | tested | `fa24cdc2ae1e96f73a46d3a3e7e510280b03108ad0feb0796b2b2672900798b7` |
+| the previous masterfx (New Project then an immediate Save As kept the previous project's settings) | `TrackerPlus_mf7.ptf` | `1.2.0-mf7` | tested | `7149651eda407e0bbbe7d84ea947ae3d1ee0035989cb63d0c59bf6779080fe9f` |
 | the previous masterfx ("Gated" still a delay, before the lighter effects) | `TrackerPlus_mf5.ptf` | `1.2.0-mf5` | tested | `f7ec780456867eac7a8cb469d6bb929949ef7a334ccaeb1c0c645863c8657a5a` |
 | the previous masterfx (Save As dropped the settings) | `TrackerPlus_mf4.ptf` | `1.2.0-mf4` | tested | `0f3f9cd0c0c00ceed7651aacece96bd52dd084991e82f9e03d814630b898df1a` |
-| swing | `TrackerPlus_sw2.ptf` | `1.2.0-sw2` | tested | `05a3f65fb21381224f95f0e41f1782909b86fbe0628cbaa9263da18e4ac1a275` |
+| swing | `TrackerPlus_sw3.ptf` | `1.2.0-sw3` | tested | `1244a4e02dd10dd79369f5c30b0139cfb7e11cec8bd495354e4e24a9498491d6` |
+| the previous swing (New Project then an immediate Save As kept the previous project's settings) | `TrackerPlus_sw2.ptf` | `1.2.0-sw2` | tested | `05a3f65fb21381224f95f0e41f1782909b86fbe0628cbaa9263da18e4ac1a275` |
 | the previous swing (Save As dropped the settings) | `TrackerPlus_sw1.ptf` | `1.2.0-sw1` | tested | `510fe9ad078ed737f1cf3c63ea706a8a0e50f978c9d115bfbc773f4252a0e8d7` |
 | visualizer | `TrackerPlus_vz6.ptf` | `1.2.0-vz6` | tested | `38860b39e6ca58102b137dbd14690b3c134d6e09aadb779cb23b887b9ff2ec18` |
 | the previous visualizer (animated while hidden) | `TrackerPlus_vz5.ptf` | `1.2.0-vz5` | tested | `46970bb1689414fd711cadc6cfd149da458145aafcd9f6d274f10759dce9bdbd` |
@@ -105,7 +109,8 @@ must be byte-identical to these builds:
 | legato (MIDI and synth slots) | `TrackerPlus_lg2.ptf` | `1.2.0-lg2` | tested | `a7bab99688e6036e58b66bd8e60806170a045b10c57a218d6607ab9261f81a75` |
 | the previous legato (MIDI only) | `TrackerPlus_lg1.ptf` | `1.2.0-lg1` | tested | `f266ed1f131fc15edf12b224e081f16d9109938b004d8410e2cb0cdb380a68e6` |
 | copypattern | `TrackerPlus_cp4.ptf` | `1.2.0-cp4` | tested (also with humanize) | `7bfbc3eb09a7eb9d9dd4ccf3a8a52b1221743be7061397048f72bbc32908db01` |
-| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample + tracklen + songloop) | `TrackerPlus_MR8.ptf` | `1.2.0-MR8` | tested | `ce41aa1e9f8053b56855abe977d11aebca8122ae5d2597f10470ae8d8b34c574` |
+| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample + tracklen + songloop) | `TrackerPlus_MNP.ptf` | `1.2.0-MNP` | tested | `d4c22592906cf68d57e27f337e4c7dae082388eca148c34d0a67a76e0fe6c1ec` |
+| the previous all (the same with swing sw2, humanize hz9, interpolate ip7, masterfx mf7, slicethru bt5) | `TrackerPlus_MR8.ptf` | `1.2.0-MR8` | tested | `ce41aa1e9f8053b56855abe977d11aebca8122ae5d2597f10470ae8d8b34c574` |
 | the previous all (the same with resample rs4) | `TrackerPlus_SLA.ptf` | `1.2.0-SLA` | tested | `643755cc94ba6f904298a4adbfcadd739925db8c50e0c719d34c0b8d3f79ad1b` |
 | the previous all (without songloop) | `TrackerPlus_MVL.ptf` | `1.2.0-MVL` | tested | `babfded088d61424511b6a3edb0a384937f28458d0721f70c9e9c27670880ed3` |
 | the previous all (without tracklen, with condtrig ct1) | `TrackerPlus_MTZ.ptf` | `1.2.0-MTZ` | tested | `5393e48e8bd23b1504ff0a8b75ee29ed1962fee1f19acb4a30bc705d99d0e5ac` |
@@ -126,7 +131,8 @@ must be byte-identical to these builds:
 | the one before that (without legato and copypattern) | `TrackerPlus_MSY.ptf` | `1.2.0-MSY` | tested (made with the web patcher) | `f3fee2dd07e88d3b8810cd1d9b371e0636f7ad4920c777f021b28da2afd2fd99` |
 | the one before that (without synths, legato and copypattern) | `TrackerPlus_MCT.ptf` | `1.2.0-MCT` | tested | `6d818234483106b3b6444c1f180bf3f2b5cb93060d75762f752f252fce6b8437` |
 | the one before that (without condtrig, synths, legato and copypattern) | `TrackerPlus_MTE.ptf` | `1.2.0-MTE` | tested | `72f65355487ea13908a73cc891dacf3568e883ce2fc5388c3c169c888852d982` |
-| slicethru (Beat Slice Thru, with Loop) | `TrackerPlus_bt5.ptf` | `1.2.0-bt5` | tested | `5f50698d8545833a6c6a7cbba495de4004da2cd9250b36e7ad548f50dc4981e8` |
+| slicethru (Beat Slice Thru, with Loop) | `TrackerPlus_bt6.ptf` | `1.2.0-bt6` | tested | `e5c3a47b684a92b8277813444dda7a327ddc6886baa9a09ec7f54cc585dcf20c` |
+| the previous slicethru (New Project then an immediate Save As kept the previous project's flags) | `TrackerPlus_bt5.ptf` | `1.2.0-bt5` | tested | `5f50698d8545833a6c6a7cbba495de4004da2cd9250b36e7ad548f50dc4981e8` |
 | the previous slicethru (without Loop) | `TrackerPlus_bt4.ptf` | `1.2.0-bt4` | tested | `8aed6732660f5c8e8ab231b20fbfa58bfaf3b875896ce790b5b9ae2bd6552232` |
 | the previous slicethru (Save As dropped the setting) | `TrackerPlus_bt3.ptf` | `1.2.0-bt3` | tested | `76e0a004302bb9e57d214cb04cf0053e906f1b6de3141a4ad4809f440de2cb2e` |
 | resample (live resampling, Trk Audio and Trk Record) | `TrackerPlus_rs8.ptf` | `1.2.0-rs8` | tested | `b7f2056a34bc3b476ce433d7a7b8d91b76fca7c536dd944cffdc408537347653` |
@@ -167,7 +173,7 @@ Each patch can be installed on its own, or several can go into one firmware:
               "../condtrig/patch.json", "../synths/patch.json", "../legato/patch.json",
               "../copypattern/patch.json", "../slicethru/patch.json", "../resample/patch.json",
               "../tracklen/patch.json", "../songloop/patch.json"],
-  "version": "MR8",
+  "version": "MNP",
   ```
 
 To make your own mix, copy `patch/all/` to a new folder (for example `patch/mymix/`)
@@ -308,10 +314,10 @@ python -m pip install unicorn capstone numpy
 python tools/emu/check_version.py build/TrackerPlus_c11.ptf          # -> '1.2.0-c11'
 python tools/emu/test_colorsong.py build/TrackerPlus_c11.ptf
 python tools/emu/test_rescan.py build/TrackerPlus_c11.ptf "path/to/<project A>" "path/to/<project B>"
-python tools/emu/test_humanize.py build/TrackerPlus_hz9.ptf
-python tools/emu/test_interpolate.py build/TrackerPlus_ip7.ptf
-python tools/emu/test_masterfx.py build/TrackerPlus_mf7.ptf path/to/TrackerPlus_1.2.0.ptf out/fx_wav
-python tools/emu/test_swing.py build/TrackerPlus_sw2.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/emu/test_humanize.py build/TrackerPlus_h10.ptf
+python tools/emu/test_interpolate.py build/TrackerPlus_ip8.ptf
+python tools/emu/test_masterfx.py build/TrackerPlus_mf8.ptf path/to/TrackerPlus_1.2.0.ptf out/fx_wav
+python tools/emu/test_swing.py build/TrackerPlus_sw3.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_visualizer.py build/TrackerPlus_vz6.ptf
 python tools/emu/test_condtrig.py build/TrackerPlus_ct1.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_itcmtest.py build/TrackerPlus_it1.ptf path/to/TrackerPlus_1.2.0.ptf
@@ -319,7 +325,7 @@ python tools/emu/test_synths.py build/TrackerPlus_sy9.ptf path/to/TrackerPlus_1.
 python tools/emu/test_phase.py build/TrackerPlus_sy9.ptf path/to/TrackerPlus_1.2.0.ptf [--wav folder]
 python tools/emu/test_legato.py build/TrackerPlus_lg2.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_copypattern.py build/TrackerPlus_cp4.ptf
-python tools/emu/test_slicethru.py build/TrackerPlus_bt5.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/emu/test_slicethru.py build/TrackerPlus_bt6.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_resample.py build/TrackerPlus_rs8.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_songloop.py build/TrackerPlus_sl4.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_bundle_cost.py build/TrackerPlus_all.ptf path/to/TrackerPlus_1.2.0.ptf [--quick]

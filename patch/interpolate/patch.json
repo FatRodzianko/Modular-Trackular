@@ -49,6 +49,14 @@
   ],
   "words": [
     {
+      "at": "0x6004193C",
+      "old": "59ad0e60",
+      "to": "mt_ip_project_update",
+      "next": "mt_ip_next_project_update",
+      "thumb": true,
+      "note": "project screen vtable: update method 0x600ead59 -> mt_ip_project_update (a new project seen before its first save)"
+    },
+    {
       "at": "0x600403DC",
       "old": "991f0e60",
       "to": "mt_ip_pattern_update",
@@ -69,7 +77,7 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-ip7"
+      "note": "version text 1.2.0-ip8"
     }
   ]
 }

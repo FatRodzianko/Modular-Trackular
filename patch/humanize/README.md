@@ -6,8 +6,8 @@ timing (Micro-move, `m`) and level (Volume/Velocity, `V`), so programmed parts s
 less robotic. How much (separately for timing and level), and whether levels change
 at all, is set per project under
 Config → Project Settings → Humanize. Installed on its own, Config shows the firmware
-version as `1.2.0-hz9`. Together with all the other mods
-([`patch/all`](../all/patch.json)) it shows `1.2.0-MR8`.
+version as `1.2.0-h10`. Together with all the other mods
+([`patch/all`](../all/patch.json)) it shows `1.2.0-MNP`.
 
 **Status:** tested on hardware.
 
@@ -84,6 +84,7 @@ startup (`0x60118acc`); Project Settings is created with room for exactly its 10
 | `mt_hz_pattern_update` | Pattern screen vtable slot `0x600403dc` (update `0x600e1f98`) | Loads `humanize.bin` when the project changes, saves it after a change, then runs the stock update |
 | `mt_hz_config_update` | Config screen vtable slot `0x6003b5f8` (update `0x600c6474`) | The same, while Config is open |
 | `mt_hz_save_name` | `bl strncpy` at `0x60114eaa` in the save request `0x60114e34` (the new name; Save As only; chained) | Marks the Save As, so the settings go with the project to its new name and are written there |
+| `mt_hz_project_update` | project screen vtable slot `0x6004193c` (update `0x600ead58`; chained) | Notices a project change there too, so New Project then an immediate Save As saves the defaults, not the previous project's settings |
 
 The menu, update-method and Save As hooks are chained: each calls whatever the site pointed to
 before (the stock function, or another patch's hook, such as interpolate's), so other
@@ -102,14 +103,14 @@ generator, the one its random FX use.
 The settings take 32 bytes of RAM, which the patcher assigns (in the free OCRAM tail:
 `0x20205000` on its own, right after colorsong's table in `patch/all`). The menu
 items edit them directly; the stock number editor stores a list index, so 1–100 is
-kept as 0–99 and shown + 1. The settings file is read and written from the two
-screens' update methods, where the stock code does its own file work, in the same way
+kept as 0–99 and shown + 1. The settings file is read and written from the
+screens' update methods (Pattern, Config and the project screen), where the stock code does its own file work, in the same way
 colorsong saves its colors: one 16-byte file (`HHZ2`, the 5 values, 3 zero bytes, a
 checksum), written only when a value has changed, and only while the file manager is
 idle. A 12-byte `HHZ1` file, with a single range, is read too: both ranges get its
 value. The firmware's Save As copies only its own files, so the patch writes
 `humanize.bin` to the new folder itself; a new project ("New Project", no path) writes
-nothing until it has a folder. The menu nodes come from the
+nothing until it has a folder. New Project and Save As happen on the project screen, whose update checks for a project change too, so a new project saved at once gets the defaults, not the previous project's settings. The menu nodes come from the
 firmware's heap. The code is 2,488 bytes. The patcher places it after the stock image
 or after the patches listed before it, and moves its 23 code-address words and 11
 RAM-address words to match (`prebuilt/humanize.rel`). The settings are used by
@@ -164,7 +165,7 @@ It runs the stock code with the patch in place:
 - **Settings file:** the two update hooks with a fake SD card: defaults without a file,
   one write a while after a change, per-project values, a damaged file, a
   single-range `HHZ1` file; Save As and new projects through the firmware's own save
-  request (`tools/emu/project_save.py`).
+  request (`tools/emu/project_save.py`); New Project then an immediate Save As, with only the project screen's update in between, saves the defaults.
 
 The same test runs on `TrackerPlus_MTE.ptf`.
 
@@ -172,8 +173,8 @@ The same test runs on `TrackerPlus_MTE.ptf`.
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-hz9 Build 1504` (or
-`1.2.0-MR8 Build 1504` for all mods).
+Config → Firmware → the patched file. Config should show `1.2.0-h10 Build 1504` (or
+`1.2.0-MNP Build 1504` for all mods).
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Humanized patterns keep their
 FX and play the same on stock firmware. Stock firmware ignores the `humanize.bin`

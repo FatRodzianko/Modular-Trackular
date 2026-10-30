@@ -5,8 +5,8 @@ at the start of its step: on a MIDI track it sends a MIDI CC, on a synth track (
 it sets that Macro. So the value changes in jumps. With this patch it ramps smoothly
 to the next step on that track with the same letter. CC A 0 on step 1 and CC A 127 on
 step 17 becomes a 16-step sweep; the steps in between need no FX.
-Installed on its own, Config shows the firmware version as `1.2.0-ip7`. Together with
-all the other mods ([`patch/all`](../all/patch.json)) it shows `1.2.0-MR8`.
+Installed on its own, Config shows the firmware version as `1.2.0-ip8`. Together with
+all the other mods ([`patch/all`](../all/patch.json)) it shows `1.2.0-MNP`.
 
 **Status:** tested on hardware (in a firmware with colorsong and humanize), MIDI and synths.
 
@@ -79,6 +79,7 @@ it.
 | `mt_ip_pattern_update` | Pattern screen vtable slot `0x600403dc` | Loads `interpolate.bin` when the project changes, saves it after a change, then runs the next update method |
 | `mt_ip_config_update` | Config screen vtable slot `0x6003b5f8` | The same, while Config is open |
 | `mt_ip_save_name` | `bl strncpy` at `0x60114eaa` in the save request `0x60114e34` (the new name; Save As only; chained) | Marks the Save As, so the settings go with the project to its new name and are written there |
+| `mt_ip_project_update` | project screen vtable slot `0x6004193c` (update `0x600ead58`; chained) | Notices a project change there too, so New Project then an immediate Save As saves the defaults, not the previous project's settings |
 
 All seven hooks are chained: each calls whatever the site pointed to before (the stock
 function, or another patch's hook), so the patch combines with humanize, which hooks
@@ -103,11 +104,11 @@ and read positions before sending.
 The two settings are 2 bytes of the patch's 1,504 bytes of RAM, which the patcher
 assigns (the free OCRAM tail on its own; the DTCM gap above the heap in `patch/all`).
 They are saved as `interpolate.bin` (12 bytes: `HIP1`, MIDI CC, synths, 2 zero bytes, a
-checksum) in the project folder, read and written from the two screens' update methods,
+checksum) in the project folder, read and written from the screens' update methods (Pattern, Config and the project screen),
 like humanize's settings. A file without the synths byte set reads as synths Off. Save
 As keeps the settings for the project's new name and writes them to its new folder (the
 firmware copies only its own files), also on a new project's first save; a new project
-starts with both Off. The
+starts with both Off. New Project and Save As happen on the project screen, whose update checks for a project change too, so a new project saved at once gets the defaults, not the previous project's settings. The
 code is 3,041 bytes; the patcher places it after the stock image or after the patches
 listed before it, and moves its 20 code-address words and 8 RAM-address words to
 match (`prebuilt/interpolate.rel`). Firmware addresses are in
@@ -154,15 +155,15 @@ FX2 column, the per-block cap and the render loop), two letters on one track, a 
 FX2, sample instruments, a channel change,
 a program-change mapping, equal values, a muted track, stopping, the per-block caps,
 sharing between ramps, and the jack's send buffer. It also checks that each setting works on its own, counts the patch's instructions
-per block, and checks the FX Interpolation folder and its two items, and the settings file. The same test
+per block, and checks the FX Interpolation folder and its two items, and the settings file (Save As and new projects through the firmware's own save request; New Project then an immediate Save As, with only the project screen's update in between, saves the defaults). The same test
 runs on `TrackerPlus_MTE.ptf`.
 
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-ip7 Build 1504` (or
-`1.2.0-MR8 Build 1504` for all mods).
+Config → Firmware → the patched file. Config should show `1.2.0-ip8 Build 1504` (or
+`1.2.0-MNP Build 1504` for all mods).
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Patterns are unchanged (the
 patch writes nothing into them), so they play as before, with stepped CCs. Stock

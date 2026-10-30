@@ -40,7 +40,7 @@
 #include <stdint.h>
 
 #ifndef SWING_VERSION
-#define SWING_VERSION "sw2"
+#define SWING_VERSION "sw3"
 #endif
 
 /* ---- firmware 1.2.0 addresses (function pointers carry the Thumb bit) ----------- */
@@ -76,6 +76,7 @@ typedef void (*void_fn)(void);
 typedef void (*advance_fn)(void *seq, float seconds);
 typedef uint32_t (*advance_step_fn)(void *seq, uint32_t track);
 typedef void (*update_fn)(void *screen, void *a1, void *a2, void *a3);
+typedef uint32_t (*project_update_fn)(void *screen, void *a1, void *a2, void *a3);
 typedef void *(*folder_fn)(void *node, void *parent, const char *label, uint32_t capacity);
 typedef void *(*item_fn)(void *node, void *parent, const char *label, const char *help,
                          uint32_t type, const void *descriptor);
@@ -94,6 +95,7 @@ CHAIN_WORD(mt_sw_next_last_item);           /* last item: cfg_menu_item 0x601183
 CHAIN_WORD(mt_sw_next_pattern_update);      /* Pattern screen update 0x600e1f99 */
 CHAIN_WORD(mt_sw_next_config_update);       /* Config screen update 0x600c6475 */
 CHAIN_WORD(mt_sw_next_save_name);           /* strncpy 0x601673d7 (Save As: the new name) */
+CHAIN_WORD(mt_sw_next_project_update);      /* project screen update 0x600ead59 */
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
@@ -463,10 +465,18 @@ void mt_sw_config_update(void *screen, void *a1, void *a2, void *a3)
     ((update_fn)mt_sw_next_config_update)(screen, a1, a2, a3);
 }
 
+/* Project screen vtable slot 0x6004193c (update method 0x600ead59; chained): New
+ * Project, Open and Save As happen there, so a new project is seen before its first
+ * save even when no other hooked screen showed in between. */
+uint32_t mt_sw_project_update(void *screen, void *a1, void *a2, void *a3)
+{
+    settings_tick();
+    return ((project_update_fn)mt_sw_next_project_update)(screen, a1, a2, a3);
+}
+
 /* 0x60114eaa in the save request 0x60114e34: "bl strncpy(fm + 0x340, name, 0x21)",
  * run only for Save As, after the new path is copied. The next tick sees the new
- * session and keeps the settings for it. (Any screen: the request comes from the
- * project screen, whose update isn't hooked.) */
+ * session and keeps the settings for it. */
 char *mt_sw_save_name(char *dst, const char *src, uint32_t n)
 {
     char *r = ((strncpy_fn)mt_sw_next_save_name)(dst, src, n);

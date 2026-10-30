@@ -1128,6 +1128,8 @@ def file_checks(ptf: Path, stock: Path) -> None:
     fs.set_project(Path("."), "D", "Projects/User")
     tick()
     check(mask() == 1 << 1, "a project reopened, its name cleared and restored on the way: its own file's flags")
+    project_save.new_project_checks(check, m, fs, tick, "slicethru.bin", lambda: (mask(), loops()), (0, 0),
+                                    (1 << 1, 1 << 1), lambda v: bts2(*v), SAVE_DELAY)
 
     print("stock firmware with the same project")
     s = Rig(stock, False)

@@ -15,7 +15,7 @@ the Reverb to get the burst back.)
 
 The sends work as always, and the Master Reverb and Master Delay pages set the chosen
 effect. Each effect gives the knobs its own meaning, described below. Installed on its
-own, Config shows the firmware version as `1.2.0-mf7`.
+own, Config shows the firmware version as `1.2.0-mf8`.
 
 **Status:** tested on hardware, on its own and together with colorsong, humanize and
 interpolate (in both orders): every reverb and delay, switching, also during playback,
@@ -189,6 +189,7 @@ sends it on as the reverb return. The master delay is another (`0x20018fc0`): it
 | `mt_mfx_pattern_update` | Pattern screen vtable slot `0x600403dc` (chained) | Reads and writes `masterfx.bin`; the unit has booted, so the chosen effects may run |
 | `mt_mfx_config_update` | Config screen vtable slot `0x6003b5f8` (chained) | Reads and writes `masterfx.bin` |
 | `mt_mfx_save_name` | `bl strncpy` at `0x60114eaa` in the save request `0x60114e34` (the new name; Save As only; chained) | Marks the Save As, so the choices go with the project to its new name and are written there |
+| `mt_mfx_project_update` | project screen vtable slot `0x6004193c` (update `0x600ead58`; chained) | Notices a project change there too, so New Project then an immediate Save As saves the defaults, not the previous project's choices |
 
 - **Stock:** the hooks call the stock `update()` and nothing else, so with Stock chosen
   the reverb and the delay are exactly the stock ones (the emulator tests compare them
@@ -376,7 +377,7 @@ is (`mt_mfx_ram_map`), which the tests read. It checks:
 - **File:** `masterfx.bin` through the screens' update hooks with a fake SD card:
   per-project choices, one write a while after a change, damaged and unknown files, a
   project without a name; Save As and new projects through the firmware's own save
-  request (`tools/emu/project_save.py`).
+  request (`tools/emu/project_save.py`); New Project then an immediate Save As, with only the project screen's update in between, saves the defaults.
 - **Cost:** instructions per block for each effect, and for a switch's clearing blocks.
 
 With a folder given, it also writes the WAV files the samples here were cut from: the
@@ -410,7 +411,7 @@ python tools/emu/compare_masterfx.py build/TrackerPlus_a.ptf build/TrackerPlus_b
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-mf7 Build 1504`.
+Config → Firmware → the patched file. Config should show `1.2.0-mf8 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Projects play with the stock
 effects again; their `masterfx.bin` files stay in their folders and do nothing in stock

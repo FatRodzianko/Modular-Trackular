@@ -8,7 +8,7 @@
               "../condtrig/patch.json", "../synths/patch.json", "../legato/patch.json",
               "../copypattern/patch.json", "../slicethru/patch.json", "../resample/patch.json",
               "../tracklen/patch.json", "../songloop/patch.json"],
-  "version": "MR8",
+  "version": "MNP",
   "version_word": {
     "at": "0x600CBF9C",
     "old": "34b80360",

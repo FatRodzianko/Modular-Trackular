@@ -6,13 +6,14 @@ sample exactly as in Beat Slice (Slice, Adjust, Add, Remove, Auto, Evenly), and 
 pads and notes pick slices the same way. The difference is playback: a note starts at
 its slice and plays on to the end of the sample, instead of stopping where the next
 slice starts. With **Loop** on, the note then loops the whole sample until something
-stops it. Installed on its own, Config shows the firmware version as `1.2.0-bt5`.
+stops it. Installed on its own, Config shows the firmware version as `1.2.0-bt6`.
 [docs/BEAT_SLICE_THROUGH_PLAN.md](../../docs/BEAT_SLICE_THROUGH_PLAN.md) and
 [docs/SLICETHRU_LOOP_PLAN.md](../../docs/SLICETHRU_LOOP_PLAN.md) have the
 investigations and the plans.
 
-**Status:** tested on hardware, on its own (`1.2.0-bt5`) and in `patch/all`
-(`1.2.0-MT5`), Loop included, as are Save As and a new project's first save. A project
+**Status:** tested on hardware, on its own (`1.2.0-bt6`) and in `patch/all`, Loop
+included, as are Save As, a new project's first save, and New Project then an
+immediate Save As. A project
 saved with Beat Slice Thru instruments plays them as Beat Slice in stock firmware, and
 as Beat Slice Thru again back on this firmware.
 
@@ -111,6 +112,7 @@ frames to play, the reverse start, and the copy a stereo sample's right voice ta
 | `mt_bt_playback_update` | Sample Playback screen vtable slot `0x60042698` (update `0x600f6070`) | `slicethru.bin` load and save; the list redrawn after a load |
 | `mt_bt_pattern_update` | Pattern screen vtable slot `0x600403dc` (update `0x600e1f98`) | `slicethru.bin` load and save |
 | `mt_bt_save_name` | `bl strncpy` at `0x60114eaa` in the save request `0x60114e34` (the new name; Save As only) | Marks the Save As, so the flags go with the project to its new name |
+| `mt_bt_project_update` | project screen vtable slot `0x6004193c` (update `0x600ead58`; chained) | Notices a project change there too, so New Project then an immediate Save As saves the defaults, not the previous project's flags |
 | `mt_bt_wrap` | the 4 bytes at `0x60035522` in the forward 1-shot render `0x600353fc`: two instructions, not a BL (`"replaces": "insns"`), run only when a voice reaches its end | A Beat Slice Thru note with Loop on: its position goes on from the sample's first frame. Otherwise the two stock instructions (the stop) |
 | `mt_bt_page2_label` | `bl disp_ctrl_set_text` at `0x600f820a` (the 4th button on page 2 of Slice and Beat Slice) | On a Beat Slice Thru instrument: "Loop", and "On" or "Off" under it |
 | `mt_bt_button4` | the 4th button's callback word `0x600f5158` (`0x600f4b55`) | Page 2 of a Beat Slice Thru instrument, no pop-up: a press toggles Loop and relabels the button; then the stock callback (which does nothing there) |
@@ -141,13 +143,13 @@ second patch there.
 - **The file** is 24 bytes: `BTS2`, the Thru and Loop masks (48 bits each, one per
   instrument), and a checksum. A 16-byte `BTS1` file from bt4 and older still loads,
   with every Loop off; those builds ignore a `BTS2` file (no Beat Slice Thru there). A
-  Loop bit without its Thru bit is ignored. It is read and written only from the two screens' update methods, where
+  Loop bit without its Thru bit is ignored. It is read and written only from the three screens' update methods, where
   the stock code does its own file work, and only while the firmware's file manager
   is idle. On another project the flags are cleared at once, then read from that
   project's file. A Save As keeps them for the project's new name and writes them
   there; the save request's name copy (`0x60114eaa`, Save As only) marks it, from any
   screen. A new project ("New Project" with no path) has no folder: nothing is
-  written until its first save. A
+  written until its first save. New Project and Save As happen on the project screen, whose update checks for a project change too, so a new project saved at once gets the defaults, not the previous project's flags. A
   flag whose instrument isn't an active Beat Slice instrument any more is cleared
   (its Loop too), only while the file manager is idle (never in the middle of a
   project load).
@@ -168,7 +170,7 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/slicethru/patch.json build/TrackerPlus_bt5.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/slicethru/patch.json build/TrackerPlus_bt6.ptf
 ```
 
 To combine it with other mods, list it in a bundle spec (see "Choosing patches" in
@@ -188,7 +190,7 @@ patch/slicethru/build.sh
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_slicethru.py build/TrackerPlus_bt5.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/emu/test_slicethru.py build/TrackerPlus_bt6.ptf path/to/TrackerPlus_1.2.0.ptf
 ```
 
 It runs the stock code with the patch in place, next to stock firmware:
@@ -220,13 +222,14 @@ It runs the stock code with the patch in place, next to stock firmware:
   flags cleared; a new project as the firmware makes it writes nothing; Save As through
   the firmware's own save request (a new project's first save, and from a saved
   project) keeps the flags and writes them to the new folder; a plain save; a project
-  opened afterwards gets its own file.
+  opened afterwards gets its own file; New Project then an immediate Save As, with only the
+  project screen's update in between, saves no flags.
 
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-bt5 Build 1504`.
+Config → Firmware → the patched file. Config should show `1.2.0-bt6 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Beat Slice Thru instruments
 play Beat Slice in stock firmware, with their slices intact; `slicethru.bin` files stay

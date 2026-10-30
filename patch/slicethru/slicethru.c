@@ -57,7 +57,7 @@
 #include <stdint.h>
 
 #ifndef SLICETHRU_VERSION
-#define SLICETHRU_VERSION "bt5"
+#define SLICETHRU_VERSION "bt6"
 #endif
 
 /* ---- firmware 1.2.0 ------------------------------------------------------------------ */
@@ -116,6 +116,7 @@ typedef void (*set_data_fn)(void *controls, uint32_t id, void *data);
 typedef void (*callback_fn)(uint32_t r0, uint32_t r1, uint32_t r2, uint32_t r3);
 typedef void (*change_fn)(int32_t step);
 typedef void (*update_fn)(void *screen, void *a1, void *a2, void *a3);
+typedef uint32_t (*project_update_fn)(void *screen, void *a1, void *a2, void *a3);
 typedef void (*show_fn)(void *screen);
 typedef int (*snprintf_fn)(char *buf, uint32_t size, const char *fmt, ...);
 typedef char *(*strncpy_fn)(char *dst, const char *src, uint32_t n);
@@ -135,6 +136,7 @@ CHAIN_WORD(mt_bt_next_button_minus);        /* mode-change handler 0x600f5b99 (7
 CHAIN_WORD(mt_bt_next_playback_update);     /* Sample Playback screen update 0x600f6071 */
 CHAIN_WORD(mt_bt_next_pattern_update);      /* Pattern screen update 0x600e1f99 */
 CHAIN_WORD(mt_bt_next_save_name);           /* strncpy 0x601673d7 (Save As: the new name) */
+CHAIN_WORD(mt_bt_next_project_update);      /* project screen update 0x600ead59 */
 CHAIN_WORD(mt_bt_next_page2_label);         /* disp_ctrl_set_text 0x60101d5d (4th button, page 2) */
 CHAIN_WORD(mt_bt_next_button4);             /* the 4th button's callback 0x600f4b55 */
 
@@ -654,10 +656,18 @@ void mt_bt_pattern_update(void *screen, void *a1, void *a2, void *a3)
     ((update_fn)mt_bt_next_pattern_update)(screen, a1, a2, a3);
 }
 
+/* Project screen vtable slot 0x6004193c (update method 0x600ead59; chained): New
+ * Project, Open and Save As happen there, so a new project is seen before its first
+ * save even when no other hooked screen showed in between. */
+uint32_t mt_bt_project_update(void *screen, void *a1, void *a2, void *a3)
+{
+    settings_tick();
+    return ((project_update_fn)mt_bt_next_project_update)(screen, a1, a2, a3);
+}
+
 /* 0x60114eaa in the save request 0x60114e34: "bl strncpy(fm + 0x340, name, 0x21)",
  * run only for Save As, after the new path is copied. The next tick sees the new
- * session and keeps the flags for it. (Any screen: the request comes from the project
- * screen, whose update isn't hooked.) */
+ * session and keeps the flags for it. */
 char *mt_bt_save_name(char *dst, const char *src, uint32_t n)
 {
     char *r = ((strncpy_fn)mt_bt_next_save_name)(dst, src, n);

@@ -40,7 +40,7 @@ from fakefs import PROJECT_NAME, FakeFS  # noqa: E402
 from layout import patch_code, patch_ram  # noqa: E402
 from machine import Machine  # noqa: E402
 from patch_ptf import bl_target  # noqa: E402
-from project_save import save_as_checks  # noqa: E402
+from project_save import new_project_checks, save_as_checks  # noqa: E402
 import seq_timing as st  # noqa: E402
 
 SEQ = st.SEQ
@@ -325,6 +325,7 @@ def file_checks(ptf: Path) -> None:
 
     save_as_checks(check, m, fs, tick, "swing.bin", values, put, (0, 50), (1, 70), (1, 30),
                    lambda v: hsw1(*v), SAVE_DELAY)
+    new_project_checks(check, m, fs, tick, "swing.bin", values, (0, 50), (1, 70), lambda v: hsw1(*v), SAVE_DELAY)
 
 
 def main() -> int:
