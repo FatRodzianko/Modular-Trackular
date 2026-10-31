@@ -23,7 +23,11 @@ docs/LIVE_RESAMPLING_PLAN.md and docs/RESAMPLE_SOURCE_PLAN.md have the design. S
 3. The patch's RAM full of garbage: it initializes itself.
 4. A recording: the loaded samples' bytes stay as they were and the recording holds
    the input. In stock firmware the same recording writes over them (the reason the
-   recorder blocks the sample instruments).
+   recorder blocks the sample instruments). A take that fills its space (10 s left, and
+   with Record Tracker, Monitor off and on) stops by itself at its end: nothing after
+   the space is written, the loaded samples are kept, and the update then stops the
+   mix and the pattern. The write position is moved near the end first, so the run is
+   20 blocks.
 5. The patch writes nothing outside its RAM and the stack; cost of the hook.
 6. Play during a recording (Monitor off, the input silent): samples, synths and MIDI
    play. The output is bit-identical to stock firmware given the same steps by hand
@@ -343,6 +347,67 @@ def recording_checks(p: Rig, s: Rig) -> None:
           "it holds the input (left 1000, right -1000)")
     kept_s, n_s, _, _ = record(s)
     check(not kept_s and n_s == n, f"stock: the same recording ({n_s} frames) writes over the loaded samples")
+
+
+# A take that fills its space. The recorder's write position (REC + 0x30, frames) is
+# moved to 20 blocks before the end, so the run needs 20 blocks, not the ~3,500 of a
+# 10 s take; stock's own check (0x6010c5b8) stops it once fewer than 128 frames are left.
+
+REC_POS = REC + 0x30
+GUARD = bytes((k * 13 + 5) & 0xFF for k in range(0x10000))
+
+
+def fill_to_end(r: Rig, step) -> tuple[int, int, bool]:
+    """Run blocks from 20 before the end of the take's space; (blocks until it stopped,
+    its length, the 64 KB after the space unchanged also 5 blocks later)."""
+    m = r.m
+    frames = m.r32(REC_FRAMES)
+    end = m.call(REC_CHANNEL, REC, 1) + 2 * frames
+    m.write(end, GUARD)
+    m.w32(REC_POS, frames - 20 * 128)
+    n = 0
+    while m.uc.mem_read(REC + 0x2C, 1)[0] and n < 40:
+        step()
+        n += 1
+    length = m.call(REC_LENGTH)
+    for _ in range(5):
+        step()
+    return n, length, m.call(REC_LENGTH) == length and bytes(m.uc.mem_read(end, len(GUARD))) == GUARD
+
+
+def full_take_checks(ptf: Path, stock: Path) -> None:
+    print("a take that fills its space")
+    for label, path, patched, used in (("10 s left", ptf, True, BANK_SIZE - 2 * MIN_BYTES_PER_CH - 0x1000),
+                                       ("stock, nothing loaded", stock, False, 0)):
+        r = Rig(path, patched)
+        m = r.m
+        tail = bytes((k * 7 + 3) & 0xFF for k in range(0x10000))
+        if used:
+            m.write(BANK + used - len(tail), tail)          # the last 64 KB of the loaded samples
+        _, _, frames = r.start(used, 0)
+        moved = r.moved() if patched else 0
+        n, length, guard = fill_to_end(r, r.block)
+        kept = not used or bytes(m.uc.mem_read(BANK + used - len(tail), len(tail))) == tail
+        check(n == 21 and length == frames - 128 and guard and kept and moved == patched,
+              f"{label}: the recording stops by itself {n} blocks later at {length} of {frames} frames; "
+              f"nothing after its space written, also 5 blocks later; the loaded samples kept")
+        r.stop()
+    for monitor in (False, True):
+        r = Session(ptf, True, monitor=monitor, inp=(1000, -1000), record=True)
+        m = r.m
+        r.rec_press(shift=1)
+        frames = m.r32(REC_FRAMES)
+        loaded = bytes(m.uc.mem_read(BANK, PLAY_USED))
+        mixing = m.uc.mem_read(r.ram + RS_MIX, 1)[0]
+        n, length, guard = fill_to_end(r, lambda: r.run(1))
+        kept = bytes(m.uc.mem_read(BANK, PLAY_USED)) == loaded
+        r.update()
+        check(mixing == 1 and n == 21 and length == frames - 128 and guard and kept
+              and m.uc.mem_read(r.ram + RS_MIX, 1)[0] == 0 and queue_state(m) == [(0, 0), (0, 0)]
+              and not r.playing() and not r.opened(),
+              f"Record Tracker, Monitor {'on' if monitor else 'off'}: the recording stops by itself at {length} of "
+              f"{frames} frames, nothing after its space written, the loaded samples kept; the update then stops "
+              f"the mix and the pattern and closes the gates")
 
 
 # ---- 5. writes and cost -------------------------------------------------------------
@@ -1456,6 +1521,7 @@ def main() -> int:
     recording_checks(p, s)
     write_checks(p)
     del p, s
+    full_take_checks(ptf, stock)
     engine_on_checks(ptf, stock)
     input_checks(ptf, stock)
     stock_cases(ptf, stock)
