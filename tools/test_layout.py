@@ -30,6 +30,8 @@ Builds, from the repository's patch specs (local builds if present, else prebuil
     patch/all has it last),
   - songloop alone, after patch/all's patches, and first with them after it in reverse
     order (ITCM hooks on the two preload calls; no site shared with patch/all's patches),
+  - chords alone, after patch/all's patches, and first with them after it in reverse
+    order (it chains legato's ITCM site and three of condtrig's sites),
   - tracklen (ITCM hooks, 4 KB of RAM) alone, after patch/all's patches, and first with
     them after it in reverse order; and with page 3's other buttons (humanize,
     copypattern, both) in both orders, and with a copy of it that hooks only its two
@@ -383,6 +385,15 @@ def main() -> int:
                       version="SLR")
     all_sl_rev_spec = outdir / "all-songloop-reversed.json"
     all_sl_rev_spec.write_text(json.dumps(all_sl_rev, indent=2))
+    ch = ROOT / "patch" / "chords" / "patch.json"
+    all_ch_list = all_sl_list + [ch]
+    all_ch = dict(rev, name="all-chords", include=[str(x) for x in all_ch_list], version="CHA")
+    all_ch_spec = outdir / "all-chords.json"
+    all_ch_spec.write_text(json.dumps(all_ch, indent=2))
+    all_ch_rev = dict(rev, name="all-chords-reversed", include=[str(x) for x in all_ch_list[::-1]],
+                      version="CHR")
+    all_ch_rev_spec = outdir / "all-chords-reversed.json"
+    all_ch_rev_spec.write_text(json.dumps(all_ch_rev, indent=2))
     all_pm_list = all_rs_list + [pm]
     all_pm = dict(rev, name="all-tracklen", include=[str(x) for x in all_pm_list], version="PMA")
     all_pm_spec = outdir / "all-tracklen.json"
@@ -498,6 +509,11 @@ def main() -> int:
             ("songloop alone (ITCM hooks)", sl, [sl], None, None),
             ("patch/all's patches, then songloop", all_sl_spec, all_sl_list, "SLA", None),
             ("songloop, then patch/all's patches reversed", all_sl_rev_spec, all_sl_list[::-1], "SLR", None),
+            ("chords alone (ITCM hooks)", ch, [ch], None, None),
+            ("patch/all's patches, then chords (after legato and condtrig on their sites)", all_ch_spec,
+             all_ch_list, "CHA", None),
+            ("chords, then patch/all's patches reversed (before them)", all_ch_rev_spec, all_ch_list[::-1], "CHR",
+             None),
             *[(f"page 3's buttons: {name}", spec_path, specs, version, None)
               for version, (name, spec_path, specs) in pm_page3.items()],
             ("chained tail calls: tracklen, then a copy on its two b.w sites", pm_tail_chain,

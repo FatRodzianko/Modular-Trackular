@@ -139,6 +139,8 @@ must be byte-identical to these builds:
 | the previous resample (Play and Shift+Rec always on, no Record Tracker) | `TrackerPlus_rs4.ptf` | `1.2.0-rs4` | tested | `5cf21721e8c1f9339304b24adfcc355a07f37dcaff9697a5b97ab41d50352925` |
 | tracklen (Variable Track Length) | `TrackerPlus_tl7.ptf` | `1.2.0-tl7` | in patch/all (`1.2.0-MVL`), not on its own | `d4a19b7aad99f388a8448791957116746b9a8f9e0924b8efb86be8224077f2fd` |
 | songloop (Song Loop) | `TrackerPlus_sl4.ptf` | `1.2.0-sl4` | tested (also in patch/all, `1.2.0-SLA`) | `403c76593d2e5f096893ddb2771dd7c90536b1dedc7f64352bf5c154c24ca935` |
+| chords (more MIDI chords: inversions, with the Arp, on its own) | `TrackerPlus_ch2.ptf` | `1.2.0-ch2` | tested; not in patch/all or the web patcher | `f850c3621d30061726963d4b68f3fc06916d9a0121d1b87b5a11025d4670e03d` |
+| the previous chords (without Arp support: the Arp plays new chords chromatic) | `TrackerPlus_ch1.ptf` | `1.2.0-ch1` | tested | `d92dc8da22287623d9cac9e4f6581208b698780ee0317c4dc5aaece5c4fa83a7` |
 | ramdiag (diagnostic, on its own) | `TrackerPlus_RD2.ptf` | `1.2.0-RD2` | tested | `84a33f1858bdd3c908eeea62227d84f68fe450dc4e3e21fb21077292fef1b82e` |
 | versiontest | `TrackerPlus_MT0.ptf` | `1.2.0-MT0` | tested | `f45510a17f8b9b120c0e699f239a737a145c3d57bbaf596046fb7a8bc643ffff` |
 | itcmtest (ITCM hooks test, on its own) | `TrackerPlus_it1.ptf` | `1.2.0-it1` | tested | `701b35dfadb4626ebe19e94ccb3af47aff9e4d604684d59b2e8b9cbf5da18d7c` |
@@ -161,7 +163,8 @@ Each patch can be installed on its own, or several can go into one firmware:
   `patch/copypattern/patch.json` the Copy to New button,
   `patch/slicethru/patch.json` the Beat Slice Thru play mode,
   `patch/resample/patch.json` live resampling, `patch/tracklen/patch.json` Variable
-  Track Length, `patch/songloop/patch.json` Song Loop.
+  Track Length, `patch/songloop/patch.json` Song Loop, `patch/chords/patch.json` more
+  MIDI chords (on its own only, for now).
 - **Several patches:** use a bundle spec, which lists the patches to combine.
   `patch/all/patch.json` is the bundle that ships (all fourteen: colorsong, Humanize,
   interpolate, masterfx, swing, the visualizer, condtrig, synths, legato, copypattern,
@@ -328,10 +331,12 @@ python tools/emu/test_copypattern.py build/TrackerPlus_cp4.ptf
 python tools/emu/test_slicethru.py build/TrackerPlus_bt6.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_resample.py build/TrackerPlus_rs8.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_songloop.py build/TrackerPlus_sl4.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/emu/test_chords.py build/TrackerPlus_ch2.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_bundle_cost.py build/TrackerPlus_all.ptf path/to/TrackerPlus_1.2.0.ptf [--quick]
 ```
 
-`tools/run_tests.py` runs the tests of the mods the web patcher offers.
+`tools/run_tests.py` runs the tests of the mods the web patcher offers, and chords' (not
+in the web patcher yet) on its own.
 
 
 Each test works on any firmware that contains its patch, so for a bundle run every
@@ -345,7 +350,8 @@ other order, those three with masterfx in both orders, the six before condtrig i
 copypattern alone, with humanize in both orders and with all nine in both orders,
 slicethru alone and first with the others after it in reverse order,
 resample alone and first with the others after it in reverse order,
-songloop alone, after the others and first with them after it in reverse order, and two
+songloop alone, after the others and first with them after it in reverse order,
+chords alone, after the others and first with them after it in reverse order, and two
 patches on the same chained sites, and
 checks that each patch's code and RAM sit where they
 should (RAM in a region the patch may use, no two blocks overlapping), that exactly the

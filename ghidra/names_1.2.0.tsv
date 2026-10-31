@@ -465,3 +465,4 @@
 600a3e90	usbaudio_ring_end_q	bracket vt +8: + 0x80 frames, + 0xe00 bytes mod 0x2a00, USB IRQ 113 masked
 600a4738	usb_irq_disable_q	NVIC ICER3 bit 17 (IRQ 113, USB_OTG1), dsb, isb
 600a4724	usb_irq_enable_q	IRQ 113 priority 0, ISER3 bit 17
+00000b74	arp_next_note_q	(seq, state = track block + 0x68): next arp note; chord value at +0x44 (track +0xac), table literal ITCM 0xcc0, 1..29 masks else 0xffff

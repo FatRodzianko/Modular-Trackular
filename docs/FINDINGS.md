@@ -3423,3 +3423,75 @@ section 14. What they say about the firmware:
   emulated instructions.
 - **The stock reverb at Size 100 with the stock delay at Time 3500 ms makes one-sample
   spikes** in both outputs, about one per second, at 46 % load with no late blocks.
+
+## 32. The MIDI Chord FX and the Arp's chord table (emulator and static)
+
+Found while planning more chords (inversions); the plan is
+[CHORDS_PLAN.md](CHORDS_PLAN.md). Scratch proofs ran on the stock image.
+
+- **Value.** FX type 14 stores 0–29 (`fx_max` 29, min 0) in the step's FX value byte. It
+  is an index, not encoded digits.
+- **Table.** 30 `int16` interval bitmasks at `0x60039bfc`: bit i = also send root + i,
+  for i = 0..14. Every entry has bit 0; entry 0 is the root alone (shown `---`).
+  Contents: CHORDS_PLAN.md section 2.1 (the manual's section 7.39 lists the same 29).
+- **Labels.** A separate table of thirty 4-byte strings at `0x60039d90` (`---`, ` 27` …
+  `57B`), not computed from the masks. `fx_value_text` (`0x600afb48`) chord case
+  `0x600afc56` indexes it with the value **unbounded**. Values ≥ 30 read the following
+  tables (LFO rates `128`, ` 96` …, then other strings, control bytes and blanks), always
+  within the 4-byte buffer. The stock Pattern grid draws all of 30–255 without a fault
+  (emulator, `test_tracklen.GridRig`).
+- **Consumers of the table** (literals `0x60039bfc` at `0x600ac5a0`, ITCM `0x1494` and
+  ITCM `0xcc0`):
+  - `seq_trigger_chord_q` (ITCM `0x138c`), reached only by the `b.w` at ITCM `0x14d4`
+    in `seq_trigger_note`. `seq_trigger_note` has exactly three callers: ITCM `0x22f8`,
+    `0x285c`, `0x2fd8`.
+  - `seq_chord_note_off_q` (`0x600ac508`), reached only through the ITCM veneer
+    `0x1f698`, whose target word is in flash at `0x601acd80`. Every note-off
+    (`seq_note_off_q` ITCM `0x11a4`, callers `0x20ca`, `0x24da`, `0x296e`, `0x33f2`,
+    `0x1242`, and stop through `0x600ac5a8`) reaches it for chord records.
+  - `arp_next_note_q` (ITCM `0xb74`), callers ITCM `0x2428` and `0x32ce`.
+  - Guards: trigger and note-off `cmp #0x1d` / `bhi` → mask 1 (the root alone) for
+    values ≥ 30. Arp `subs #1; cmp #0x1c` → values 1–29 use the table, 0 and ≥ 30 use
+    `0xffff` (chromatic).
+- **Chord rule** (both trigger and note-off): instruments 48–66 only. FX1 if its type is
+  14, else FX2. Not when the other column is Arp (21): then the note is plain (the
+  arp's notes). Sample instruments (≤ 47) get one voice note-on with the root; no MIDI.
+- **Sending:** ascending bit order, one note-on each at the same tick, skipping root + i >
+  127 (before the MIDI-octave shift). Same velocity as a plain note (`V` × 127 / 100 or
+  the instrument default, plus the performance offset `+0xb4`). Note-offs mirror it from
+  the stored last record. Synths get one host note-on per note.
+- **Decomposition equivalence (emulator).** A stock chord's messages are identical to one
+  `seq_trigger_note` (or `seq_note_off_q`) call per chord note on a copy of the record
+  with the note raised by i and the chord value 0 (with root + i > 127 skipped). Checked
+  on 6,000 random cases: all 29 chords, channels and synths, `V` −1/0/30/100/120, the
+  performance offset, MIDI octave 0–4, FX1/FX2, roots up to 127. 37,496 messages, 0
+  mismatches. Dropping one interval fails.
+- **Arp.** At its start (ITCM `0x3270`–`0x327e`) the arp copies the other column's chord
+  value into track `+0xac`. `arp_next_note_q(seq, r1)` reads it at `r1+0x44` (`r1+0x45`
+  = root, `+0x3e` direction, `+0x46` position) and walks the mask mod 12, so `5C`
+  arpeggiates C, F. Pointing the literal at ITCM `0xcc0` at a 2-entry table and setting
+  the value to 1 for the length of one call makes any mask arpeggiate like the stock
+  entry with that mask: 29 masks × Arp values 1–33, Random included, 957 cases, 0
+  mismatches.
+  At both callers `r1` (the arp state) is the track + `0x68`, with the track in `r6`.
+  The literal at `0xcc0` is read only by `arp_next_note_q`; the table's other reader,
+  ITCM `0x13b2`, has its own literal. The chords patch (`ch2`) swaps it this way.
+- **Other writers stay in 0–29:**
+  - the encoder (`0x600af1b2` max);
+  - pads, Fill and random fill (`fx_min`/`fx_max` through their own veneers);
+  - Random FX value (16): clamped by ITCM `fx_max` (RFX 255 on chord 5 gave 0–29 only).
+- **No stock inversion feature.** All entries build upward from the step's note. Some
+  4-note entries are inversions of other chords (`479` = Am7/C, `379` = Am7♭5/C, `378`
+  = A♭maj7/C, `489` = AmMaj7/C), and ` 27` / ` 57` are inversions of each other. None of
+  the four major/minor triad inversions exists.
+- **The three `seq_trigger_note` callers** (found while building `patch/chords`):
+  - `0x2fd8`: the step's note in `seq_process_track`, also when Micro-move or the
+    instrument's MIDI delay moves it to a later tick;
+  - `0x285c`: Roll's repeated notes after the first (Roll 8 on one step: 15 calls);
+  - `0x22f8`: performance mode's step repeat. When track `+0xb8` (signed) is nonzero,
+    `(|value| & 15) - 1` indexes a table of tick periods at `0x600387dc`. Every period
+    (track `+0x90` mod period = 1) the last record (`+0x68`) is copied to the work
+    record (`+0x6f`), with the performance transpose (`+0xb0`/`+0xb1`) added for MIDI
+    instruments, and played again. Negative values in the emulator played nothing extra.
+- **`seq_chord_note_off_q`** (`0x600ac508`) reads only its third argument (the record);
+  `r0`, `r1` and `r3` (seq, track, mode) pass through `seq_note_off_q` unused.

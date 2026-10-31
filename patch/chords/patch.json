@@ -1,0 +1,89 @@
+{
+  "name": "chords",
+  "description": "More MIDI chords: Chord FX values past the stock 29 hold inversions of the major and minor triads and of the 7th chords, then every other chord within an octave",
+  "firmware": "TrackerPlus 1.2.0",
+  "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
+  "bin": "build/chords.bin",
+  "sym": "build/chords.sym",
+  "rel": "build/chords.rel",
+  "prebuilt_bin": "prebuilt/chords.bin",
+  "prebuilt_sym": "prebuilt/chords.sym",
+  "prebuilt_rel": "prebuilt/chords.rel",
+  "branches": [
+    {
+      "at": "0x600AF1B2",
+      "old": "00f089f8",
+      "to": "mt_ch_cell_max",
+      "next": "mt_ch_next_cell_max",
+      "note": "seq_change_selection_fx_value (encoder edit): bl fx_max (veneer 0x600af2c8); Chord goes up to 236, the library's last"
+    },
+    {
+      "at": "0x600DF748",
+      "old": "d0f73efb",
+      "to": "mt_ch_fx1_text",
+      "next": "mt_ch_next_fx1_text",
+      "note": "pattern grid rows: bl fx_value_text_cell 0x600afdc8 for FX1; a library chord's intervals"
+    },
+    {
+      "at": "0x600DF77C",
+      "old": "d0f724fb",
+      "to": "mt_ch_fx2_text",
+      "next": "mt_ch_next_fx2_text",
+      "note": "pattern grid rows: bl fx_value_text_cell 0x600afdc8 for FX2; a library chord's intervals"
+    }
+  ],
+  "itcm_branches": [
+    {
+      "at": "0x22F8",
+      "old": "fff7d0f8",
+      "to": "mt_ch_trigger_a",
+      "next": "mt_ch_next_trigger_a",
+      "note": "seq_process_track: bl seq_trigger_note 0x149c (performance mode's step repeat) -> mt_ch_trigger_a(seq, t, rec): a library chord as one stock note per chord note"
+    },
+    {
+      "at": "0x285C",
+      "old": "fef71efe",
+      "to": "mt_ch_trigger_b",
+      "next": "mt_ch_next_trigger_b",
+      "note": "seq_process_track: bl seq_trigger_note 0x149c (Roll's repeats) -> mt_ch_trigger_b(seq, t, rec): the same"
+    },
+    {
+      "at": "0x2FD8",
+      "old": "fef760fa",
+      "to": "mt_ch_trigger_c",
+      "next": "mt_ch_next_trigger_c",
+      "note": "seq_process_track: bl seq_trigger_note 0x149c (the step's note; legato hooks it too) -> mt_ch_trigger_c(seq, t, rec): the same"
+    },
+    {
+      "at": "0x2428",
+      "old": "fef7a4fb",
+      "to": "mt_ch_arp_a",
+      "next": "mt_ch_next_arp_a",
+      "note": "seq_process_track: bl arp_next_note_q 0xb74 (the arp's next note) -> mt_ch_arp_a(seq, state): a library chord's mask as stock chord 1, through the table literal at ITCM 0xcc0"
+    },
+    {
+      "at": "0x32CE",
+      "old": "fdf751fc",
+      "to": "mt_ch_arp_b",
+      "next": "mt_ch_next_arp_b",
+      "note": "seq_process_track: bl arp_next_note_q 0xb74 (the arp's first note) -> mt_ch_arp_b(seq, state): the same"
+    }
+  ],
+  "words": [
+    {
+      "at": "0x601ACD80",
+      "old": "09c50a60",
+      "to": "mt_ch_note_off",
+      "next": "mt_ch_next_note_off",
+      "thumb": true,
+      "note": "ITCM image (copied to the ITCM veneer 0x1f698's literal at boot): seq_note_off_q's jump to seq_chord_note_off_q 0x600ac509 -> mt_ch_note_off (a library chord's offs, one per note)"
+    },
+    {
+      "at": "0x600CBF9C",
+      "old": "34b80360",
+      "to": "mt_version_fmt",
+      "version": true,
+      "note": "version text 1.2.0-ch2"
+    }
+  ]
+}

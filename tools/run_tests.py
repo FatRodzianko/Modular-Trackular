@@ -8,7 +8,8 @@ Tiers (times with an empty cache on an 8-core PC; with the cache, only what chan
   quick    (about 2 min) tools/test_layout.py, plus every patch's emulator test on each patch alone
            and on patch/all (masterfx and synths in their --quick mode), and on the
            diagnostic builds (DIAGNOSTICS: headroom alone and listed last in patch/all
-           and in patch/all + tracklen); test_bundle_cost.py's sequencer side on each of
+           and in patch/all + tracklen), and on the mods not in the web patcher yet
+           (NOT_IN_WEB: chords); test_bundle_cost.py's sequencer side on each of
            them. For a change to one patch, while working on it.
   release  (about 40 min) quick, plus tools/test_web_patcher.py (every web patcher selection
            byte-identical to patch_ptf.py's, and its layout checks), plus every patch's
@@ -96,7 +97,7 @@ CACHE = ROOT / "build" / "test_cache.json"
 EDGE = 64                                  # bytes from a region's start or end that count as "at the edge"
 FLASH_SECTOR, FLASH_PAGE = 0x1000, 0x100
 STOCK_ARG = {"masterfx", "swing", "condtrig", "synths", "phase", "legato", "slicethru", "resample", "tracklen", "songloop",
-             "bundle_cost"}                # tests that take the stock .ptf too
+             "chords", "bundle_cost"}      # tests that take the stock .ptf too
 QUICK_MODE = {"masterfx", "synths", "phase", "bundle_cost"}   # tests with a --quick mode
 EXTRA_TESTS = {"synths": ["phase"]}        # a patch's tests besides test_<patch>.py (PHASE: test_phase.py)
 DIAGNOSTICS = [                            # specs outside the web patcher, tested in every tier
@@ -104,10 +105,13 @@ DIAGNOSTICS = [                            # specs outside the web patcher, test
     ("all-headroom", "patch/headroom/all_headroom.json"),
     ("all-tracklen-headroom", "patch/headroom/all_tracklen_headroom.json"),
 ]
+NOT_IN_WEB = [                             # mods not in the web patcher (nor patch/all) yet: alone, in every tier
+    ("chords", "patch/chords/patch.json"),
+]
 DEFAULT_SECONDS = 60.0                     # estimate for a test not timed yet, unless below
 MEASURED_SECONDS = {                       # alone, on an 8-core PC (the cache keeps its own, measured under load)
     "layout": 45, "web harness": 800, "colorsong": 1, "copypattern": 3, "humanize": 6, "visualizer": 8,
-    "swing": 16, "headroom": 7, "interpolate": 25, "condtrig": 36, "legato": 130, "slicethru": 12, "resample": 245, "masterfx (quick)": 15,
+    "swing": 16, "headroom": 7, "interpolate": 25, "condtrig": 36, "legato": 130, "chords": 135, "slicethru": 12, "resample": 245, "masterfx (quick)": 15,
     "masterfx (full)": 385, "synths (quick)": 127, "synths (full)": 1400, "phase (quick)": 150,
     "phase (full)": 660, "bundle_cost (quick)": 25, "bundle_cost (full)": 95,
 }
@@ -460,7 +464,7 @@ def main() -> int:
     builds.mkdir(exist_ok=True)
     first = [(build(stock, spec, builds / f"{name}.ptf"), tier == "deep") for name, spec in patches]
     first.append((build(stock, ROOT / "patch" / "all" / "patch.json", builds / "all.ptf"), tier != "quick"))
-    first += [(build(stock, ROOT / spec, builds / f"{name}.ptf"), False) for name, spec in DIAGNOSTICS]
+    first += [(build(stock, ROOT / spec, builds / f"{name}.ptf"), False) for name, spec in DIAGNOSTICS + NOT_IN_WEB]
     jobs = pre + emu_jobs(first)
     if "--dry-run" in opts:
         for j in jobs:

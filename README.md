@@ -99,6 +99,12 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   [patch/songloop/README.md](patch/songloop/README.md).
 - **all**: all fourteen mods above in one firmware (version text `1.2.0-MNP`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
+- **chords**: more MIDI chords. Turning the encoder on a MIDI Chord FX (`0`) past the
+  last stock chord goes on to the major and minor triad inversions, then the maj7,
+  min7 and dom7 inversions, then every other chord of up to four notes within an
+  octave (values 30–236). The Arp plays them too. On its own for now (version text
+  `1.2.0-ch2`): not yet in patch/all or the web patcher. Tested on hardware. See
+  [patch/chords/README.md](patch/chords/README.md).
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
   future patches. See [patch/ramdiag/README.md](patch/ramdiag/README.md).
@@ -166,6 +172,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `patch/resample/` | Live resampling: Trk Audio and Trk Record in the Sample Recorder (hear the pattern; record Line In plus the tracker), saved per project; recordings after the loaded samples |
 | `patch/tracklen/` | Variable Track Length: a length per track and pattern, set with the Trk Len button, saved per project |
 | `patch/songloop/` | Song Loop: select a block of Song positions and loop it (Play Selection, Continue Song) |
+| `patch/chords/` | More MIDI chords: Chord FX values 30–236 (inversions first, then every chord within an octave) |
 | `patch/all/` | Bundle spec: colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample + tracklen + songloop in one firmware |
 | `patch/ramdiag/` | RAM diagnostic: which candidate regions stay untouched, heap high-water mark |
 | `patch/headroom/` | Timing diagnostic: worst audio block and sequencer share in % of the measured block length, late blocks; its bundle specs (`all_headroom.json`, `all_tracklen_headroom.json`) |
@@ -207,6 +214,7 @@ patches of your own: see "Choosing patches" in [docs/PATCHING.md](docs/PATCHING.
 | `tools/emu/test_slicethru.py` | slicethru: every play mode's note-on as stock without the flag, the slice-to-end span, render cost, `S`, reverse, stereo and re-entry with it; Loop (the whole sample from frame 0, sample-exact, and what ends it); the Play Mode list, the Loop button and every input on the real Sample Playback screen; the settings file |
 | `tools/emu/test_resample.py` | resample: the record buffer's placement and the loaded samples kept; Play during a recording against stock and normal playback, the input and Monitor, the stop; Shift+Rec and Play in the count-in through the real Rec handler; the Trk Audio and Trk Record buttons through the real binder; the recording with the tracker, frame for frame, and the count-in's click; resample.bin per project; stock where not asked for; cost |
 | `tools/emu/test_songloop.py` | songloop: every hooked site, selecting downwards, Play Selection stopped and playing (block ahead, behind, inside), the preload and the pattern end through the ITCM stubs against stock, moving the block, Continue Song, stop, the locked softkeys, labels and the play icon with Performance, the status bar icons, the fonts, the frame, Performance held while looping, the preload with track 1 not on Fwd |
+| `tools/emu/test_chords.py` | chords: what every value 30–255 plays, library chords against stock chords message for message (random patterns, Micro-move, delay, Roll, gate, OFF/CUT/FADE, mute, stop, song mode, performance step repeat, synth slots), Random FX as stock, the Arp (against stock chords under every Arp value, and each library chord's notes), the encoder and grid text, stock firmware with such patterns, cost |
 | `tools/emu/test_legato.py` | legato: random patterns against stock (identical without `G`, only reordered with it), the legato order and every case that keeps the stock order, other FX, stuck notes, cost; synth slots: the order, envelopes on every model and WAVE, PERC unchanged |
 | `tools/emu/test_itcmtest.py` | itcmtest: the ITCM stubs after the boot copy, Chance FX and count-in playing exactly as stock through the hooks |
 | `tools/emu/test_interpolate.py` | interpolate ramp, MIDI-rate, cost, Config menu and settings-file tests, through the real audio block |
