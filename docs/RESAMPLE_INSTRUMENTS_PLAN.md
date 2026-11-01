@@ -1,10 +1,8 @@
 # Plan: any instrument in the Sample Recorder
 
-**Status:** shelved by the user (2026-10-31) after phase 1 (section 2.7): too many
-interacting cases to change with confidence. Kept as a record; not built.
-Original status: plan (2026-10-31), not built. An extension of `patch/resample` (`rs8`), as
-`rs9`. Static analysis plus one emulator run (section 2.4); the rest is to be
-checked in phase 1.
+**Status:** built as `rs9` (2026-10-31), tested on hardware in `patch/all` (`1.2.0-MR9`).
+Shelved after phase 1 (section 2.7), then resumed with a narrower design (section 7),
+which replaces sections 3 and 4.
 
 ## 1. What the user gets
 
@@ -197,3 +195,37 @@ Audio on; the takeover fix in resample; dropped notes accepted).
   playing; to check that no voice reads a sample while its slot is replaced.
 - **CPU:** live notes add voices the budget already assumes (all 8 sample voices,
   the synth voices).
+
+## 7. The design as built (rs9)
+
+Narrower than section 3: everything happens only in the recorder with Trk Audio on, and
+nothing changes on other screens (the takeover fix of 2.4 is dropped there).
+
+| Hook | Where | What |
+|---|---|---|
+| `mt_rs_picker` | pool word `0x600fa4a8` | Press: `picker_open(mgr, 2, instrument)`, no clamp. Release: the stock close; a pick that isn't MIDI leaves `scr+0xbe9` as it was |
+| `mt_rs_start` | vtable start | After the stock start: if it swapped the selection for the MIDI instrument (`0x600fa45a`), select it again |
+| `mt_rs_update` | recorder update | In the setup, a sample or synth selected: open the gates. They close as in rs8 (after a recording, Trk Audio off) |
+| `mt_rs_record_mode` | ITCM `0x166a`, args r4 (seq), r6 (the track tried) | Recorder in front (`0x200207c0+8` = `0x20026100`): "off" while a track passes the strict test (not muted, `+0x80` = 0, sample instruments tracks 1-8); with none, "on" only for an ended track (below) |
+| Trk Audio off | slot 2 | A selection that isn't MIDI: the recorder's MIDI instrument (`scr+0xbe9`, clamped) |
+
+The track rule: stock's record-mode-off rule (a free track from the cursor's). With record
+mode on this keeps a live note in the recorder off a sounding track while a free one
+exists (the arp case of 2.4, in the recorder only). When no track is free, where stock
+drops the note, the first track from the cursor's whose sound has ended:
+
+- tracks 1-8, the last note's instrument a sample (`+0x69` ≤ 47), no Roll (3), Chord (14)
+  or Arp (21) in its FX types (`+0x6a`, `+0x6c`: the last triggered record keeps them
+  for the rest of the bar), no delayed note (`+0xc0`), no live note (`+0x81`);
+- both voices of the track's player (`player+0x73c`..`+0x740`) with `voice+0x20` clear.
+  Emulator, stock, every play mode: 1-Shot, Slice and Beat Slice clear it at their end,
+  and the master is silent from the next block on (the rig's output is a block late);
+  the loops, Wavetable and Granular keep it set while they sound. The flag can stay set
+  after a short envelope has faded: such a track counts as sounding (no note taken).
+
+rs9's first build took the cursor's track whenever none was free (stock's record-mode
+rule); with an M01 Chord + Arp on the cursor's track the arp then played the live sample
+(the user's hardware test, 2026-10-31). The ended-track rule replaced it the same day.
+Checked on stock first (scratch): only this test reads the answer (the second record-mode
+call at `0x16e2` and the pattern write after it are untouched); the pattern write path
+`seq+0x2b` (`0x1628`) is before it. RAM: none new.

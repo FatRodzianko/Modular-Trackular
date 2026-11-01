@@ -80,6 +80,25 @@ docs/LIVE_RESAMPLING_PLAN.md and docs/RESAMPLE_SOURCE_PLAN.md have the design. S
    projects through the firmware's save request (project_save.save_as_checks). rs7: the
    project screen's update ticks too, so New Project then Save As at once saves the
    new project's Off; a new project's reset redraws the recorder's slots.
+14. Any instrument live (rs9; sections 6-13 run with a MIDI instrument selected, as stock's
+   start leaves it). The picker's pool word and ITCM 0x166a (through its stub) point into
+   the patch. The instrument button: Tracker Audio on opens the full picker (mode 2) on
+   the selection; off, and stock, clamp it to MIDI and open mode 4; the close keeps the
+   recorder's MIDI instrument when the pick isn't MIDI. The start (stock's instrument
+   code 0x600fa3ce.., run for real): with Tracker Audio on a sample or synth stays
+   selected; off as stock. The update opens the gates in the setup only for a sample
+   or synth with Tracker Audio on (not in the count-in or the crop screen). Tracker
+   Audio off puts the recorder's MIDI instrument back. Live notes (the pads' path, the
+   cursor on a track): in the recorder a free track, as stock with record mode off (the
+   output identical), with record mode on too (where stock takes the cursor's sounding
+   track). With no track free: while every sample track still sounds the note is
+   dropped, as stock; once their 1-shots have ended, the first ended sample track from
+   the cursor's (stock drops it; the output as stock's record-mode rule on that track),
+   never a synth or MIDI track, nor one with a Chord + Arp: a MIDI Chord + Arp on the
+   cursor's track (the user's case on rs9's first build, which took that track) runs on.
+   Nothing written into the pattern. Outside the recorder, or with Tracker Audio off,
+   exactly stock. A Record Tracker take with a live sample holds it, in step with the
+   jacks.
 """
 from __future__ import annotations
 
@@ -90,7 +109,7 @@ from pathlib import Path
 
 import numpy as np
 from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_WRITE
-from unicorn.arm_const import UC_ARM_REG_PC
+from unicorn.arm_const import UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7, UC_ARM_REG_SP
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -198,6 +217,7 @@ class Rig:
             if not (real_binder and a == BINDER):      # the button binder needs a button object (Ui)
                 m.stub_function(a, lambda mm: 0)
         m.w32(BANK_TOTAL, BANK_SIZE)
+        m.w8(PROJECT + 0x6C5, 0x30)         # M01: stock's start leaves a MIDI instrument (rs9: section 14)
 
     def start(self, used: int, source: int = 0, total: int = BANK_SIZE) -> tuple[int, int, int]:
         """Start a recording with the bank `used` bytes full; (ch0, ch1, frames)."""
@@ -1400,6 +1420,7 @@ def file_checks(ptf: Path) -> None:
     m = Machine(ptf)
     fs = FakeFS(m, Path("."))
     ram = patch_ram(ptf, "resample")
+    m.w8(PROJECT + 0x6C5, 0x30)                     # a MIDI instrument, as stock's start leaves it
     m.stub_function(PATTERN_UPDATE, lambda mm: 0)
     m.stub_function(STOCK_UPDATE, lambda mm: 0)
     m.stub_function(PROJECT_UPDATE, lambda mm: 0)
@@ -1509,6 +1530,243 @@ def file_checks(ptf: Path) -> None:
     save_as_checks(check, m, fs, tick, "resample.bin", values, put, (0, 0), (1, 1), (1, 0), rsm1, SAVE_DELAY)
 
 
+# ---- 14. any instrument live (rs9) ----------------------------------------------------
+
+PICKER_WORD = 0x600FA4A8            # the recorder start's pool word: the instrument button's callback 0x600d4675
+PICKER, PICKER_OPEN, PICKER_CLOSE = 0x20020880, 0x600CF2B8, 0x600CF1E8
+PICKER_ACTIVE = 0x74                # the picker's byte the close tests (0x600cd138)
+INSTRUMENT = PROJECT + 0x6C5
+INS_ENTRY, INS_MIDI = 0xBE8, 0xBE9  # the screen's: the selection at its start, its MIDI instrument
+START_TAIL = 0x600FA3CE             # stock start: its instrument code, to its return (0x600fa3ec / 0x600fa460)
+LIVE_NOTE, NOTE_OFF = 0x15C9, 0x600AC701    # (seq, 0x14, note, velocity / 0, stack 0): the pads' path
+SCREEN_NOW, PATTERN_VIEW = 0x200207C0 + 8, 0x20021770
+ED_RECORD = 0x20022770 + 0x254      # Pattern record mode (0x1faa8 reads it)
+TRACK_SITE = 0x166A                 # seq_record_live_note: bl 0x1faa8 (record mode?) in the track test
+
+
+def real_start_tail(m) -> None:
+    """Stock's start (0x600fa228) replaced by its own instrument code, run for real from
+    0x600fa3ce with its registers (r4 = the screen, r6 = the argument) and stack frame:
+    the rig can't run the rest (screen objects it doesn't build)."""
+    def hook(uc, a, size, user):
+        sp = uc.reg_read(UC_ARM_REG_SP) - 0x14 - 20
+        for k in range(5):
+            m.w32(sp + 4 * k, 0)
+        for k, reg in enumerate((UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_R6, UC_ARM_REG_R7, UC_ARM_REG_LR)):
+            m.w32(sp + 0x14 + 4 * k, uc.reg_read(reg))  # popped by its return: the caller's r4-r7, pc
+        uc.reg_write(UC_ARM_REG_R6, uc.reg_read(UC_ARM_REG_R1))
+        uc.reg_write(UC_ARM_REG_R4, uc.reg_read(UC_ARM_REG_R0))
+        uc.reg_write(UC_ARM_REG_SP, sp)
+        uc.reg_write(UC_ARM_REG_PC, START_TAIL | 1)
+    m.uc.hook_add(UC_HOOK_CODE, hook, begin=STOCK_START, end=STOCK_START)
+
+
+def live(r: Session, note: int = 60) -> int:
+    """A pad's note through the pads' path: the track (1-16) it took, 0 if dropped."""
+    before = [r.m.uc.mem_read(SEQ + 0x68 * t + 0x81, 1)[0] for t in range(16)]
+    r.m.call(LIVE_NOTE, SEQ, 0x14, note, 100, 0, max_insns=20_000_000)
+    got = [t + 1 for t in range(16) if r.m.uc.mem_read(SEQ + 0x68 * t + 0x81, 1)[0] and not before[t]]
+    return got[0] if got else 0
+
+
+def live_rig(ptf: Path, patched: bool, audio: bool = True, cursor: int = 6, ins: int = 0, busy: int = 5,
+             play: bool = True, record_mode: bool = False, screen: int = SCR, blocks: int = 4,
+             arp: bool = False) -> Session:
+    """The recorder (Monitor off) with the gates open (the patch's update, or the stock
+    calls by hand), notes on step 0 of tracks 1..`busy` (from 6 on: sample 1; their 0.1 s
+    1-shots end after 35 blocks), the cursor on track `cursor`, the pattern playing
+    `blocks` blocks. `arp`: track 1 is M01 with Chord + Arp instead."""
+    r = Session(ptf, patched, monitor=False, audio=audio)
+    m = r.m
+    for t in range(5, busy):
+        m.write(r.cur + 0x1C + t * 0x301 + 1, bytes([60, 0, 0, 0, 0, 0]))
+    if arp:
+        m.write(r.cur + 0x1C + 1, bytes([60, 48, 14, 1, 21, 9]))
+    m.w8(INSTRUMENT, ins)
+    m.w32(SCREEN_NOW, screen)
+    m.w8(ED_RECORD, int(record_mode))
+    if patched and audio:
+        r.update()
+    else:
+        r.open_by_hand()
+    m.write(SEQ, bytes([0, cursor - 1, 0, cursor - 1]))
+    if play:
+        r.play()
+    r.run(blocks)
+    return r
+
+
+def pattern_writes(r: Session, fn) -> list[int]:
+    seen: list[int] = []
+    lo, hi = r.cur, r.cur + 0x3030
+    h = r.m.uc.hook_add(UC_HOOK_MEM_WRITE, lambda uc, acc, a, sz, v, u: seen.append(a) if lo <= a < hi else None)
+    fn()
+    r.m.uc.hook_del(h)
+    return seen
+
+
+def arp_checks(ptf: Path, stock: Path) -> None:
+    """M01 Chord + Arp on track 1, the cursor on it, every other track used and its sound
+    ended, a sample played live in the recorder: the arp runs on (MIDI channel 1)."""
+    for record_mode in (False, True):
+        got = []
+        for f, patched in ((ptf, True), (stock, False)):
+            r = live_rig(f, patched, cursor=1, busy=8, blocks=40, arp=True, record_mode=record_mode)
+            r.m.events.clear()
+            t = live(r)
+            r.run(SOUND_BLOCKS)
+            arp = [e for _, e in r.m.events if e.startswith("DIN note on") and e.endswith(" ch1")]
+            got.append((t, len(arp)))
+        (pt, pa), (st_, sa) = got
+        check(pt == 2 and pa > 4,
+              f"Chord + Arp (M01) on the cursor's track 1, record mode {'on' if record_mode else 'off'}: the live note "
+              f"takes ended track {pt}, the arp runs on ({pa} notes; stock: track {st_}, {sa} notes)")
+
+
+def instrument_checks(ptf: Path, stock: Path) -> None:
+    print("any instrument live (rs9)")
+    p = Session(ptf, True, monitor=False)
+    m = p.m
+    lo, hi = p.code
+    check(lo <= m.r32(PICKER_WORD) < hi, f"the instrument button's pool word {PICKER_WORD:#x} points into the patch")
+    itcm = bytes(m.uc.mem_read(0, 0x20000))
+    stub = bl_target(itcm, 0, TRACK_SITE)
+    moves = struct.unpack_from("<HH", itcm, stub)        # mov r2, r4; mov r3, r6: the seq and the track tried
+    hook = struct.unpack_from("<I", itcm, stub + 8)[0] & ~1 if itcm[stub + 4:stub + 8] == bytes.fromhex("dff800f0") else 0
+    check(moves == (0x4622, 0x4633) and lo <= hook < hi,
+          f"ITCM {TRACK_SITE:#x}: bl -> stub {stub:#x} (r2, r3 = r4, r6) -> {hook:#x}, in the patch")
+
+    # the instrument button
+    def button(f: Path, patched: bool, audio: bool, ins: int, state: int):
+        r = Session(f, patched, monitor=False, audio=audio)
+        calls = []
+        r.m.stub_function(PICKER_OPEN, lambda mm: calls.append((mm.arg(0), mm.arg(1), mm.arg(2) & 0xFF)))
+        r.m.stub_function(PICKER_CLOSE, lambda mm: calls.append(("close",)))
+        r.m.w8(INSTRUMENT, ins)
+        r.m.w8(SCR + INS_MIDI, 0x34)
+        r.m.w8(PICKER + PICKER_ACTIVE, 2)
+        r.m.call(r.m.r32(PICKER_WORD), state, 0, 0, 0, max_insns=5_000_000)
+        return calls, r.m.uc.mem_read(INSTRUMENT, 1)[0], r.m.uc.mem_read(SCR + INS_MIDI, 1)[0]
+    for ins in (0, 5, 0x33, 64):
+        got = button(ptf, True, True, ins, 1)
+        check(got == ([(PICKER, 2, ins)], ins, 0x34),
+              f"Tracker Audio on, instrument {ins:#x}: the press opens the full picker (mode 2) on it {got}")
+        for name, f, patched in (("Tracker Audio off", ptf, True), ("stock", stock, False)):
+            got = button(f, patched, False, ins, 1)
+            want = min(max(ins, 0x30), 0x3F)
+            check(got == ([(PICKER, 4, want)], want, 0x34),
+                  f"{name}, instrument {ins:#x}: clamped to MIDI ({want:#x}), the MIDI picker (mode 4) {got}")
+    for ins, want in ((5, 0x34), (64, 0x34), (0x36, 0x36)):
+        got = button(ptf, True, True, ins, 0)
+        check(got == ([("close",)], ins, want),
+              f"Tracker Audio on, the release with {ins:#x} picked: closed, the recorder's MIDI instrument {want:#x} {got}")
+    got = button(stock, False, False, 0x36, 0)
+    check(got == ([("close",)], 0x36, 0x36), f"stock: the release copies the pick into the MIDI instrument {got}")
+
+    # the start
+    for name, f, patched, audio in (("Tracker Audio on", ptf, True, True), ("Tracker Audio off", ptf, True, False),
+                                    ("stock", stock, False, False)):
+        for ins in (5, 64, 0x33):
+            r = Session(f, patched, monitor=False, audio=audio)
+            real_start_tail(r.m)
+            r.m.w8(INSTRUMENT, ins)
+            r.m.w8(SCR + INS_MIDI, 0x34)
+            r.m.call(r.m.r32(START_WORD), SCR, 0, max_insns=5_000_000)
+            got = tuple(r.m.uc.mem_read(a, 1)[0] for a in (INSTRUMENT, SCR + INS_ENTRY, SCR + INS_MIDI))
+            midi = 0x30 <= ins <= 0x3F
+            want = (ins if (audio or midi) else 0x34, ins, ins if midi else 0x34)
+            check(got == want, f"{name}, the start with {ins:#x} selected: selected, entry, MIDI = "
+                               f"{tuple(hex(x) for x in got)} (want {tuple(hex(x) for x in want)})")
+
+    # the gates in the setup
+    for label, audio, ins, setup, want in (("sample", True, 0, None, 1), ("synth", True, 64, None, 1),
+                                           ("MIDI", True, 0x30, None, 0), ("Tracker Audio off, sample", False, 0, None, 0),
+                                           ("the count-in, sample", True, 0, lambda m: m.w8(SCR + SCR_ACTIVE, 1), 0),
+                                           ("the crop screen, sample", True, 0, lambda m: m.w8(SCR + SCR_MODE, 1), 0)):
+        r = Session(ptf, True, monitor=False, audio=audio)
+        r.m.w8(INSTRUMENT, ins)
+        if setup:
+            setup(r.m)
+        r.update()
+        check(r.opened() == want and not r.playing(),
+              f"the update, {label} selected: gates {'open' if want else 'shut'}, no pattern")
+    u = Ui(ptf, audio=True)
+    u.m.w8(INSTRUMENT, 5)
+    u.m.w8(SCR + INS_MIDI, 0x34)
+    u.update()
+    opened = u.opened()
+    u.press(2)
+    check(opened and u.settings() == (0, 0) and not u.opened() and u.m.uc.mem_read(INSTRUMENT, 1)[0] == 0x34,
+          "Tracker Audio off with a sample selected: the gates close, the recorder's MIDI instrument (0x34) back")
+
+    # live notes: which track, against stock
+    cases = (  # label, rig arguments, the patch's track, stock's track
+        ("stopped, cursor 6, sample", dict(play=False), 6, 6),
+        ("playing tracks 1-5, cursor 1, sample", dict(cursor=1), 6, 6),
+        ("playing tracks 1-8, all still sounding, cursor 2, sample", dict(cursor=2, busy=8), 0, 0),
+        ("record mode on, playing tracks 1-5, cursor 1, sample", dict(cursor=1, record_mode=True), 6, 1),
+        ("record mode on, playing tracks 1-8, all still sounding, cursor 2, sample",
+         dict(cursor=2, busy=8, record_mode=True), 0, 2),
+        ("playing tracks 1-8, the 1-shots ended, cursor 2, sample", dict(cursor=2, busy=8, blocks=40), 2, 0),
+        ("playing tracks 1-8, the 1-shots ended, cursor 3 (a synth's), sample", dict(cursor=3, busy=8, blocks=40), 6, 0),
+        ("playing tracks 1-8, the 1-shots ended, cursor 3, synth", dict(cursor=3, ins=64, busy=8, blocks=40), 9, 9),
+        ("playing tracks 1-5, cursor 11, sample", dict(cursor=11), 6, 6),
+        ("playing tracks 1-5, cursor 11, synth", dict(cursor=11, ins=64), 11, 11),
+        ("playing tracks 1-8, cursor 11, synth", dict(cursor=11, ins=64, busy=8), 11, 11))
+    for label, kw, want_p, want_s in cases:
+        p, s = live_rig(ptf, True, **kw), live_rig(stock, False, **kw)
+        got_p, got_s = [], []
+        wp = pattern_writes(p, lambda: got_p.append(live(p)))
+        ws = pattern_writes(s, lambda: got_s.append(live(s)))
+        check(got_p == [want_p] and got_s == [want_s] and not wp and not ws,
+              f"the recorder, {label}: track {got_p} (stock {got_s}), nothing written into the pattern")
+        out_p = p.run(SOUND_BLOCKS // 2)
+        # stock's free-track rule, or (no track free) its record-mode rule on the track the patch took
+        ref = live_rig(stock, False, **({**kw, "record_mode": False} if want_p == want_s or not want_p
+                                        else {**kw, "record_mode": True, "cursor": want_p}))
+        got_r = live(ref)
+        out_r = ref.run(SOUND_BLOCKS // 2)
+        ok, d = same(out_p, out_r)
+        check(got_r == want_p and ok and peak(*out_p) > 0,
+              f"  ... the output is stock's with that track's rule (track {got_r}, max diff {d}, peak {peak(*out_p)})")
+    arp_checks(ptf, stock)
+    for label, kw in (("Tracker Audio off", dict(audio=False)), ("the Pattern screen in front", dict(screen=PATTERN_VIEW)),
+                      ("no screen in front", dict(screen=0))):
+        for extra in (dict(cursor=1), dict(cursor=2, busy=8), dict(cursor=1, record_mode=True)):
+            p, s = live_rig(ptf, True, **kw, **extra), live_rig(stock, False, **kw, **extra)
+            a, b = live(p), live(s)
+            check(a == b, f"{label}, {extra}: as stock (track {a}, stock {b})")
+    p = live_rig(ptf, True, play=False)
+    a, b = live(p, 60), live(p, 62)
+    p.m.call(NOTE_OFF, SEQ, 0x14, 60, 0, 0, max_insns=20_000_000)
+    p.m.call(NOTE_OFF, SEQ, 0x14, 62, 0, 0, max_insns=20_000_000)
+    c = live(p, 64)
+    check((a, b, c) == (6, 7, 6), f"two pads held take tracks 6 and 7; released, a third takes 6 again {(a, b, c)}")
+
+    # a Record Tracker take with a live sample
+    r = Session(ptf, True, monitor=False, record=True)
+    m = r.m
+    m.w8(INSTRUMENT, 0)
+    m.w32(SCREEN_NOW, SCR)
+    r.update()
+    m.write(SEQ, bytes([0, 5, 0, 5]))
+    r.rec_press()
+    first = r.run(3)
+    t = live(r)
+    rest = r.run(SOUND_BLOCKS)
+    out = tuple(np.concatenate((a, b)) for a, b in zip(first, rest))
+    rec = r.recorded()
+    n = len(rec[0])
+    good = r.opened() and not r.playing() and t == 6 and n >= (SOUND_BLOCKS + 1) * 128 and peak(*rec) > 1000
+    for ch in range(2):
+        good = good and np.array_equal(rec[ch].astype(int), out[ch][128:n + 128].astype(int))
+    check(good, f"Record Tracker, plain Rec, a pad played during it: track {t}, the recording ({n} frames, peak "
+                f"{peak(*rec)}) is the output, in step with the jacks")
+    r.stop()
+    r.update()
+    check(not r.opened(), "its stop: the gates close")
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print(__doc__)
@@ -1529,6 +1787,7 @@ def main() -> int:
     shift_rec_checks(ptf, stock)
     tracker_checks(ptf, stock)
     file_checks(ptf)
+    instrument_checks(ptf, stock)
     print(f"{len(failures)} failure(s)")
     return 1 if failures else 0
 

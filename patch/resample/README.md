@@ -9,16 +9,20 @@ Recorder's setup:
 - **Trk Record** (Record Tracker): record the pattern too, with no cable. The recording
   holds Line In plus the tracker's own sound.
 
+With Trk Audio on you can also pick any instrument in the recorder (samples and synths
+as well as MIDI) and play it live on the pads or from a MIDI controller.
+
 Both are Off on a new project, and each project keeps its own (in `resample.bin` in its
 folder). With both Off the recorder behaves as stock. Every recording goes after the
 loaded samples, so they stay intact. Installed on its own, Config shows the firmware
-version as `1.2.0-rs8`.
-[docs/RESAMPLE_SOURCE_PLAN.md](../../docs/RESAMPLE_SOURCE_PLAN.md) and
-[docs/LIVE_RESAMPLING_PLAN.md](../../docs/LIVE_RESAMPLING_PLAN.md) have the
+version as `1.2.0-rs9`.
+[docs/RESAMPLE_SOURCE_PLAN.md](../../docs/RESAMPLE_SOURCE_PLAN.md),
+[docs/LIVE_RESAMPLING_PLAN.md](../../docs/LIVE_RESAMPLING_PLAN.md) and
+[docs/RESAMPLE_INSTRUMENTS_PLAN.md](../../docs/RESAMPLE_INSTRUMENTS_PLAN.md) have the
 investigation and the plan.
 
-**Status:** tested on hardware, on its own and in `patch/all` (`1.2.0-MR8`). It is also
-in the web patcher.
+**Status:** tested on hardware in `patch/all` (`1.2.0-MR9`); rs9 alone is emulator-tested.
+It is also in the web patcher.
 
 ## Using it
 
@@ -63,6 +67,30 @@ With **Trk Record on** (Line In):
 With Trk Audio off, Shift+Rec is a plain Rec and Play in the recorder stays silent, as
 in stock.
 
+**Playing an instrument live** (Trk Audio on):
+
+- **Hold the instrument button** in the recorder: the list has the synths, the sample
+  instruments and MIDI, as in the Pattern screen. With Trk Audio off it is MIDI only, as
+  in stock.
+- **The instrument you had selected stays selected** when you open the recorder, and
+  leaving the recorder gives the Pattern screen back the instrument it had, as in stock.
+- **The pads and a MIDI controller play it.** A sample or synth is heard whenever the
+  setup shows, with or without the pattern; with Trk Record on, a recording holds it too.
+- **Which track plays it:** the same choice as the Pattern screen's live playing, from
+  the track the Pattern screen's cursor is on: the first track that hasn't played a note
+  yet (sample instruments: tracks 1-8; synths and MIDI: 1-16). Put the cursor on an empty
+  track and the pattern is left alone. Record mode makes no difference here (stock, with
+  record mode on, would take the cursor's track even while it sounds).
+- **When every track has played** (stock drops the note): the note takes the first
+  sample track, from the cursor's, whose sound has ended, a 1-Shot or slice that has
+  played to its end, and plays there until that track's next note. Never a track playing
+  a loop, wavetable or granular sample (they don't end), a synth or MIDI track, or one
+  whose last note has a Chord, Arp or Roll, so an arp keeps running. If no track has
+  ended, the note is dropped, as in stock.
+- **Nothing is written into the pattern**, with Pattern record mode on or off.
+- **Turning Trk Audio off** with a sample or synth selected switches to the recorder's
+  MIDI instrument, as stock's recorder does.
+
 **Feedback:** if the tracker's output is cabled back to its own input and Monitor is
 on, the input reaches the output at full level, as in the stock recorder, so the loop
 builds up when the cable path (output volume and input gain) is at unity or more. With
@@ -102,10 +130,12 @@ stock records at the start of the sample bank, where the loaded samples are.
 | `mt_rs_rec_button` | the Rec handler's pool word `0x600f9000` (`0x600d0620`) | With Trk Audio on, in the setup: arm "start the pattern" if Shift is held, then the stock handler |
 | `mt_rs_rec_started` | `bl 0x6010c890` at `0x600f90d8` (the record queues' start, reached from Rec and from the count-in's end alike) | With Trk Record on and Line In: start taking the master's blocks with the input's. If armed and the buffer was moved: open the gates and play the pattern |
 | `mt_rs_play_button` | the Play handler's pool word `0x600fa4ac` (`0x600d07b4`) | With Trk Audio on: during the count-in, arm instead of starting the pattern; in the setup or during a moved recording, open the gates, then the stock handler |
-| `mt_rs_update` | Sample Recorder vtable slot `0x60042c54` (update `0x600fafe8`) | Once the recording has stopped: stop taking the master's blocks, stop the pattern, close the gates. Disarm when nothing is counting in or recording. Reads and writes `resample.bin` outside a recording and its count-in |
-| `mt_rs_start` | Sample Recorder vtable slot `0x60042c58` (start `0x600fa228`) | A new visit starts with the gates shut and nothing armed |
+| `mt_rs_update` | Sample Recorder vtable slot `0x60042c54` (update `0x600fafe8`) | Once the recording has stopped: stop taking the master's blocks, stop the pattern, close the gates. Disarm when nothing is counting in or recording. Reads and writes `resample.bin` outside a recording and its count-in. With Trk Audio on and a sample or synth selected, opens the gates in the setup |
+| `mt_rs_start` | Sample Recorder vtable slot `0x60042c58` (start `0x600fa228`) | A new visit starts with the gates shut and nothing armed. With Trk Audio on: the stock start swaps a sample or synth for the recorder's MIDI instrument; the patch selects it again |
+| `mt_rs_picker` | the recorder start's pool word `0x600fa4a8` (the instrument button's callback `0x600d4675`) | With Trk Audio on: the press opens the picker with every instrument (mode 2, the Pattern screen's) instead of clamping to MIDI (mode 4); after the release, a pick that isn't MIDI leaves the recorder's MIDI instrument as it was |
+| `mt_rs_record_mode` | ITCM `0x166a`, through a stub passing the sequencer and the track tried (`bl 0x1faa8` in `seq_record_live_note`'s track test) | In the recorder with Trk Audio on: answers "record mode off" while some track is free (stock then takes a free track). When none is: "on" only for a sample track whose sound has ended (its voices' playing flag clear, no Chord, Arp or Roll, no delayed note), so stock takes that track instead of dropping the note |
 | `mt_rs_labels1`-`4` | `bl 0x600fbc40` at `0x600f99e2`, `0x600f9a3a`, `0x600f9ab6`, `0x600fcbd4` (the setup's slot labels) | Draw Trk Audio in slot 2 and Trk Record in slot 3 (Line In) after stock empties them |
-| `mt_rs_slot2_button`, `mt_rs_slot3_button` | the setup's button binder `0x600f8db4`, pool words `0x600f8e24` and `0x600f8e28` | A press in the setup toggles the setting (stock acts there only for Radio) |
+| `mt_rs_slot2_button`, `mt_rs_slot3_button` | the setup's button binder `0x600f8db4`, pool words `0x600f8e24` and `0x600f8e28` | A press in the setup toggles the setting (stock acts there only for Radio). Trk Audio off with a sample or synth selected selects the recorder's MIDI instrument |
 | `mt_rs_copy` | `bl 0x6010c7c8` at `0x6010c6f6` (the record copy of one input block, audio interrupt) | With Trk Record: adds the matching block of the master's record queues (`E+0x1e58`/`E+0x2248`, which only Export uses otherwise), or with Monitor on takes it alone |
 | `mt_rs_countin_done` | the recorder start's pool word `0x600fa490` (the count-in's end callback `0x600f8605`) | With Trk Record: mute the preview player's master input, which carries the count-in's clicks, until the recording ends |
 | `mt_rs_is_recording` | the ITCM image's word `0x601acc28` (the literal of the thunk at ITCM `0x1f540`, loaded at boot) | `engine_block_update` asks it whether to return early: "no" while the patch has the gates open and the recorder records into the buffer it moved |
@@ -140,8 +170,8 @@ function, or another patch's hook), so other patches can hook the same sites.
   A new project (`New Project` with no folder yet): both Off, nothing written. Save As
   (and a new project's first save, which is one) writes the settings to the new folder.
 
-No codec, DMA or ITCM code changes; the ITCM image changes in one word only. The code is
-3,469 bytes. Its state is 40 bytes (a magic word, the flags, the last buffer and size,
+No codec or DMA changes. In the ITCM image one word changes (the "recording?" thunk) and
+one `bl` goes to a stub (the live note's track test). The code is 4,033 bytes. Its state is 40 bytes (a magic word, the flags, the last buffer and size,
 the two settings, the file's bookkeeping, the muted gains), which the patcher places in
 free RAM. The patcher moves the code's code-address and RAM-address words to match
 (`prebuilt/resample.rel`). Firmware addresses are in
@@ -153,7 +183,7 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/resample/patch.json build/TrackerPlus_rs8.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/resample/patch.json build/TrackerPlus_rs9.ptf
 ```
 
 To combine it with other mods, list it in a bundle spec (see "Choosing patches" in
@@ -173,7 +203,7 @@ patch/resample/build.sh
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_resample.py build/TrackerPlus_rs8.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/emu/test_resample.py build/TrackerPlus_rs9.ptf path/to/TrackerPlus_1.2.0.ptf
 ```
 
 It runs the stock code with the patch in place, next to stock firmware (about 7
@@ -199,13 +229,18 @@ minutes):
 - **`resample.bin`** through the screens' update hooks and a fake SD card: another
   project, a damaged file, no file I/O during a take, New Project then the recorder or
   an immediate Save As, Save As through the firmware's own save request.
+- **Any instrument** (rs9): the picker's mode by Trk Audio; the start's instrument code
+  run for real; the gates in the setup; live notes through the pads' path against stock
+  (a free track, the cursor's when none is free, record mode on, Trk Audio off, other
+  screens), with the output identical to stock given the same track; nothing written
+  into the pattern; a Record Tracker take holds a live sample frame for frame.
 - **Writes** outside the patch's RAM, and cost.
 
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-rs8 Build 1504`.
+Config → Firmware → the patched file. Config should show `1.2.0-rs9 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Stock firmware ignores the
 `resample.bin` files in the project folders; delete them if you like.

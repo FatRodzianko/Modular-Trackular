@@ -101,7 +101,7 @@
       "bit": 11,
       "spec": "patch/resample/patch.json",
       "title": "Live Resampling",
-      "summary": "Two buttons in the Sample Recorder's setup. Trk Audio: hear the pattern there (Play, or Shift+Rec to start it with the recording, after the count-in if Pre Roll is on), samples and synths at the mix levels with delay and reverb; stopping the recording stops the pattern. Trk Record: record it too, Line In plus the tracker, with no cable. Saved per project; with both Off the recorder is stock. Recordings go after the loaded samples, so they stay intact.",
+      "summary": "Two buttons in the Sample Recorder's setup. Trk Audio: hear the pattern there (Play, or Shift+Rec to start it with the recording, after the count-in if Pre Roll is on), samples and synths at the mix levels with delay and reverb; stopping the recording stops the pattern. Trk Record: record it too, Line In plus the tracker, with no cable. With Trk Audio on, any instrument (samples, synths, MIDI) can be picked there and played live on the pads. Saved per project; with both Off the recorder is stock. Recordings go after the loaded samples, so they stay intact.",
       "status": "Tested on hardware"
     },
     {
@@ -179,6 +179,7 @@
     "bb08491d9c5b2949bacd2c6433e668bc5e33d6a22e2850bfa5b377a763984bb0": "interpolate (1.2.0-ip8)",
     "fa24cdc2ae1e96f73a46d3a3e7e510280b03108ad0feb0796b2b2672900798b7": "masterfx (1.2.0-mf8)",
     "e5c3a47b684a92b8277813444dda7a327ddc6886baa9a09ec7f54cc585dcf20c": "slicethru (1.2.0-bt6)",
-    "d4c22592906cf68d57e27f337e4c7dae082388eca148c34d0a67a76e0fe6c1ec": "all fourteen mods (1.2.0-MNP)"
+    "d4c22592906cf68d57e27f337e4c7dae082388eca148c34d0a67a76e0fe6c1ec": "all fourteen mods (1.2.0-MNP)",
+    "cb735851d771c5201b377a7c97e222abbd148da39a6d932364e8dcbc0eb1296c": "all fourteen mods (1.2.0-MR9)"
   }
 }

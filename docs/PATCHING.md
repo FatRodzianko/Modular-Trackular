@@ -38,7 +38,7 @@ Python command below does, without installing anything:
    one in step 1) and the image's, and refuses anything else, including a file that's
    already patched.
 2. Tick the mods you want. One mod gives its own build, "Select all" gives the
-   `patch/all` bundle (all fourteen, `1.2.0-MNP`), and any other mix gets a version text
+   `patch/all` bundle (all fourteen, `1.2.0-MR9`), and any other mix gets a version text
    that says which mods are in it: `M` plus two hex digits for colorsong 01, humanize 02,
    interpolate 04, masterfx 08, swing 10, visualizer 20, condtrig 40 and synths 80
    (colorsong + swing is `1.2.0-M11`); `N` instead of `M` when legato is in it
@@ -109,7 +109,8 @@ must be byte-identical to these builds:
 | legato (MIDI and synth slots) | `TrackerPlus_lg2.ptf` | `1.2.0-lg2` | tested | `a7bab99688e6036e58b66bd8e60806170a045b10c57a218d6607ab9261f81a75` |
 | the previous legato (MIDI only) | `TrackerPlus_lg1.ptf` | `1.2.0-lg1` | tested | `f266ed1f131fc15edf12b224e081f16d9109938b004d8410e2cb0cdb380a68e6` |
 | copypattern | `TrackerPlus_cp4.ptf` | `1.2.0-cp4` | tested (also with humanize) | `7bfbc3eb09a7eb9d9dd4ccf3a8a52b1221743be7061397048f72bbc32908db01` |
-| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample + tracklen + songloop) | `TrackerPlus_MNP.ptf` | `1.2.0-MNP` | tested | `d4c22592906cf68d57e27f337e4c7dae082388eca148c34d0a67a76e0fe6c1ec` |
+| all (colorsong + humanize + interpolate + masterfx + swing + visualizer + condtrig + synths + legato + copypattern + slicethru + resample + tracklen + songloop) | `TrackerPlus_MR9.ptf` | `1.2.0-MR9` | tested | `cb735851d771c5201b377a7c97e222abbd148da39a6d932364e8dcbc0eb1296c` |
+| the previous all (the same with resample rs8) | `TrackerPlus_MNP.ptf` | `1.2.0-MNP` | tested | `d4c22592906cf68d57e27f337e4c7dae082388eca148c34d0a67a76e0fe6c1ec` |
 | the previous all (the same with swing sw2, humanize hz9, interpolate ip7, masterfx mf7, slicethru bt5) | `TrackerPlus_MR8.ptf` | `1.2.0-MR8` | tested | `ce41aa1e9f8053b56855abe977d11aebca8122ae5d2597f10470ae8d8b34c574` |
 | the previous all (the same with resample rs4) | `TrackerPlus_SLA.ptf` | `1.2.0-SLA` | tested | `643755cc94ba6f904298a4adbfcadd739925db8c50e0c719d34c0b8d3f79ad1b` |
 | the previous all (without songloop) | `TrackerPlus_MVL.ptf` | `1.2.0-MVL` | tested | `babfded088d61424511b6a3edb0a384937f28458d0721f70c9e9c27670880ed3` |
@@ -135,7 +136,8 @@ must be byte-identical to these builds:
 | the previous slicethru (New Project then an immediate Save As kept the previous project's flags) | `TrackerPlus_bt5.ptf` | `1.2.0-bt5` | tested | `5f50698d8545833a6c6a7cbba495de4004da2cd9250b36e7ad548f50dc4981e8` |
 | the previous slicethru (without Loop) | `TrackerPlus_bt4.ptf` | `1.2.0-bt4` | tested | `8aed6732660f5c8e8ab231b20fbfa58bfaf3b875896ce790b5b9ae2bd6552232` |
 | the previous slicethru (Save As dropped the setting) | `TrackerPlus_bt3.ptf` | `1.2.0-bt3` | tested | `76e0a004302bb9e57d214cb04cf0053e906f1b6de3141a4ad4809f440de2cb2e` |
-| resample (live resampling, Trk Audio and Trk Record) | `TrackerPlus_rs8.ptf` | `1.2.0-rs8` | tested | `b7f2056a34bc3b476ce433d7a7b8d91b76fca7c536dd944cffdc408537347653` |
+| resample (live resampling, Trk Audio and Trk Record, any instrument live) | `TrackerPlus_rs9.ptf` | `1.2.0-rs9` | in patch/all (`1.2.0-MR9`), not on its own | `92dc3af6ddec453172f71a93b205a1c3962349e1383bc5fb06c97531bf8b11a3` |
+| the previous resample (MIDI instruments only in the recorder) | `TrackerPlus_rs8.ptf` | `1.2.0-rs8` | tested | `b7f2056a34bc3b476ce433d7a7b8d91b76fca7c536dd944cffdc408537347653` |
 | the previous resample (Play and Shift+Rec always on, no Record Tracker) | `TrackerPlus_rs4.ptf` | `1.2.0-rs4` | tested | `5cf21721e8c1f9339304b24adfcc355a07f37dcaff9697a5b97ab41d50352925` |
 | tracklen (Variable Track Length) | `TrackerPlus_tl7.ptf` | `1.2.0-tl7` | in patch/all (`1.2.0-MVL`), not on its own | `d4a19b7aad99f388a8448791957116746b9a8f9e0924b8efb86be8224077f2fd` |
 | songloop (Song Loop) | `TrackerPlus_sl4.ptf` | `1.2.0-sl4` | tested (also in patch/all, `1.2.0-SLA`) | `403c76593d2e5f096893ddb2771dd7c90536b1dedc7f64352bf5c154c24ca935` |
@@ -176,7 +178,7 @@ Each patch can be installed on its own, or several can go into one firmware:
               "../condtrig/patch.json", "../synths/patch.json", "../legato/patch.json",
               "../copypattern/patch.json", "../slicethru/patch.json", "../resample/patch.json",
               "../tracklen/patch.json", "../songloop/patch.json"],
-  "version": "MNP",
+  "version": "MR9",
   ```
 
 To make your own mix, copy `patch/all/` to a new folder (for example `patch/mymix/`)
@@ -329,7 +331,7 @@ python tools/emu/test_phase.py build/TrackerPlus_sy9.ptf path/to/TrackerPlus_1.2
 python tools/emu/test_legato.py build/TrackerPlus_lg2.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_copypattern.py build/TrackerPlus_cp4.ptf
 python tools/emu/test_slicethru.py build/TrackerPlus_bt6.ptf path/to/TrackerPlus_1.2.0.ptf
-python tools/emu/test_resample.py build/TrackerPlus_rs8.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/emu/test_resample.py build/TrackerPlus_rs9.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_songloop.py build/TrackerPlus_sl4.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_chords.py build/TrackerPlus_ch2.ptf path/to/TrackerPlus_1.2.0.ptf
 python tools/emu/test_bundle_cost.py build/TrackerPlus_all.ptf path/to/TrackerPlus_1.2.0.ptf [--quick]

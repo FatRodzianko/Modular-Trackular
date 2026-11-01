@@ -1,6 +1,6 @@
 {
   "name": "resample",
-  "description": "Live resampling: the Sample Recorder records into the sample bank's free space; Tracker Audio and Record Tracker in the setup's slots 2 and 3 let the pattern be heard (Play, Shift+Rec, Play during a recording) and recorded with Line In",
+  "description": "Live resampling: the Sample Recorder records into the sample bank's free space; Tracker Audio and Record Tracker in the setup's slots 2 and 3 let the pattern be heard (Play, Shift+Rec, Play during a recording) and recorded with Line In; with Tracker Audio on, any instrument (samples, synths, MIDI) can be picked and played live there",
   "firmware": "TrackerPlus 1.2.0",
   "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
   "bin": "build/resample.bin",
@@ -149,11 +149,32 @@
       "note": "the recorder start's pool word for the count-in's end callback 0x600f8605 (seq+0x6fc) -> mt_rs_countin_done (Record Tracker: mutes the last click)"
     },
     {
+      "at": "0x600FA4A8",
+      "old": "75460d60",
+      "to": "mt_rs_picker",
+      "next": "mt_rs_next_picker",
+      "thumb": true,
+      "note": "the recorder start's pool word for the instrument button's callback 0x600d4675 (press: picker in mode 4, MIDI only; release: close) -> mt_rs_picker (Tracker Audio on: mode 2, every instrument)"
+    },
+    {
       "at": "0x600CBF9C",
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-rs8"
+      "note": "version text 1.2.0-rs9"
+    }
+  ],
+  "itcm_branches": [
+    {
+      "at": "0x166A",
+      "old": "1ef01dfa",
+      "to": "mt_rs_record_mode",
+      "next": "mt_rs_next_record_mode",
+      "note": "seq_record_live_note's track test: bl 0x1faa8 (record mode?) for track r6 -> mt_rs_record_mode(_, _, seq, track) (in the recorder with Tracker Audio on: \"off\" while a track is free; when none is, \"on\" only for a sample track whose sound has ended)",
+      "args": [
+        "r4",
+        "r6"
+      ]
     }
   ]
 }

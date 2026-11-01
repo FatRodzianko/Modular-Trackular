@@ -2,7 +2,8 @@
  * resample: live resampling in the Sample Recorder (Polyend Tracker+ firmware 1.2.0).
  * docs/LIVE_RESAMPLING_PLAN.md has the design (phases 1-6, rs4) and
  * docs/RESAMPLE_SOURCE_PLAN.md its phase 7 (rs5): two buttons in the setup, Tracker
- * Audio and Record Tracker.
+ * Audio and Record Tracker. docs/RESAMPLE_INSTRUMENTS_PLAN.md: any instrument played
+ * live in the recorder with Tracker Audio on (rs9).
  *
  * Stock records into the start of the sample bank (0x8026a000), where the project's
  * samples are loaded, so a recording writes over them. That is why the recorder
@@ -54,6 +55,32 @@
  * moved). On: Play in the setup is heard, Shift+Rec and Play in the count-in start the
  * pattern with the recording, Play during a recording is heard.
  *
+ * Any instrument live (rs9), only with Tracker Audio on; off, the recorder keeps stock's
+ * MIDI-only instrument:
+ *  - mt_rs_picker (the instrument button's open/close callback 0x600d4675, pool word
+ *    0x600fa4a8): opens the full picker (mode 2: synths, samples, MIDI) where stock
+ *    clamps to MIDI and opens mode 4. Its close copies the pick into scr+0xbe9, the
+ *    recorder's MIDI instrument; a pick that isn't MIDI leaves scr+0xbe9 as it was.
+ *  - mt_rs_start: the stock start swaps a selected sample or synth for the recorder's
+ *    MIDI instrument; the patch puts the selection back (the stock leave restores it
+ *    from scr+0xbe8 as ever).
+ *  - mt_rs_update: in the setup, with a sample or synth selected, opens the gates so
+ *    its notes are heard.
+ *  - mt_rs_record_mode (ITCM 0x166a: seq_record_live_note's track test asks "record
+ *    mode?" for each track it tries from the cursor's): stock with record mode off takes
+ *    only a track with no note sounding (a track counts as sounding from its note to
+ *    its next one); with record mode on it takes the first track not holding a live
+ *    note, the pattern's notes or not, so a sounding track (an arp's, say) plays the live
+ *    instrument until its next step. In the recorder the patch answers "off" while a
+ *    track is free (stock's free track). When none is, where stock drops the note, it
+ *    answers "on" only for a track whose sound has ended: tracks 1-8, a sample
+ *    instrument's note, no Roll, Chord or Arp in it, no delayed note pending, and both
+ *    of its voices stopped (voice+0x20, which a 1-shot or slice clears at its end; loops,
+ *    wavetable and granular keep it set). Such a track plays the live note until its
+ *    next pattern note; with none, the note is dropped.
+ *  - Tracker Audio off (mt_rs_slot2_button): a selection that isn't MIDI goes back to
+ *    the recorder's MIDI instrument, as the stock start picks it.
+ *
  * Each saved project keeps both settings in <project folder>/resample.bin (rs6), as swing
  * keeps swing.bin: read and written from the Pattern screen's update (mt_rs_pattern_update,
  * vtable word 0x600403dc) and the recorder's (outside a recording and its count-in), only
@@ -75,7 +102,7 @@
 #include <stdint.h>
 
 #ifndef RESAMPLE_VERSION
-#define RESAMPLE_VERSION "rs8"
+#define RESAMPLE_VERSION "rs9"
 #endif
 
 /* ---- firmware 1.2.0 ------------------------------------------------------------------ */
@@ -152,6 +179,30 @@
 #define FW_IRQ0_MASK        0x600303D4u     /* the audio interrupt off */
 #define FW_IRQ0_UNMASK      0x600303C8u     /* and on */
 
+#define FW_INSTRUMENT       (*(volatile uint8_t *)0x202046C5u)  /* the selected instrument */
+#define FW_SCR_INS_ENTRY    0xBE8u          /* the selection at the recorder's start (the leave restores it) */
+#define FW_SCR_INS_MIDI     0xBE9u          /* the recorder's MIDI instrument */
+#define INS_MIDI_FIRST      0x30u           /* M01..M16 */
+#define INS_MIDI_LAST       0x3Fu
+#define INS_SAMPLE_LAST     0x2Fu           /* 0..47 samples; 64..66 synths */
+#define FW_SEQ_TRACK        0x68u           /* the sequencer's 16 track records from seq+0x68, 0x68 apart */
+#define TRK_INSTRUMENT      0x69u           /* the last note's instrument, */
+#define TRK_FX1_TYPE        0x6Au           /* its FX types */
+#define TRK_FX2_TYPE        0x6Cu
+#define TRK_SOUNDING        0x80u           /* a note sounds (until its note-off or the next note) */
+#define TRK_LIVE            0x81u           /* a live note holds the track */
+#define TRK_DELAYED         0xC0u           /* a delayed (Micro-move) note pending */
+#define FX_ROLL             3u
+#define FX_CHORD            14u
+#define FX_ARP              21u
+#define FW_TRACK_SKIPPED    0x00003995u     /* ITCM (seq, track): seq_record_live_note's muted test */
+#define FW_PLAYER_VOICES    0x73Cu          /* the player's voice vector: begin, end */
+#define VOICE_PLAYING       0x20u           /* cleared when a 1-shot or slice ends */
+#define FW_PICKER           0x20020880u
+#define FW_PICKER_OPEN      0x600CF2B8u     /* (picker, mode, instrument) */
+#define PICKER_ALL          2u              /* synths, samples, MIDI (the Pattern screen's) */
+#define FW_SCREEN           (*(volatile const uint32_t *)(0x200207C0u + 8u))   /* the screen in front */
+
 #define PENDING_PLAYER_SENDS 0x00100100u
 #define PENDING_SYNTH_SENDS  0x6u           /* bit 1 delay, bit 2 reverb */
 
@@ -172,6 +223,9 @@ typedef void (*fn2)(uint32_t a, uint32_t b);
 typedef void (*fn0)(void);
 typedef void (*start_fn)(void *self, uint32_t arg);
 typedef void (*labels_fn)(void *scr);
+typedef void (*picker_open_fn)(uint32_t picker, uint32_t mode, int32_t instrument);
+typedef uint32_t (*record_mode_fn)(uint32_t a, uint32_t b, uint32_t c, uint32_t d);
+typedef uint32_t (*skipped_fn)(uint32_t seq, uint32_t track);
 typedef void (*copy_fn)(void *dst, const void *src, uint32_t n);
 typedef uint32_t (*q_fn)(uint32_t q);
 typedef void (*ctl_text_fn)(uint32_t controls, uint32_t id, const char *text);
@@ -205,6 +259,8 @@ CHAIN_WORD(mt_rs_next_pattern_update);      /* Pattern screen update 0x600e1f99 
 CHAIN_WORD(mt_rs_next_save_name);           /* strncpy 0x601673d7 (Save As: the new name) */
 CHAIN_WORD(mt_rs_next_project_update);      /* project screen update 0x600ead59 */
 CHAIN_WORD(mt_rs_next_countin_done);        /* the count-in's end 0x600f8605 */
+CHAIN_WORD(mt_rs_next_picker);              /* the instrument button's callback 0x600d4675 */
+CHAIN_WORD(mt_rs_next_record_mode);         /* ITCM 0x1faa9: record mode (ed+0x254) */
 
 /* ---- state (.mt_ram: neither loaded nor zeroed; the patcher places it) ----------- */
 
@@ -253,6 +309,11 @@ static void rs_init_if_needed(void)         /* RAM outside .bss holds garbage at
 }
 
 /* ---- the gates --------------------------------------------------------------------- */
+
+static int instrument_midi(void)
+{
+    return (uint8_t)(FW_INSTRUMENT - INS_MIDI_FIRST) <= INS_MIDI_LAST - INS_MIDI_FIRST;
+}
 
 static int moved_recording_on(void)         /* a recording runs, in the buffer mt_rs_rec_buffer moved */
 {
@@ -493,6 +554,8 @@ uint32_t mt_rs_update(void *self)
         preview_unmute_masked();            /* the count-in ended without a recording */
     if (!FW_REC_ON && !FW_SCR_B(FW_SCR_ACTIVE) && settings_tick())
         draw_slots();                       /* the settings changed with the project while the setup shows */
+    if (RS->audio && !RS->opened && in_setup() && !FW_SCR_B(FW_SCR_ACTIVE) && !instrument_midi())
+        open_gates();                       /* a sample or synth selected: its live notes are heard */
     return r;
 }
 
@@ -508,7 +571,78 @@ void mt_rs_start(void *self, uint32_t arg)
     RS->opened = 0;                         /* the stock start shuts the engine again */
     RS->armed = 0;
     RS->ran = 0;
+    uint8_t ins = FW_INSTRUMENT;
     ((start_fn)mt_rs_next_start)(self, arg);
+    if (RS->audio && FW_INSTRUMENT != ins && FW_SCR_B(FW_SCR_INS_ENTRY) == ins)
+        FW_INSTRUMENT = ins;                /* swapped for the MIDI instrument (0x600fa45a): put it back */
+}
+
+/* ---- the instrument button (pool word 0x600fa4a8) ---------------------------------- */
+/* A kind-3 binding: r0 = 1 on the press (open the picker), 0 on the release (close it). */
+
+uint32_t mt_rs_picker(uint32_t state, uint32_t b, uint32_t c, uint32_t d)
+{
+    if (RS->magic != RS_MAGIC || !RS->audio)
+        return ((handler_fn)mt_rs_next_picker)(state, b, c, d);
+    if (state == 1u) {
+        ((picker_open_fn)(FW_PICKER_OPEN | 1u))(FW_PICKER, PICKER_ALL, (int8_t)FW_INSTRUMENT);
+        return 0;
+    }
+    volatile uint8_t *midi = (volatile uint8_t *)(FW_SCR + FW_SCR_INS_MIDI);
+    uint8_t was = *midi;
+    uint32_t r = ((handler_fn)mt_rs_next_picker)(state, b, c, d);
+    if (!instrument_midi())
+        *midi = was;                        /* it stays the recorder's MIDI instrument */
+    return r;
+}
+
+/* ---- the live note's track (ITCM 0x166a) ------------------------------------------- */
+
+#define TRK_B(t, off)       FW_SEQ_B(FW_SEQ_TRACK * (t) + (off))
+
+static int track_free(void)                 /* a track stock's strict test would take */
+{
+    uint32_t ins = FW_INSTRUMENT, from = FW_SEQ_B(1u);
+    for (uint32_t i = 0; i < 16u; i++) {
+        uint32_t t = (from + i) & 15u;
+        if (ins <= INS_SAMPLE_LAST && (t & 8u))
+            continue;                       /* sample instruments: tracks 1-8 */
+        if (((skipped_fn)FW_TRACK_SKIPPED)(FW_SEQ, t))
+            continue;
+        if (!TRK_B(t, TRK_SOUNDING))
+            return 1;
+    }
+    return 0;
+}
+
+static int track_ended(uint32_t t)          /* a sample track whose sound has ended */
+{
+    if (t >= 8u || TRK_B(t, TRK_INSTRUMENT) > INS_SAMPLE_LAST || TRK_B(t, TRK_DELAYED))
+        return 0;
+    for (uint32_t k = TRK_FX1_TYPE; k <= TRK_FX2_TYPE; k += 2u) {
+        uint32_t fx = TRK_B(t, k);
+        if (fx == FX_ROLL || fx == FX_CHORD || fx == FX_ARP)
+            return 0;                       /* they play on after the note */
+    }
+    uint32_t player = FW_PLAYERS + FW_PLAYER_SIZE * t;
+    const uint32_t *v = *(const uint32_t *const *)(player + FW_PLAYER_VOICES);
+    const uint32_t *end = *(const uint32_t *const *)(player + FW_PLAYER_VOICES + 4u);
+    if (v == end)
+        return 0;
+    for (; v < end; v++)
+        if (*(volatile const uint8_t *)(*v + VOICE_PLAYING))
+            return 0;
+    return 1;
+}
+
+/* r2 = seq, r3 = the track tried (r4 and r6 at the site). */
+uint32_t mt_rs_record_mode(uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+{
+    if (RS->magic != RS_MAGIC || !RS->audio || FW_SCREEN != FW_SCR)
+        return ((record_mode_fn)mt_rs_next_record_mode)(a, b, c, d);
+    if (track_free())
+        return 0;                           /* stock's free track */
+    return (uint32_t)track_ended(d & 15u);  /* "on": the track is taken unless a live note holds it */
 }
 
 /* ---- the setup's labels (bl 0x600fbc40 at four sites) ----------------------------- */
@@ -576,6 +710,12 @@ uint32_t mt_rs_slot2_button(uint32_t a, uint32_t b, uint32_t c, uint32_t d)
         RS->record = 0;                     /* Record Tracker needs Tracker Audio */
         if (RS->opened)
             close_gates();                  /* stops the pattern Play started here */
+        if (!instrument_midi()) {           /* the stock start's choice (0x600fa446) */
+            uint8_t ins = FW_SCR_B(FW_SCR_INS_MIDI);
+            ins = ins < INS_MIDI_FIRST ? INS_MIDI_FIRST : ins > INS_MIDI_LAST ? INS_MIDI_LAST : ins;
+            *(volatile uint8_t *)(FW_SCR + FW_SCR_INS_MIDI) = ins;
+            FW_INSTRUMENT = ins;
+        }
     }
     draw_slots();
     return 0;
