@@ -38,8 +38,14 @@ Needs Node (runs web/patcher.js through tools/web_patcher_node.mjs). It:
     in docs/PATCHING.md and web/manifest.json;
   - checks web/expected.json (the hashes the page accepts) holds exactly the
     selections' hashes; --update rewrites it.
-Outputs: <out dir>/py, the .ptf and .map.json files the emulator tests need, and
-<out dir>/js, the web patcher's .map.json files (its .ptf files only where they differ).
+Outputs: <out dir>/py, each selection's .map.json, and index.json: for each selection that
+passed, its .ptf's SHA-256, where its image ends (the last non-0xFF byte, for the test
+runner's cover set) and the spec it was patched from in <out dir>/site. A selection's
+.ptf (4.6 MB; 88 GB for fourteen mods' 16,383) is deleted once it passed: the test runner
+rebuilds the few mixes its emulator tests run on, and checks each against its SHA-256.
+A selection that failed keeps its .ptf, for a look. The bundles in other orders keep
+theirs. <out dir>/js holds the web patcher's .map.json files (its .ptf files only where
+they differ).
 
 Both patchers run in parallel, --jobs N processes at once (default one per core): the web
 patcher in Node processes, patch_ptf.py in a pool of worker processes that parse the
@@ -49,7 +55,7 @@ interpreter per selection).
 The selections' cache (<out dir>/selections.json): a selection's key is a digest of the
 patcher code (both patchers, test_layout.py and this file), the stock firmware, the spec
 the page plans for it and every patch file that spec uses. A selection whose key passed
-before (byte-identical, layout checks passed), and whose outputs in <out dir>/py are
+before (byte-identical, layout checks passed), and whose .map.json in <out dir>/py is
 still as written, isn't patched or checked again: a change to one patch reruns only the
 selections that contain it. --no-cache runs them all. The bundles in other orders and
 the refusals always run.
@@ -163,7 +169,7 @@ def _py_job(site: Path, name: str, spec: str | None, stock: Path, outdir: Path, 
     finally:
         sys.argv = argv
     r = SimpleNamespace(returncode=rc, stdout=so.getvalue(), stderr=se.getvalue(), same=None, same_map=None,
-                        layout_checked=False, layout_failed=0, layout_log="")
+                        layout_checked=False, layout_failed=0, layout_log="", end=None, map=None)
     if rc:
         return r
     if compare:
@@ -180,7 +186,33 @@ def _py_job(site: Path, name: str, spec: str | None, stock: Path, outdir: Path, 
         r.layout_checked = True
         r.layout_failed = len(test_layout.failures) - n0
         r.layout_log = buf.getvalue() if r.layout_failed else ""
+    if name.startswith("sel-") and r.same and r.same_map and r.layout_checked and not r.layout_failed:
+        r.end = data_end(out)
+        r.map = hashlib.sha256(out.with_suffix(".map.json").read_bytes()).hexdigest()
+        out.unlink()                              # passed: the index keeps what the test runner needs
     return r
+
+
+def data_end(ptf: Path) -> int:
+    """Address after the image's last non-0xFF byte, read from the end of the Intel HEX:
+    only its last 64 KB, more if the answer isn't in them."""
+    size, chunk = ptf.stat().st_size, 1 << 16
+    with ptf.open("rb") as f:
+        while True:
+            start = max(0, size - chunk)
+            f.seek(start)
+            lines = f.read().splitlines()[1 if start else 0:]     # the first line may be cut
+            last = None
+            for line in reversed(lines):
+                n, addr, kind = int(line[1:3], 16), int(line[3:7], 16), int(line[7:9], 16)
+                data = bytes.fromhex(line[9:9 + 2 * n].decode())
+                if kind == 0 and last is None and data.rstrip(b"\xff"):
+                    last = addr + len(data.rstrip(b"\xff"))
+                elif kind == 4 and last is not None:
+                    return (int.from_bytes(data, "big") << 16) + last
+            if not start:
+                raise ValueError(f"{ptf}: no data")
+            chunk *= 4
 
 
 @functools.lru_cache(None)
@@ -204,9 +236,8 @@ def selection_key(base: str, site: Path, plan: dict) -> str:
 
 
 def outputs_as_written(py: Path, name: str, entry: dict) -> bool:
-    f = py / f"{name}.ptf"
-    return f.is_file() and f.with_suffix(".map.json").is_file() and \
-        [f.stat().st_size, f.stat().st_mtime_ns] == entry["ptf"]
+    """A cached selection's map (the cover set reads it) is the one it passed with."""
+    return "map" in entry and file_sha(py / f"{name}.map.json") == entry["map"]
 
 
 def tested_hashes() -> dict[str, tuple[str, bool]]:
@@ -256,8 +287,8 @@ def main() -> int:
     outdir.mkdir(parents=True, exist_ok=True)
     py_dir = outdir / "py"
     py_dir.mkdir(exist_ok=True)
-    for f in py_dir.iterdir():                    # only selections' outputs are kept
-        if not f.name.startswith("sel-"):
+    for f in py_dir.iterdir():                    # only selections' maps are kept
+        if not f.name.startswith("sel-") or f.suffix == ".ptf":
             f.unlink()
     site = outdir / "site"
     r = subprocess.run([sys.executable, "-I", str(ROOT / "web" / "stage.py"), str(site), "--no-check"],
@@ -484,9 +515,11 @@ def main() -> int:
             passed[keys[n]] = cache[keys[n]]
         elif keys[n] and js["ok"] and pr is not None and not pr.returncode and pr.same and pr.same_map \
                 and pr.layout_checked and not pr.layout_failed:
-            f = py_dir / f"{n}.ptf"
-            passed[keys[n]] = {"js": js, "ptf": [f.stat().st_size, f.stat().st_mtime_ns]}
+            passed[keys[n]] = {"js": js, "map": pr.map, "end": pr.end}
     cache_path.write_text(json.dumps(passed, indent=0) + "\n")
+    index = {n: {"sha256": passed[k]["js"]["sha256"], "end": passed[k]["end"], "spec": js_sel[n]["spec"]}
+             for n, k in keys.items() if k in passed}
+    (py_dir / "index.json").write_text(json.dumps(index, indent=0) + "\n")
 
     print("hardware-tested builds")
     table = tested_hashes()

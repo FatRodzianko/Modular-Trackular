@@ -33,7 +33,11 @@ differs from mix to mix:
     read past the end faults);
   - each pair of patches that sit next to each other in a hook chain on a shared site;
   - an image that the sector padding pads, and one it doesn't.
-Each mix runs the emulator test of every patch it contains.
+Each mix runs the emulator test of every patch it contains. The harness keeps each
+mix's .map.json and an index (harness/py/index.json: each .ptf's SHA-256, image end and
+spec), not the .ptf files (4.6 MB each). The cover set is chosen from those, and only its
+mixes are rebuilt, into harness/cover as mix-<version text>.ptf; one that isn't
+byte-identical to what the harness checked is a failure, and its tests don't run.
 
 The cache (build/test_cache.json, local only): a job's key is the SHA-256 of the
 firmware file it tests, the test and its mode, the test's code and the stock firmware.
@@ -179,28 +183,6 @@ def load_cache() -> dict:
         return {}
 
 
-def data_end(ptf: Path) -> int:
-    """Address after the image's last non-0xFF byte, read from the end of the Intel HEX:
-    only its last 64 KB, more if the answer isn't in them (the cover set reads every mix)."""
-    size, chunk = ptf.stat().st_size, 1 << 16
-    with ptf.open("rb") as f:
-        while True:
-            start = max(0, size - chunk)
-            f.seek(start)
-            lines = f.read().splitlines()[1 if start else 0:]     # the first line may be cut
-            last = None
-            for line in reversed(lines):
-                n, addr, kind = int(line[1:3], 16), int(line[3:7], 16), int(line[7:9], 16)
-                data = bytes.fromhex(line[9:9 + 2 * n].decode())
-                if kind == 0 and last is None and data.rstrip(b"\xff"):
-                    last = addr + len(data.rstrip(b"\xff"))
-                elif kind == 4 and last is not None:
-                    return (int.from_bytes(data, "big") << 16) + last
-            if not start:
-                raise ValueError(f"{ptf}: no data")
-            chunk *= 4
-
-
 def hook_sites(spec_path: Path) -> set[int]:
     spec = json.loads(spec_path.read_text())
     sites = set()
@@ -219,8 +201,10 @@ def mods() -> list[tuple[str, Path]]:
     return [(m["id"], ROOT / m["spec"]) for m in manifest["patches"]]
 
 
-def mix_features(ptf: Path, sites: dict[str, set[int]]) -> tuple[list[str], set]:
-    """The patches in a built mix, and the cases it contains (see the cover set above)."""
+def mix_features(ptf: Path, image_end: int, sites: dict[str, set[int]]) -> tuple[list[str], set]:
+    """The patches in a built mix (from its .map.json, which the harness keeps), and the
+    cases it contains (see the cover set above). `image_end`: where its image ends, from the
+    harness's index (without the padding's 0xFF bytes)."""
     m = json.loads(ptf.with_suffix(".map.json").read_text())
     names = [p["name"] for p in m["patches"]]
     feats = set()
@@ -239,21 +223,21 @@ def mix_features(ptf: Path, sites: dict[str, set[int]]) -> tuple[list[str], set]
         chain = [n for n in names if site in sites.get(n, set())]
         for a, b in zip(chain, chain[1:]):
             feats.add(("chain", a, b))
-    end = data_end(ptf)                     # without the padding's 0xFF bytes
-    feats.add(("padded", 0 < end % FLASH_SECTOR <= FLASH_PAGE))
+    feats.add(("padded", 0 < image_end % FLASH_SECTOR <= FLASH_PAGE))
     return names, feats
 
 
-def cover_set(outputs: list[Path], sites: dict[str, set[int]], tested: list[Path] = ()) -> list[Path]:
+def cover_set(outputs: list[Path], sites: dict[str, set[int]], ends: dict[str, int],
+              tested: list[Path] = ()) -> list[Path]:
     """Greedy set cover: the fewest mixes that between them have every case that the
-    mixes in `tested` (tested anyway) don't."""
+    mixes in `tested` (tested anyway) don't. `ends`: each mix's image end, by name."""
     feats, size = {}, {}
     for f in outputs:
-        names, feats[f] = mix_features(f, sites)
+        names, feats[f] = mix_features(f, ends[f.stem], sites)
         size[f] = len(names)
     want = set().union(*feats.values())
     for f in tested:
-        want -= mix_features(f, sites)[1]
+        want -= mix_features(f, ends[f.stem], sites)[1]
     chosen = []
     while want:
         best = max(feats, key=lambda f: (len(feats[f] & want), -size[f]))
@@ -461,6 +445,34 @@ def build(stock: Path, spec: Path, out: Path) -> Path:
     return out
 
 
+def rebuild_mixes(stock: Path, harness: Path, index: dict, chosen: list[str], workers: int) \
+        -> tuple[dict[str, Path], list[str]]:
+    """The chosen web mixes, rebuilt into harness/cover from the specs the harness staged
+    (a file already there with the right SHA-256 is kept), each named as its spec's folder
+    (mix-<version text>: a selection's name can pass Windows' 260-character path limit).
+    Returns the files by selection name, and the names whose rebuild isn't byte-identical
+    to what the harness checked."""
+    cover = harness / "cover"
+    cover.mkdir(exist_ok=True)
+    files = {n: cover / f"{Path(index[n]['spec']).parent.name}.ptf" for n in chosen}
+    for f in cover.iterdir():
+        if f.name.split(".")[0] not in {g.stem for g in files.values()}:
+            f.unlink()
+
+    def one(n: str) -> tuple[str, bool]:
+        f = files[n]
+        if not (f.is_file() and sha256_file(f) == index[n]["sha256"]):
+            rc = subprocess.run([PY, "-I", str(TOOLS / "patch_ptf.py"), str(stock), str(harness / "site" / index[n]["spec"]),
+                                 str(f)], cwd=ROOT, capture_output=True, text=True).returncode
+            if rc or sha256_file(f) != index[n]["sha256"]:
+                return n, False
+        return n, True
+
+    with ThreadPoolExecutor(workers) as ex:
+        done = dict(ex.map(one, chosen))
+    return files, [n for n, ok in done.items() if not ok]
+
+
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     opts = sys.argv[1:]
@@ -509,7 +521,7 @@ def main() -> int:
     harness = out / "harness"
     if tier != "quick":
         hkey = r.key("harness", tool_digest, sha256_file(expected))
-        if not (harness / "py").is_dir():           # the cover set needs its outputs even when cached
+        if not (harness / "py" / "index.json").is_file():   # the cover set needs it even when cached
             r.cache["passed"].pop(hkey, None)
         pre.append(("test_web_patcher", "web harness", hkey,
                     [PY, "-I", str(TOOLS / "test_web_patcher.py"), str(stock), str(harness)] + (["--update"] if update else [])
@@ -559,20 +571,24 @@ def main() -> int:
         r.save()
 
     # 3. release and deep: the cover set of web mixes and the bundles in other orders,
-    # from the harness's outputs (byte-identical to the web patcher's, which it checks)
+    # from the harness's outputs (byte-identical to the web patcher's, which it checks).
+    # The harness keeps each mix's .map.json and, in its index, the .ptf's SHA-256, image
+    # end and spec, not the .ptf: the mixes chosen here are rebuilt from their specs.
     if tier != "quick" and not r.stopped:
         py = harness / "py"
+        index = json.loads((py / "index.json").read_text())
         singles = [py / f"sel-{n}.ptf" for n in names]
         # the bundles test_layout.py builds in other orders (not the chained copies of a
         # patch, which only test the patcher)
         extra = [f for f in py.glob("*.ptf") if not f.name.startswith("sel-") and
                  all(p["name"] in names for p in json.loads(f.with_suffix(".map.json").read_text())["patches"])]
         every = py / ("sel-" + "+".join(names) + ".ptf")
-        mixes = sorted(f for f in py.glob("sel-*.ptf") if f not in singles and f != every)
-        cover = cover_set(mixes, sites, [every])
+        mixes = sorted(py / f"{n}.ptf" for n in index if py / f"{n}.ptf" not in singles and py / f"{n}.ptf" != every)
+        cover = cover_set(mixes, sites, {n: e["end"] for n, e in index.items()}, [every])
         print(f"cover set: {len(cover)} of {len(mixes) + 1} mixes, plus {len(extra)} bundles in other orders",
               flush=True)
-        (out / "cover_set.txt").write_text("".join(f"{f.stem}\n" for f in cover))
+        (out / "cover_set.txt").write_text("".join(f"{Path(index[f.stem]['spec']).parent.name}  {f.stem}\n"
+                                                   for f in cover))
         if mixes_of:
             unknown = set(mixes_of) - set(names)
             if unknown:
@@ -580,9 +596,18 @@ def main() -> int:
             pick = [n for n in names if n in mixes_of]          # the web patcher's order
             chosen = [py / ("sel-" + "+".join(c) + ".ptf")
                       for k in range(2, len(pick) + 1) for c in itertools.combinations(pick, k)]
+            missing = [f.stem for f in chosen if f.stem not in index]
+            if missing:
+                sys.exit(f"--mixes-of: not in the harness's passes: {', '.join(missing)}")
             extra += [f for f in chosen if f not in cover and f != every]
             print(f"--mixes-of: {len(chosen)} mixes of {', '.join(pick)}", flush=True)
-        failed += r.run_all(emu_jobs([(f, tier == "deep") for f in cover + extra], mix=True))
+        built, bad = rebuild_mixes(stock, harness, index, [f.stem for f in cover + extra if f.parent == py
+                                                           and f.name.startswith("sel-")], workers)
+        for n in bad:
+            r.results.append((n, "rebuild", False, "not the .ptf the harness checked"))
+        failed += len(bad)
+        targets = [built.get(f.stem, f) for f in cover + extra if f.stem not in bad]
+        failed += r.run_all(emu_jobs([(f, tier == "deep") for f in targets], mix=True))
 
     # 4. summary
     lines = [f"tier {tier}: {len(r.results)} jobs, {failed} failed, "

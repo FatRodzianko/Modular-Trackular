@@ -1,6 +1,6 @@
 # Plan: more mods with less testing
 
-Status: Phase 1a and 1b are built (test tooling only, not committed yet); the rest is plan only.
+Status: Phase 1a and 1b are built and committed, 1c is built (test tooling only); 1d is planned; the rest is plan only.
 
 ## The problem today (14 mods in the web patcher)
 
@@ -82,12 +82,43 @@ These help whatever happens later, and none of them changes a byte of any firmwa
 - **Applies to:** resample first (the big one), then legato, chords and tracklen.
 - **Estimated saving:** 40–50 minutes off a release run that has to redo the cover set. That's an estimate from the per-run times above, so the first step is to time it.
 
-**1c. The harness disk change, already planned by the Beat Slice session.**
-- The harness keeps a fingerprint per mix instead of each `.ptf`.
-- `build/testrun` drops from about 21 GB to about 190 MB.
-- This is disk only, not time. The plan is written and waits on your go.
+**1c. The harness disk change, already planned by the Beat Slice session.** Done (2026-11-01): `index.json` in `tools/test_web_patcher.py`, `rebuild_mixes` in `tools/run_tests.py`.
+- The harness keeps each mix's `.map.json` and an index entry (the `.ptf`'s SHA-256, where its image ends, its spec) instead of each `.ptf`.
+- The test runner picks the cover set from those and rebuilds only its 23 mixes, into `harness/cover/` as `mix-<version text>.ptf`. A rebuild that isn't byte-identical to what the harness checked is a failure, and its tests don't run.
+- Nothing is checked less: byte identity and the layout checks still run on every mix before its `.ptf` is deleted.
+- What you lose: browsing any mix's `.ptf` without building it first (`patch_ptf.py` with its spec from `harness/site/`).
 
 Together, 1a and 1b should bring a typical one-mod release run back near your 60-minute goal. The web harness's doubling stays, and that's what Phase 2 is for.
+
+**1d. A faster deep tier.** Plan written 2026-11-01; each step is timed before the next one starts.
+
+The deep tier runs only when masterfx's or synths' audio code changes, not for every new patch. It runs every test in full mode on every build, cover mixes included, and takes nothing from the cache: it's the check on anything the cache keys might miss, so it keeps doing that (decided 2026-11-01).
+
+Where its time goes, from the runner's own per-test times (not a timed deep run):
+
+| Test, full mode | Share of the deep tier's CPU time |
+|---|---|
+| synths | 39 % |
+| resample | 19 % |
+| PHASE | 14 % |
+| test_bundle_cost.py | 8 % |
+| masterfx | 8 % |
+| everything else | 12 % |
+
+The runner's formula puts the whole tier at about 12.0 h with `--jobs 2`, and about 4.5 h with `--jobs 7`.
+
+The steps, cheapest first:
+1. **Run it overnight on every core.** No code change: the default `--jobs` is one less than the number of cores (7 here), and the daytime limit of 2 doesn't apply overnight. Done means a timed overnight run, which replaces the 4.5 h estimate above.
+2. **Time each long test by section.** One full run each of synths, resample, PHASE, test_bundle_cost.py and masterfx on patch/all, with each section timed, so the next two steps go where the time is.
+3. **Share the stock firmware's runs within one deep run.** Several sections run stock firmware with the same inputs for every build, for example synths' stock-output comparison (`run_pair`). Those results are identical from build to build, so a deep run could work them out once and reuse them for each build.
+   - They'd be kept only for that one run, so the deep tier still takes nothing from before it started.
+   - Before relying on it, a check that the shared results equal fresh ones, value for value, on two different builds.
+   - Worth doing only if step 2 shows those runs are a real share of the time.
+4. **Profile the emulator on the slowest section** (Python's own profiler, nothing to install). Take only changes to the test code or the emulator that leave every result exactly as it was. Checked by comparing each changed section's outputs before and after, value for value.
+
+Not planned:
+- **Splitting long tests into parallel parts.** The runner already starts the longest jobs first, and no single job (a full synths run is about 22–30 min) comes near a deep run's length, so the parts wouldn't shorten it.
+- **Letting the deep tier use the cache.** That would make it a second release tier and remove the one run that checks what the cache keys might miss.
 
 ### Phase 2: stop the doubling with "fixed slots" (before chords joins the web patcher)
 
@@ -170,7 +201,8 @@ That's far more risk than Phase 2, which changes only the build tools.
 ## What I'd do, in order
 
 1. **1a (per-test cache keys) and 1b (resample's quick mode first).** One session, timed before and after. A release run checks it. Nothing users get changes.
-2. **1c, the harness disk change**, when you say go.
+2. **1c, the harness disk change.** Done.
+   Then 1d, the deep tier's steps, one at a time, with the timed overnight run last.
 3. **Phase 2.** A design session first, plan only, with a timed prototype; then build, with an overnight deep run.
 4. **Chords joins** patch/all and the web patcher, using the bit-14 names.
 5. **Before mod 16:** the emulator check on the version text, then the name choice.
@@ -213,6 +245,34 @@ The rs9 release run before this (a patch change, so not the same case) took 130.
 - the greedy pick re-read every `map.json` in each of its 24 rounds: 62 s.
 
 Now `data_end` reads only each file's last 64 KB (more when needed), and the patch counts are kept. That takes it to **39 s**, with the same 23 mixes in the same order. A release run with everything cached now takes 0.9 min.
+
+### Timed for 1c (2026-11-01)
+
+- **Disk:** `build/testrun/harness` went from 84,475 MB to **394 MB**, and `build/testrun` from 84,931 MB to 850 MB (measured with `du`).
+- **Release run that brought it in: 142.9 min, all 253 jobs passed.** Nearly all of that was the web harness redoing every one of its 16,383 selections, because its own code changed. That happens only when the harness's code changes; a change to one patch redoes only the selections that contain it.
+  - The harness took 8,463 s (141 min) at `--jobs 2`, on 3 cores. The runner had estimated about 90 min, from its running average of earlier harness runs (3,606 s, then 1.5 times that for a busy machine). That average mixes full and partial reruns made at other `--jobs` settings, so it's a poor guide to a full rerun. The two full runs in the table above (3,130 s and 5,040 s) ran at settings I don't know.
+  - All 171 cover-set jobs came from the cache: their keys are the files' SHA-256, so this shows the rebuilt mixes are byte-identical to the ones that passed before.
+- **Choosing the cover set:** 5 s, down from 39 s, because each image's end now comes from the index. Same 23 mixes in the same order, checked against the committed code on the same files.
+- **Fully cached release run, all 23 cover mixes rebuilt:** 1.0 min (0.9 min before).
+
+### Timed for 1d step 2: where the long tests' time goes (2026-11-01)
+
+One full run of each on `patch/all`, every section timed, with other runs on the machine (so read the shares, not the exact seconds):
+
+| Test | Full run | Biggest sections |
+|---|---|---|
+| synths | 1,804 s | voice allocation 979 s (54 %), stress 194 s, stock output 193 s, swap 66 s |
+| resample | 1,043 s | instrument 408 s, Record Tracker 242 s, Shift+Rec 154 s, engine on 99 s |
+| PHASE | 801 s | engine 652 s, of which level 391 s; swap 58 s |
+| masterfx | 344 s | reverb 173 s, delay 72 s, shimmer 47 s |
+| test_bundle_cost.py | 118 s | (no sections; its stock side comes from its own stock cache file) |
+
+**Stock firmware's share, the same for every build:**
+- synths' voice allocation runs one note sequence on stock VAP and on the build, and compares which voice each note gets. Timed alone: stock 632 s, the build 244 s.
+- synths' `script()` runs (stock output and the rig): stock 102 s, the build 84 s. The rig checks (stock only) are another 31 s.
+- PHASE's voice allocation, inside its level checks: stock 263 s, the build 92 s.
+
+So a full synths run spends about 765 s, and a full PHASE run about 263 s, on stock work that gives the same answer for every build. A deep run has 11 full runs of each (synths alone, patch/all, the 8 cover mixes that have synths, and one reordered bundle), so sharing that work within the run would save about 10 × (765 + 263) ≈ 10,300 s of CPU. That's roughly 18 % of the tier's CPU time by the runner's estimate, or about 35–40 min of a 4.5 h overnight run on 7 cores. Worked out from these timings, not timed as a deep run.
 
 ### Still estimates, not timed
 
