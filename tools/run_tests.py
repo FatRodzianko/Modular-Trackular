@@ -8,18 +8,21 @@ Tiers (times with an empty cache on an 8-core PC; with the cache, only what chan
   quick    (about 2 min) tools/test_layout.py, plus every patch's emulator test on each patch alone
            and on patch/all (masterfx and synths in their --quick mode), and on the
            diagnostic builds (DIAGNOSTICS: headroom alone and listed last in patch/all
-           and in patch/all + tracklen), and on the mods not in the web patcher yet
-           (NOT_IN_WEB: chords); test_bundle_cost.py's sequencer side on each of
-           them. For a change to one patch, while working on it.
+           and in patch/all + tracklen; MIX_QUICK tests in --quick mode), and on the mods
+           not in the web patcher yet (NOT_IN_WEB: chords); test_bundle_cost.py's
+           sequencer side on each of them. For a change to one patch, while working on it.
   release  (about 40 min) quick, plus tools/test_web_patcher.py (every web patcher selection
            byte-identical to patch_ptf.py's, and its layout checks), plus every patch's
            emulator test on a cover set of web patcher mixes and on the bundles
            test_layout.py builds in other orders; masterfx, synths and test_bundle_cost.py
            (its whole block) in full mode on patch/all. Before a commit that changes what
            users get. (synths' tests are
-           test_synths.py and test_phase.py, PHASE's: EXTRA_TESTS.)
-  deep     (hours) release with masterfx and synths in full mode on every mix. Overnight, and
-           only when their audio code changes.
+           test_synths.py and test_phase.py, PHASE's: EXTRA_TESTS.) The MIX_QUICK tests
+           (resample, legato, tracklen) run in full mode on the patch alone and on patch/all, and in their
+           --quick mode (the checks that depend on the mix) on the cover set and the bundles.
+  deep     (hours) release with masterfx, synths and the MIX_QUICK tests in full mode on every
+           mix, and nothing taken from the cache. Overnight, and only when their audio code
+           changes.
 
 The cover set: the web patcher offers every mix of the mods (16383 for fourteen). Byte
 identity and the layout checks run on all of them (the harness does that in minutes);
@@ -33,11 +36,17 @@ differs from mix to mix:
 Each mix runs the emulator test of every patch it contains.
 
 The cache (build/test_cache.json, local only): a job's key is the SHA-256 of the
-firmware file it tests, the test and its mode, and a digest of every file under
-tools/emu/ (and tools/make_headroom_project.py, whose project test_bundle_cost.py plays)
-and of the stock firmware. A key that passed before is not run again, so a
-rerun after a change only runs what the change touched. --no-cache runs everything.
-The cache also keeps each test's measured duration, for the time estimate.
+firmware file it tests, the test and its mode, the test's code and the stock firmware.
+The test's code is its own file and every module of tools/emu/ and tools/ it imports, at
+any depth, found by parsing its imports (tools/patch_ptf.py where imported,
+tools/make_headroom_project.py for test_bundle_cost.py), plus the files READS lists: the
+ones a module reads without importing them (a patch's symbol files). So a change to a
+shared module (machine.py, fakefs.py, synth_rig.py...) reruns every test that imports
+it, and a change to one test reruns only that test (and the tests that import it). A
+file a test starts to read without importing it goes into READS. A key that passed
+before is not run again, so a rerun after a change only runs what the change touched.
+--no-cache and the deep tier run everything. The cache also keeps each test's measured
+duration, for the time estimate.
 
 Full masterfx and synths on patch/all (release): their full mode adds checks that depend
 on the patch's own code alone, so a full pass is also recorded against that patch's own
@@ -73,6 +82,7 @@ Exit status 0 when everything passed.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import itertools
 import json
@@ -99,6 +109,7 @@ FLASH_SECTOR, FLASH_PAGE = 0x1000, 0x100
 STOCK_ARG = {"masterfx", "swing", "condtrig", "synths", "phase", "legato", "slicethru", "resample", "tracklen", "songloop",
              "chords", "bundle_cost"}      # tests that take the stock .ptf too
 QUICK_MODE = {"masterfx", "synths", "phase", "bundle_cost"}   # tests with a --quick mode
+MIX_QUICK = {"resample", "legato", "tracklen"}   # --quick on mixes only: full on the patch alone and patch/all
 EXTRA_TESTS = {"synths": ["phase"]}        # a patch's tests besides test_<patch>.py (PHASE: test_phase.py)
 DIAGNOSTICS = [                            # specs outside the web patcher, tested in every tier
     ("headroom", "patch/headroom/patch.json"),
@@ -108,10 +119,19 @@ DIAGNOSTICS = [                            # specs outside the web patcher, test
 NOT_IN_WEB = [                             # mods not in the web patcher (nor patch/all) yet: alone, in every tier
     ("chords", "patch/chords/patch.json"),
 ]
+READS = {                                  # patches whose symbol files (own_files) a module reads
+    "test_chords.py": ["chords"],          # without importing them (layout.patch_function and the like)
+    "test_condtrig.py": ["tracklen"],
+    "test_tracklen.py": ["tracklen"],
+    "test_headroom.py": ["headroom"],
+    "test_synths.py": ["synths"],
+}
 DEFAULT_SECONDS = 60.0                     # estimate for a test not timed yet, unless below
 MEASURED_SECONDS = {                       # alone, on an 8-core PC (the cache keeps its own, measured under load)
     "layout": 45, "web harness": 800, "colorsong": 1, "copypattern": 3, "humanize": 6, "visualizer": 8,
-    "swing": 16, "headroom": 7, "interpolate": 25, "condtrig": 36, "legato": 130, "chords": 135, "slicethru": 12, "resample": 245, "masterfx (quick)": 15,
+    "swing": 16, "headroom": 7, "interpolate": 25, "condtrig": 36, "legato (full)": 240, "legato (quick)": 55,
+    "chords": 135, "slicethru": 12, "resample (full)": 750, "resample (quick)": 40,
+    "tracklen (full)": 95, "tracklen (quick)": 15, "masterfx (quick)": 15,
     "masterfx (full)": 385, "synths (quick)": 127, "synths (full)": 1400, "phase (quick)": 150,
     "phase (full)": 660, "bundle_cost (quick)": 25, "bundle_cost (full)": 95,
 }
@@ -131,6 +151,27 @@ def digest_files(paths) -> str:
     return h.hexdigest()
 
 
+def imported_files(path: Path) -> set[Path]:
+    """`path` and every module of tools/emu/ and tools/ it imports, at any depth (any import
+    statement, also one inside a function), plus the files READS lists for them."""
+    seen, todo = set(), [path]
+    while todo:
+        f = todo.pop()
+        if f in seen:
+            continue
+        seen.add(f)
+        for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                names = [node.module]
+            else:
+                continue
+            todo += [d / f"{n.split('.')[0]}.py" for n in names for d in (EMU, TOOLS)
+                     if (d / f"{n.split('.')[0]}.py").is_file()]
+    return seen | {g for f in seen for name in READS.get(f.name, []) for g in own_files(name) or []}
+
+
 def load_cache() -> dict:
     try:
         return json.loads(CACHE.read_text())
@@ -139,16 +180,25 @@ def load_cache() -> dict:
 
 
 def data_end(ptf: Path) -> int:
-    """Address after the image's last non-0xFF byte, read from the end of the Intel HEX."""
-    last = None
-    for line in reversed(ptf.read_text().splitlines()):
-        n, addr, kind = int(line[1:3], 16), int(line[3:7], 16), int(line[7:9], 16)
-        data = bytes.fromhex(line[9:9 + 2 * n])
-        if kind == 0 and last is None and data.rstrip(b"\xff"):
-            last = addr + len(data.rstrip(b"\xff"))
-        elif kind == 4 and last is not None:
-            return (int.from_bytes(data, "big") << 16) + last
-    raise ValueError(f"{ptf}: no data")
+    """Address after the image's last non-0xFF byte, read from the end of the Intel HEX:
+    only its last 64 KB, more if the answer isn't in them (the cover set reads every mix)."""
+    size, chunk = ptf.stat().st_size, 1 << 16
+    with ptf.open("rb") as f:
+        while True:
+            start = max(0, size - chunk)
+            f.seek(start)
+            lines = f.read().splitlines()[1 if start else 0:]     # the first line may be cut
+            last = None
+            for line in reversed(lines):
+                n, addr, kind = int(line[1:3], 16), int(line[3:7], 16), int(line[7:9], 16)
+                data = bytes.fromhex(line[9:9 + 2 * n].decode())
+                if kind == 0 and last is None and data.rstrip(b"\xff"):
+                    last = addr + len(data.rstrip(b"\xff"))
+                elif kind == 4 and last is not None:
+                    return (int.from_bytes(data, "big") << 16) + last
+            if not start:
+                raise ValueError(f"{ptf}: no data")
+            chunk *= 4
 
 
 def hook_sites(spec_path: Path) -> set[int]:
@@ -197,16 +247,16 @@ def mix_features(ptf: Path, sites: dict[str, set[int]]) -> tuple[list[str], set]
 def cover_set(outputs: list[Path], sites: dict[str, set[int]], tested: list[Path] = ()) -> list[Path]:
     """Greedy set cover: the fewest mixes that between them have every case that the
     mixes in `tested` (tested anyway) don't."""
-    feats = {}
+    feats, size = {}, {}
     for f in outputs:
-        feats[f] = mix_features(f, sites)[1]
+        names, feats[f] = mix_features(f, sites)
+        size[f] = len(names)
     want = set().union(*feats.values())
     for f in tested:
         want -= mix_features(f, sites)[1]
     chosen = []
     while want:
-        best = max(feats, key=lambda f: (len(feats[f] & want), -len(json.loads(
-            f.with_suffix(".map.json").read_text())["patches"])))
+        best = max(feats, key=lambda f: (len(feats[f] & want), -size[f]))
         got = feats[best] & want
         if not got:
             break
@@ -281,7 +331,8 @@ class Runner:
         self.cache = load_cache()
         self.cache.setdefault("passed", {})
         self.cache.setdefault("seconds", {})
-        self.emu_digest = digest_files([*EMU.rglob("*.py"), TOOLS / "make_headroom_project.py"])
+        self.deep = False                    # deep: MIX_QUICK tests in full mode on mixes too
+        self.test_digests: dict[str, str] = {}
         self.stock_sha = sha256_file(stock)
         self.lock = threading.Lock()
         self.results: list[tuple[str, str, bool, str]] = []   # (what, test, ok, note)
@@ -298,7 +349,16 @@ class Runner:
         return self.cache["seconds"].get(kind, MEASURED_SECONDS.get(kind, DEFAULT_SECONDS))
 
     def key(self, *parts: str) -> str:
-        return hashlib.sha256("|".join((*parts, self.emu_digest, self.stock_sha)).encode()).hexdigest()
+        return hashlib.sha256("|".join((*parts, self.stock_sha)).encode()).hexdigest()
+
+    def test_digest(self, test: str) -> str:
+        """The test code a test runs: its file and what it imports (imported_files)."""
+        if test not in self.test_digests:
+            self.test_digests[test] = digest_files(imported_files(EMU / f"test_{test}.py"))
+        return self.test_digests[test]
+
+    def job_key(self, ptf: Path, test: str, mode: str) -> str:
+        return self.key(sha256_file(ptf), test, mode, self.test_digest(test))
 
     def run_command(self, label: str, kind: str, key: str, cmd: list[str], log: Path, also: tuple = ()) -> bool:
         if self.use_cache and key in self.cache["passed"]:
@@ -323,23 +383,28 @@ class Runner:
         self.save()
         return ok
 
-    def emu_job(self, ptf: Path, patch: str, full: bool) -> tuple:
+    def emu_job(self, ptf: Path, patch: str, full: bool, mix: bool = False) -> tuple:
+        """One test on one firmware; `mix`: a mix or bundle other than the patch alone and
+        patch/all (MIX_QUICK tests take --quick there, except in the deep tier)."""
         also = ()
         if full and patch in QUICK_MODE and self.full_by_own and (own := own_files(patch)):
-            own_key = self.key("own", digest_files(own), patch, "full")
+            own_key = self.key("own", digest_files(own), patch, "full", self.test_digest(patch))
             if not (self.use_cache and own_key in self.cache["passed"]):
                 also = (own_key,)                    # a full pass holds for these files
-            elif not (self.use_cache and self.key(sha256_file(ptf), patch, "full") in self.cache["passed"]):
+            elif not (self.use_cache and self.job_key(ptf, patch, "full") in self.cache["passed"]):
                 full = False
                 self.full_skipped.append(f"{ptf.stem}: {patch}")
-        mode = "full" if (full or patch not in QUICK_MODE) else "quick"
-        kind = f"{patch}" + (f" ({mode})" if patch in QUICK_MODE else "")
+        if patch in MIX_QUICK:
+            mode = "quick" if mix and not self.deep else "full"
+        else:
+            mode = "full" if (full or patch not in QUICK_MODE) else "quick"
+        kind = f"{patch}" + (f" ({mode})" if patch in QUICK_MODE | MIX_QUICK else "")
         cmd = [PY, "-I", str(EMU / f"test_{patch}.py"), str(ptf)]
         if patch in STOCK_ARG:
             cmd.append(str(self.stock))
         if mode == "quick":
             cmd.append("--quick")
-        key = self.key(sha256_file(ptf), patch, mode)
+        key = self.job_key(ptf, patch, mode)
         log = self.out / "logs" / f"{ptf.stem}.{patch}.{mode}.txt"
         return (f"{ptf.stem}", kind, key, cmd, log, also)
 
@@ -423,7 +488,9 @@ def main() -> int:
     if problems:
         print("preflight failed (nothing run):\n" + "\n".join(f"  {p}" for p in problems))
         return 1
-    r = Runner(stock, out, workers, "--no-cache" not in opts, full_by_own=tier == "release")
+    # deep runs everything, like --no-cache: the check on what the cache keys leave out
+    r = Runner(stock, out, workers, "--no-cache" not in opts and tier != "deep", full_by_own=tier == "release")
+    r.deep = tier == "deep"
     t0 = time.time()
     patches = mods()
     sites = {name: hook_sites(spec) for name, spec in patches}
@@ -448,13 +515,14 @@ def main() -> int:
                     [PY, "-I", str(TOOLS / "test_web_patcher.py"), str(stock), str(harness)] + (["--update"] if update else [])
                     + (["--no-cache"] if "--no-cache" in opts else []) + ["--jobs", str(workers)],
                     out / "logs" / "harness.txt"))
-    def emu_jobs(targets: list[tuple[Path, bool]]) -> list[tuple]:
-        """Every contained patch's emulator test on each (file, masterfx/synths in full mode)."""
+    def emu_jobs(targets: list[tuple[Path, bool]], mix: bool = False) -> list[tuple]:
+        """Every contained patch's emulator test on each (file, masterfx/synths in full mode);
+        `mix`: mixes and bundles, where MIX_QUICK tests take --quick."""
         jobs = []
         for ptf, full in targets:
             contained = [p["name"] for p in json.loads(ptf.with_suffix(".map.json").read_text())["patches"]]
             tests = [t for p in contained for t in [p] + EXTRA_TESTS.get(p, [])]
-            jobs += [r.emu_job(ptf, t, full) for t in tests if (EMU / f"test_{t}.py").exists()]
+            jobs += [r.emu_job(ptf, t, full, mix) for t in tests if (EMU / f"test_{t}.py").exists()]
             jobs.append(r.emu_job(ptf, "bundle_cost", full))     # the whole firmware against stock
         return jobs
 
@@ -464,11 +532,15 @@ def main() -> int:
     builds.mkdir(exist_ok=True)
     first = [(build(stock, spec, builds / f"{name}.ptf"), tier == "deep") for name, spec in patches]
     first.append((build(stock, ROOT / "patch" / "all" / "patch.json", builds / "all.ptf"), tier != "quick"))
-    first += [(build(stock, ROOT / spec, builds / f"{name}.ptf"), False) for name, spec in DIAGNOSTICS + NOT_IN_WEB]
-    jobs = pre + emu_jobs(first)
+    diag = [(build(stock, ROOT / spec, builds / f"{name}.ptf"), False) for name, spec in DIAGNOSTICS]
+    first += [(build(stock, ROOT / spec, builds / f"{name}.ptf"), False) for name, spec in NOT_IN_WEB]
+    jobs = pre + emu_jobs(first) + emu_jobs(diag, mix=True)
     if "--dry-run" in opts:
+        todo = [j for j in jobs if not (r.use_cache and j[2] in r.cache["passed"])]
         for j in jobs:
-            print(" ", j[0], j[1])
+            print(f"  {'run   ' if j in todo else 'cached'} {j[0]}: {j[1]}")
+        print(f"{len(jobs)} jobs: {len(jobs) - len(todo)} already passed (cache), {len(todo)} to run"
+              + ("; the cover set's jobs come after the web harness, not listed" if tier != "quick" else ""))
         return 0
     print(f"tier {tier}: layout{' and web patcher' if tier != 'quick' else ''} checks, and the emulator tests "
           f"on each patch alone and patch/all", flush=True)
@@ -510,7 +582,7 @@ def main() -> int:
                       for k in range(2, len(pick) + 1) for c in itertools.combinations(pick, k)]
             extra += [f for f in chosen if f not in cover and f != every]
             print(f"--mixes-of: {len(chosen)} mixes of {', '.join(pick)}", flush=True)
-        failed += r.run_all(emu_jobs([(f, tier == "deep") for f in cover + extra]))
+        failed += r.run_all(emu_jobs([(f, tier == "deep") for f in cover + extra], mix=True))
 
     # 4. summary
     lines = [f"tier {tier}: {len(r.results)} jobs, {failed} failed, "

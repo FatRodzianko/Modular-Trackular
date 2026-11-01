@@ -1,7 +1,14 @@
 """Check the tracklen patch (Variable Track Length: a length per track): playback, the Trk Len button, the grid,
 live recording and the lengths' file.
 
-  python tools/emu/test_tracklen.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf>
+  python tools/emu/test_tracklen.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf> [--quick]
+
+--quick runs only what can differ between bundles (for the test runner's cover set):
+sections 1 and 2 (the ITCM stubs, and stock's playback through the hooks the mix
+chains), one length played from the patch's RAM (3's length 6), 7 (song mode), 9-14 (Trk
+Len's button, which the other patches present move, its labels, the encoder) and 18 (the
+Pattern, Config and Save As hooks it shares). The oracle sections depend on the patch's
+code alone, so they run in full mode on the patch alone and on patch/all.
 
 Works with the tracklen-only build and with bundles that include it. The sequencer runs
 tick by tick (seq_tick), MIDI instruments on the tracks, with fake MIDI ports that
@@ -664,11 +671,7 @@ def stock_checks(ptf: Path, stock: Path) -> None:
         check(out[0] == out[1] and len(out[0]) > 50, f"{label}: the same {len(out[1])} MIDI events as stock")
 
 
-def length_checks(ptf: Path, stock: Path) -> None:
-    print("Lengths: as the pattern written out (the oracle)")
-    for e in (1, 5, 6, 15):
-        a, b = pair(ptf, stock, 15, {0: (e, notes_steps(e))}, others=[(1, s, 70 + s, (0, 0), (0, 0)) for s in range(16)])
-        check(a == b and len(a) > 40, f"track 1 length {e} in 16 steps: {len(a)} events as the oracle")
+def loop_check(ptf: Path) -> None:
     rig = Rig(ptf, 15, patch_ram(ptf, "tracklen"))
     for s in range(16):
         rig.put(0, s, 40 + s)
@@ -677,6 +680,14 @@ def length_checks(ptf: Path, stock: Path) -> None:
     rig.run(3 * 16 * STEP + FIRST_MICRO)
     heard = [n - 40 for n in rig.notes(1)]
     check(heard[:48] == ([0, 1, 2, 3, 4, 5] * 3)[:16] * 3, f"length 6: plays {heard[:18]} ... (0-5 0-5 0-3, then again)")
+
+
+def length_checks(ptf: Path, stock: Path) -> None:
+    print("Lengths: as the pattern written out (the oracle)")
+    for e in (1, 5, 6, 15):
+        a, b = pair(ptf, stock, 15, {0: (e, notes_steps(e))}, others=[(1, s, 70 + s, (0, 0), (0, 0)) for s in range(16)])
+        check(a == b and len(a) > 40, f"track 1 length {e} in 16 steps: {len(a)} events as the oracle")
+    loop_check(ptf)
 
     tracks = {t: (t + 1, notes_steps(t + 1, 30 + 3 * t)) for t in range(16)}
     a, b = pair(ptf, stock, 15, tracks)
@@ -1449,16 +1460,34 @@ def file_checks(ptf: Path) -> None:
 
 
 def main() -> int:
-    ptf, stock = Path(sys.argv[1]), Path(sys.argv[2])
+    global TRK_LEN
+    args = [a for a in sys.argv[1:] if a != "--quick"]
+    quick = "--quick" in sys.argv[1:]
+    if len(args) != 2:
+        print(__doc__)
+        return 2
+    ptf, stock = Path(args[0]), Path(args[1])
     site_checks(ptf)
     stock_checks(ptf, stock)
+    if quick:                               # the mix-dependent parts only
+        print("Lengths: one played")
+        loop_check(ptf)
+        song_checks(ptf)
+        TRK_LEN = page3_buttons(ptf)[1]
+        button_checks(ptf, stock)
+        hold_checks(ptf)
+        stock_jog_checks(ptf, stock)
+        file_checks(ptf)
+        print(f"{len(failures)} failure(s) (--quick: sections 3-6, 8 and 15-17b skipped)")
+        for f in failures:
+            print("  " + f)
+        return 1 if failures else 0
     length_checks(ptf, stock)
     step_checks(ptf, stock)
     mode_checks(ptf, stock)
     roll_checks(ptf, stock)
     song_checks(ptf)
     cost_checks(ptf)
-    global TRK_LEN
     TRK_LEN = page3_buttons(ptf)[1]
     button_checks(ptf, stock)
     hold_checks(ptf)

@@ -1,7 +1,15 @@
 """Check the resample patch (the buffer above the loaded samples, Play and Shift+Rec
 with the engine on, and rs5's Tracker Audio and Record Tracker).
 
-  python tools/emu/test_resample.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf>
+  python tools/emu/test_resample.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf> [--quick]
+
+--quick runs only what can differ between bundles (for the test runner's cover set): sections
+1-3 and 5 (the sites, and the patch's RAM where it landed), 4's short recording, 6's Play
+during a recording against stock (the other patches' audio hooks in the mix), 13 (the
+Pattern, project and Save As hooks it shares with other patches, through their chains),
+14's sites (the picker's pool word, the ITCM stub) and its Record Tracker take with a live
+sample. The rest depends on the patch's code alone, so it runs in full mode on the patch
+alone and on patch/all.
 
 Works with the resample-only build and with bundles that include it. The checks run the
 firmware's record start (0x600f9074, its screen calls stubbed) and the audio engine
@@ -664,7 +672,9 @@ def entry_writes(stock: Path, monitor: bool, blocks: int, played: int = 0) -> di
     return {a: m.uc.mem_read(a, 1)[0] for a in sorted(seen)}
 
 
-def engine_on_checks(ptf: Path, stock: Path) -> None:
+def play_take_checks(ptf: Path, stock: Path) -> Session:
+    """Play during a recording, against stock given the same steps by hand; the patched
+    session, still recording."""
     print("Play during a recording")
     ref = Session(stock, False, monitor=False)      # stock: the recorder's entry, the gates opened by hand
     ref.open_by_hand()
@@ -690,6 +700,11 @@ def engine_on_checks(ptf: Path, stock: Path) -> None:
           f"the output is bit-identical to stock given the same steps by hand (peak {peak(*got)}, max diff {d})")
     check([e[1] for e in p.m.events] == [e[1] for e in midi_ref] and len(midi_ref) > 0,
           f"MIDI is sent as in stock ({len(p.m.events)} messages)")
+    return p
+
+
+def engine_on_checks(ptf: Path, stock: Path) -> None:
+    p = play_take_checks(ptf, stock)
     # against normal playback, both after SETTLE_BLOCKS audio blocks (the synths' oscillators run on)
     normal = Session(stock, False)
     normal.idle(SETTLE_BLOCKS)
@@ -1623,8 +1638,7 @@ def arp_checks(ptf: Path, stock: Path) -> None:
               f"takes ended track {pt}, the arp runs on ({pa} notes; stock: track {st_}, {sa} notes)")
 
 
-def instrument_checks(ptf: Path, stock: Path) -> None:
-    print("any instrument live (rs9)")
+def instrument_site_checks(ptf: Path) -> None:
     p = Session(ptf, True, monitor=False)
     m = p.m
     lo, hi = p.code
@@ -1635,6 +1649,37 @@ def instrument_checks(ptf: Path, stock: Path) -> None:
     hook = struct.unpack_from("<I", itcm, stub + 8)[0] & ~1 if itcm[stub + 4:stub + 8] == bytes.fromhex("dff800f0") else 0
     check(moves == (0x4622, 0x4633) and lo <= hook < hi,
           f"ITCM {TRACK_SITE:#x}: bl -> stub {stub:#x} (r2, r3 = r4, r6) -> {hook:#x}, in the patch")
+
+
+def live_take_checks(ptf: Path) -> None:
+    """A Record Tracker take with a live sample: the recorder's update, Rec, a pad's note
+    through the ITCM stub, the stop."""
+    r = Session(ptf, True, monitor=False, record=True)
+    m = r.m
+    m.w8(INSTRUMENT, 0)
+    m.w32(SCREEN_NOW, SCR)
+    r.update()
+    m.write(SEQ, bytes([0, 5, 0, 5]))
+    r.rec_press()
+    first = r.run(3)
+    t = live(r)
+    rest = r.run(SOUND_BLOCKS)
+    out = tuple(np.concatenate((a, b)) for a, b in zip(first, rest))
+    rec = r.recorded()
+    n = len(rec[0])
+    good = r.opened() and not r.playing() and t == 6 and n >= (SOUND_BLOCKS + 1) * 128 and peak(*rec) > 1000
+    for ch in range(2):
+        good = good and np.array_equal(rec[ch].astype(int), out[ch][128:n + 128].astype(int))
+    check(good, f"Record Tracker, plain Rec, a pad played during it: track {t}, the recording ({n} frames, peak "
+                f"{peak(*rec)}) is the output, in step with the jacks")
+    r.stop()
+    r.update()
+    check(not r.opened(), "its stop: the gates close")
+
+
+def instrument_checks(ptf: Path, stock: Path) -> None:
+    print("any instrument live (rs9)")
+    instrument_site_checks(ptf)
 
     # the instrument button
     def button(f: Path, patched: bool, audio: bool, ins: int, state: int):
@@ -1742,36 +1787,16 @@ def instrument_checks(ptf: Path, stock: Path) -> None:
     p.m.call(NOTE_OFF, SEQ, 0x14, 62, 0, 0, max_insns=20_000_000)
     c = live(p, 64)
     check((a, b, c) == (6, 7, 6), f"two pads held take tracks 6 and 7; released, a third takes 6 again {(a, b, c)}")
-
-    # a Record Tracker take with a live sample
-    r = Session(ptf, True, monitor=False, record=True)
-    m = r.m
-    m.w8(INSTRUMENT, 0)
-    m.w32(SCREEN_NOW, SCR)
-    r.update()
-    m.write(SEQ, bytes([0, 5, 0, 5]))
-    r.rec_press()
-    first = r.run(3)
-    t = live(r)
-    rest = r.run(SOUND_BLOCKS)
-    out = tuple(np.concatenate((a, b)) for a, b in zip(first, rest))
-    rec = r.recorded()
-    n = len(rec[0])
-    good = r.opened() and not r.playing() and t == 6 and n >= (SOUND_BLOCKS + 1) * 128 and peak(*rec) > 1000
-    for ch in range(2):
-        good = good and np.array_equal(rec[ch].astype(int), out[ch][128:n + 128].astype(int))
-    check(good, f"Record Tracker, plain Rec, a pad played during it: track {t}, the recording ({n} frames, peak "
-                f"{peak(*rec)}) is the output, in step with the jacks")
-    r.stop()
-    r.update()
-    check(not r.opened(), "its stop: the gates close")
+    live_take_checks(ptf)
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
+    args = [a for a in sys.argv[1:] if a != "--quick"]
+    quick = "--quick" in sys.argv[1:]
+    if len(args) != 2:
         print(__doc__)
         return 2
-    ptf, stock = Path(sys.argv[1]), Path(sys.argv[2])
+    ptf, stock = Path(args[0]), Path(args[1])
     p, s = Rig(ptf, True), Rig(stock, False)
     site_checks(p)
     placement_checks(p, s)
@@ -1779,6 +1804,14 @@ def main() -> int:
     recording_checks(p, s)
     write_checks(p)
     del p, s
+    if quick:                               # the mix-dependent parts only
+        play_take_checks(ptf, stock)
+        file_checks(ptf)
+        print("any instrument live (rs9): its sites, and a take")
+        instrument_site_checks(ptf)
+        live_take_checks(ptf)
+        print(f"{len(failures)} failure(s) (--quick: 4's full take, 6's rest, 7-12 and 14's behaviour skipped)")
+        return 1 if failures else 0
     full_take_checks(ptf, stock)
     engine_on_checks(ptf, stock)
     input_checks(ptf, stock)

@@ -1,6 +1,12 @@
 """Check the legato patch: MIDI and synth notes with a Glide FX (G) play legato.
 
-  python tools/emu/test_legato.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf>
+  python tools/emu/test_legato.py <patched.ptf> <stock TrackerPlus_1.2.0.ptf> [--quick]
+
+--quick (for the test runner's cover set) runs every section, but section 2 with 6 + 6
+random patterns instead of 30 + 30, and in section 9 only the first two order cases and
+the envelopes of VAP (and WAVE, when the firmware has patch/synths) with Glide Mode
+Legato, with and without G: the patterns go through the hooks the mix chains, while the
+rest of section 9 depends on the patch's code and the stock synths alone.
 
 Works with the legato-only build and with bundles that include it. The sequencer runs
 tick by tick (seq_tick) with MIDI instruments on the tracks and fake MIDI ports (USB and
@@ -200,12 +206,12 @@ def fuzz_steps(rng: random.Random, last: int, glide: bool):
     return steps
 
 
-def stock_checks(ptf: Path, stock: Path) -> None:
-    print("Against stock firmware: random patterns, 30 without G and 30 with G")
+def stock_checks(ptf: Path, stock: Path, patterns: int = 30) -> None:
+    print(f"Against stock firmware: random patterns, {patterns} without G and {patterns} with G")
     rng = random.Random(7)
     same, legato_ok, swapped, not_more_on = 0, 0, 0, 0
     for glide in (False, True):
-        for _ in range(30):
+        for _ in range(patterns):
             last = rng.choice([3, 7, 15])
             steps = fuzz_steps(rng, last, glide)
             n = rng.choice([6, 10, 18])
@@ -225,11 +231,11 @@ def stock_checks(ptf: Path, stock: Path) -> None:
             legato_ok += per_tick[0] == per_tick[1]
             swapped += ev[0] != ev[1]
             not_more_on += runs[0].left_on() <= runs[1].left_on()
-    check(same == 30, f"without G: every message at the same tick as stock ({same} of 30 patterns)")
-    check(legato_ok == 30, f"with G: the same messages at each tick as stock ({legato_ok} of 30; "
-                           f"{swapped} patterns with a changed order)")
+    check(same == patterns, f"without G: every message at the same tick as stock ({same} of {patterns} patterns)")
+    check(legato_ok == patterns, f"with G: the same messages at each tick as stock ({legato_ok} of {patterns}; "
+                                 f"{swapped} patterns with a changed order)")
     check(swapped > 0, "with G: some patterns play legato")
-    check(not_more_on == 30, f"with G: no more notes left on after stop than stock ({not_more_on} of 30)")
+    check(not_more_on == patterns, f"with G: no more notes left on after stop than stock ({not_more_on} of {patterns})")
 
 
 def legato_checks(ptf: Path) -> None:
@@ -472,7 +478,7 @@ def retrigger(rig, glide: bool) -> tuple[bool, int, int]:
     return after > 2 * before + 200, before, after
 
 
-def synth_checks(ptf: Path, stock: Path) -> None:
+def synth_checks(ptf: Path, stock: Path, quick: bool = False) -> None:
     import numpy as np
     print("Synth slots: the order the synth host gets")
     cases = [
@@ -484,7 +490,7 @@ def synth_checks(ptf: Path, stock: Path) -> None:
         ("G on S1, the same pitch", [(0, 0, 60, 64), (0, 1, 60, 64, G)], None),
         ("G on S1 after a gated S1 note (q 50)", [(0, 0, 60, 64, (GATE, 50)), (0, 1, 62, 64, G)], None),
     ]
-    for what, steps, want in cases:
+    for what, steps, want in cases[:2] if quick else cases:
         runs = []
         for path in (ptf, stock):
             rig = synth_rig(path, sr.VAP, 1, {})
@@ -497,19 +503,22 @@ def synth_checks(ptf: Path, stock: Path) -> None:
             check(got == want and sorted(runs[0]) == sorted(runs[1]), f"{what}: on 62, then off 60 ({got})")
 
     print("Synth slots: envelopes, played through the sequencer (60 on step 1, 64 on step 3)")
-    models = [(sr.ACD, "ACD"), (sr.FAT, "FAT"), (sr.VAP, "VAP"), (sr.WTFM, "WTFM")]
+    models = [(sr.VAP, "VAP")] if quick else [(sr.ACD, "ACD"), (sr.FAT, "FAT"), (sr.VAP, "VAP"), (sr.WTFM, "WTFM")]
     if any(p["name"] == "synths" for p in json.loads(ptf.with_suffix(".map.json").read_text())["patches"]):
         models.append((None, "WAVE"))
+    combos = ((1, 2, False), (1, 2, True), (1, 3, True), (1, 0, True), (4, 2, True))
     for model, name in models:
         res = {}
-        for poly, mode, glide in ((1, 2, False), (1, 2, True), (1, 3, True), (1, 0, True), (4, 2, True)):
+        for poly, mode, glide in combos[:2] if quick else combos:
             rig = synth_rig(ptf, model, poly, dict(ENVELOPES, **{"Glide Mode": float(mode)}))
             res[poly, mode, glide] = retrigger(rig, glide)
-        ok = (res[1, 2, False][0] and not res[1, 2, True][0] and not res[1, 3, True][0]
-              and res[1, 0, True][0] and res[4, 2, True][0])
+        ok = res[1, 2, False][0] and not res[1, 2, True][0] and (quick or (
+            not res[1, 3, True][0] and res[1, 0, True][0] and res[4, 2, True][0]))
         text = ", ".join(f"poly {p} mode {md}{' G' if g else ''}: {'retrigger' if r[0] else 'legato'} {r[1]}->{r[2]}"
                          for (p, md, g), r in res.items())
         check(ok, f"{name}: legato only with G, Polyphony 1, Glide Mode Legato or Legato O ({text})")
+    if quick:
+        return
 
     print("PERC (it ignores note offs)")
     outs = []
@@ -527,17 +536,22 @@ PTF = STOCK = None
 
 def main() -> int:
     global PTF, STOCK
-    PTF, STOCK = Path(sys.argv[1]), Path(sys.argv[2])
+    args = [a for a in sys.argv[1:] if a != "--quick"]
+    quick = "--quick" in sys.argv[1:]
+    if len(args) != 2:
+        print(__doc__)
+        return 2
+    PTF, STOCK = Path(args[0]), Path(args[1])
     site_checks(PTF)
-    stock_checks(PTF, STOCK)
+    stock_checks(PTF, STOCK, 6 if quick else 30)
     legato_checks(PTF)
     stock_order_checks(PTF)
     fx_checks(PTF)
     stuck_checks(PTF)
     two_track_checks(PTF, STOCK)
     cost_checks(PTF)
-    synth_checks(PTF, STOCK)
-    print(f"{len(failures)} failure(s)")
+    synth_checks(PTF, STOCK, quick)
+    print(f"{len(failures)} failure(s)" + (" (--quick: 6 + 6 random patterns, the synth slots in part)" if quick else ""))
     return 1 if failures else 0
 
 
