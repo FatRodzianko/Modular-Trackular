@@ -98,7 +98,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   the Song list; Performance stays on while the block loops (as Loop Performance does
   for one pattern). Tested on hardware, on its own and in patch/all. See
   [patch/songloop/README.md](patch/songloop/README.md).
-- **all**: all fourteen mods above in one firmware (version text `1.2.0-MR9`), from
+- **all**: all fourteen mods above in one firmware (version text `1.2.0-MLN`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **chords**: more MIDI chords. Turning the encoder on a MIDI Chord FX (`0`) past the
   last stock chord goes on to the major and minor triad inversions, then the maj7,

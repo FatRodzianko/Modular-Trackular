@@ -4,7 +4,7 @@ A patch for Polyend Tracker+ firmware 1.2.0 that lets each track of a pattern ha
 own length. A track shorter than the pattern plays its own steps over and over, and every
 track starts again together when the pattern ends: in a 16-step pattern a track of
 length 6 plays steps 1–6, 1–6, 1–4, then the pattern starts again. Installed on its own,
-Config shows the firmware version as `1.2.0-tl7`.
+Config shows the firmware version as `1.2.0-tl8`.
 
 The idea comes from a custom firmware for the Tracker Mini shown on r/PolyendTracker.
 This is a re-implementation from its description; nothing of it was seen or used.
@@ -129,12 +129,19 @@ used: a damaged file gives no lengths. Save As is recognised by the save request
 copy (`0x60114eaa`), as the other patches do, and the lengths are written to the new
 folder.
 
+For Copy to New, the patch has `mt_tl_copy_lengths(from, to)`: pattern `to` gets pattern
+`from`'s 16 lengths in place of its own ("follows the pattern" included), saved to the
+file as a Trk Len change is. Called right after a project opens, before its lengths are
+loaded, the copy waits for the load; if another project opens first, it is dropped. The
+patcher links a patch to it through `"links"`, as condtrig is linked to `mt_tl_len`; on
+its own nothing calls it.
+
 ## Building and checking it
 
 ```bash
 patch/tracklen/build.sh                    # optional: prebuilt/ is used without a build
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/tracklen/patch.json build/TrackerPlus_tl7.ptf
-python tools/emu/test_tracklen.py build/TrackerPlus_tl7.ptf path/to/TrackerPlus_1.2.0.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/tracklen/patch.json build/TrackerPlus_tl8.ptf
+python tools/emu/test_tracklen.py build/TrackerPlus_tl8.ptf path/to/TrackerPlus_1.2.0.ptf
 ```
 
 The test checks that without lengths the firmware plays exactly as stock, and that a

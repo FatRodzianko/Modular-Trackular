@@ -122,7 +122,13 @@ manager, the stock page-3 bind and label code, and the display calls recorded:
    is busy (the old project's lengths cleared at once), then read and the grid redrawn
    once; a project without a name: nothing written; no pattern file written; Save As
    and new projects as the other patches' files (project_save.save_as_checks). The
-   encoder marks a change for the file only when a length changes.
+   encoder marks a change for the file only when a length changes. Copy to New's
+   lengths (mt_tl_copy_lengths, called directly): the target gets the source's lengths
+   in place of its own (none included) and the file follows; the same pattern, 0 and
+   256, and a copy that changes nothing: no change; called before the project's
+   lengths are loaded (the file manager busy, or before the update has seen the
+   project): made after the load; another project opened first: dropped; a new project
+   with no folder: in RAM only.
 """
 from __future__ import annotations
 
@@ -203,7 +209,7 @@ CTRL_REFRESH = 0x60101E84
 FM_STATE = 0x2001E488 + 0x13D
 SAVE_DELAY = 25
 TL_CHANGED = 0x100F                     # the patch's RAM: a length changed since the file
-TL_SIZE = 0x1018
+TL_SIZE = 0x1020
 
 failures: list[str] = []
 
@@ -1424,6 +1430,68 @@ def file_checks(ptf: Path) -> None:
     put(a)
     tick(SAVE_DELAY + 5, cfg_hook)
     check(fs.overlay.get(path("A")) == good, "through the Config screen's update too")
+
+    print("Copy to New's lengths (mt_tl_copy_lengths, which copypattern is linked to)")
+    copy = patch_function(ptf, "tracklen", "mt_tl_copy_lengths")[0] | 1
+    changed = lambda: m.uc.mem_read(table + TL_CHANGED, 1)[0]
+    b = {1: lens(t1=6, t9=3), 5: lens(t4=7), 7: lens(t2=2, t5=9)}
+    put(b)
+    tick(SAVE_DELAY + 5)
+    n = writes()
+    m.call(copy, 1, 5)
+    check(get() == {**b, 5: b[1]} and changed() == 1,
+          "pattern 1 copied to 5: 5 gets 1's lengths in place of its own, 1 unchanged, marked for the file")
+    tick(SAVE_DELAY + 5)
+    check(writes() == n + 1 and fs.overlay.get(path("A")) == tln1(get()), "and written a moment later, as a Trk Len change")
+    m.call(copy, 9, 7)
+    check(get() == {1: b[1], 5: b[1]}, "a pattern without lengths copied to 7: 7's lengths go (it follows the pattern)")
+    tick(SAVE_DELAY + 5)
+    check(fs.overlay.get(path("A")) == tln1(get()), "and the file follows")
+    for args, label in (((1, 5), "a copy that changes nothing"), ((5, 5), "the same pattern"),
+                        ((0, 3), "from pattern 0"), ((1, 0), "to pattern 0"),
+                        ((256, 3), "from 256"), ((1, 256), "to 256")):
+        before = get()
+        m.call(copy, *args)
+        check(get() == before and changed() == 0, f"{label}: nothing changes, nothing to write")
+    on_a = get()
+    m.w8(FM_STATE, 5)                           # the file manager busy: A's lengths not loaded yet
+    reopen()
+    m.call(copy, 1, 9)
+    check(get() == {}, "right after the project opens, before its lengths are loaded: the copy waits")
+    m.w8(FM_STATE, 0)
+    tick()
+    check(get() == {**on_a, 9: on_a[1]}, "once they are loaded: 9 gets 1's lengths from the project's file")
+    tick(SAVE_DELAY + 5)
+    check(fs.overlay.get(path("A")) == tln1(get()), "and they are written")
+    on_a = get()
+    fs.set_project(Path("."), "B", "Projects/User")
+    tick()
+    fs.set_project(Path("."), "A", "Projects/User")
+    m.call(copy, 1, 11)                         # before this patch's update has seen the project
+    tick()
+    check(get() == {**on_a, 11: on_a[1]}, "a copy before the update has seen the project open: made after the load")
+    m.w8(FM_STATE, 5)
+    reopen()
+    m.call(copy, 1, 12)
+    fs.set_project(Path("."), "B", "Projects/User")
+    m.w8(FM_STATE, 0)
+    tick(SAVE_DELAY + 5)
+    check(get() == {} and not fs.overlay.get(path("B")), "another project opened before the load: the copy dropped")
+    reopen()
+    check(12 not in get(), "and the first project doesn't get it either")
+    fs.set_project(Path("."), "New Project", "")
+    tick()
+    put({2: lens(t3=4)})
+    m.call(copy, 2, 4)
+    log0 = len(fs.log)
+    tick(SAVE_DELAY * 2)
+    check(get() == {2: lens(t3=4), 4: lens(t3=4)} and not any("tracklen.bin" in x for x in fs.log[log0:]),
+          "a new project (no folder yet): copied in RAM, nothing written")
+    fs.set_project(Path("."), "A", "Projects/User")
+    tick()
+    put(a)
+    tick(SAVE_DELAY + 5)
+    check(fs.overlay.get(path("A")) == good, "the first project's lengths put back")
 
     print("the file manager busy, and the grid")
     fs.set_project(Path("."), "B", "Projects/User")

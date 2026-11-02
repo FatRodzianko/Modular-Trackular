@@ -90,13 +90,18 @@
  *    its first save.
  * Stock firmware never reads the file: there every track plays the whole pattern.
  *
+ * Copy to New (patch/copypattern) is linked to mt_tl_copy_lengths by the patcher
+ * ("links") and calls it after it has copied a pattern: the new pattern gets the
+ * source's lengths. Right after a project opens, before its lengths are loaded, the
+ * copy waits for the load.
+ *
  * Shared hooks go through chain words (mt_tl_next_*) that tools/patch_ptf.py fills with
  * what the site pointed to before, so other patches can hook them too.
  */
 #include <stdint.h>
 
 #ifndef TRACKLEN_VERSION
-#define TRACKLEN_VERSION "tl7"
+#define TRACKLEN_VERSION "tl8"
 #endif
 
 /* ---- firmware 1.2.0 addresses ------------------------------------------------------ */
@@ -243,6 +248,8 @@ struct tl_state {
     uint8_t held;                           /* Trk Len is held */
     char label[4];                          /* its second line: "1".."128", "--" */
     uint8_t shown[3];                       /* what it shows: the track, the pattern, E (0: "--") */
+    uint8_t copy_from, copy_to;             /* a copy's lengths waiting for the load; copy_to 0: none */
+    uint32_t copy_session;                  /* the project the copy was made in */
 };
 static struct tl_state tl_state_ram __attribute__((section(".mt_ram")));
 #define TL (&tl_state_ram)
@@ -259,6 +266,7 @@ static void tl_init_if_needed(void)
     TL->session = TL->save_as = 0;
     TL->wait = SAVE_DELAY;
     TL->load = TL->changed = TL->held = 0;
+    TL->copy_to = 0;
     __asm__ volatile("" ::: "memory");
     TL->magic = TL_MAGIC;
 }
@@ -964,6 +972,42 @@ static int save_lengths(void)
     return ok;
 }
 
+/* A copy's lengths (mt_tl_copy_lengths): made once this project's lengths are loaded,
+ * dropped if another project opens first. A change is saved as Trk Len's are. */
+static void copy_pending(void)
+{
+    if (!TL->copy_to)
+        return;
+    if (TL->copy_session != project_session()) {
+        TL->copy_to = 0;                    /* another project */
+        return;
+    }
+    if (TL->load || TL->session != TL->copy_session)
+        return;                             /* its lengths aren't loaded yet */
+    uint32_t from = TL->copy_from, to = TL->copy_to;
+    TL->copy_to = 0;
+    for (uint32_t t = 0; t < TRACKS; t++) {
+        if (TL->len[to][t] != TL->len[from][t]) {
+            TL->len[to][t] = TL->len[from][t];
+            TL->changed = 1;
+        }
+    }
+}
+
+/* For copypattern, linked to it by the patcher ("links"): after Copy to New has copied
+ * pattern `from` into pattern `to`, `to` gets `from`'s lengths, "follows the pattern"
+ * included, in place of its own. Patterns 1..255, not the same one. */
+void mt_tl_copy_lengths(uint32_t from, uint32_t to)
+{
+    tl_init_if_needed();
+    if (from - 1u >= PATTERNS - 1u || to - 1u >= PATTERNS - 1u || from == to)
+        return;
+    TL->copy_from = (uint8_t)from;
+    TL->copy_to = (uint8_t)to;
+    TL->copy_session = project_session();
+    copy_pending();
+}
+
 /* At most one file read or write per call. 1: the lengths were (re)loaded. */
 static int lengths_tick(void)
 {
@@ -988,8 +1032,10 @@ static int lengths_tick(void)
         TL->load = 0;
         load_lengths();
         TL->changed = 0;                    /* nothing to write until a length changes */
+        copy_pending();
         return 1;
     }
+    copy_pending();
     if (unsaved || !TL->changed) {
         TL->wait = SAVE_DELAY;
         return 0;
