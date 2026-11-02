@@ -447,11 +447,11 @@ def build(stock: Path, spec: Path, out: Path) -> Path:
 
 def rebuild_mixes(stock: Path, harness: Path, index: dict, chosen: list[str], workers: int) \
         -> tuple[dict[str, Path], list[str]]:
-    """The chosen web mixes, rebuilt into harness/cover from the specs the harness staged
-    (a file already there with the right SHA-256 is kept), each named as its spec's folder
-    (mix-<version text>: a selection's name can pass Windows' 260-character path limit).
-    Returns the files by selection name, and the names whose rebuild isn't byte-identical
-    to what the harness checked."""
+    """The chosen web mixes (by their harness file names, index entries keyed the same),
+    rebuilt into harness/cover from the specs the harness staged (a file already there
+    with the right SHA-256 is kept), each named as its spec's folder (mix-<version text>).
+    Returns the files by name, and the names whose rebuild isn't byte-identical to what
+    the harness checked."""
     cover = harness / "cover"
     cover.mkdir(exist_ok=True)
     files = {n: cover / f"{Path(index[n]['spec']).parent.name}.ptf" for n in chosen}
@@ -573,36 +573,38 @@ def main() -> int:
     # 3. release and deep: the cover set of web mixes and the bundles in other orders,
     # from the harness's outputs (byte-identical to the web patcher's, which it checks).
     # The harness keeps each mix's .map.json and, in its index, the .ptf's SHA-256, image
-    # end and spec, not the .ptf: the mixes chosen here are rebuilt from their specs.
+    # end and spec, not the .ptf: the mixes chosen here are rebuilt from their specs. Its
+    # files are named by the index's "file" (sel-<spec folder>), not by the mods' names.
     if tier != "quick" and not r.stopped:
         py = harness / "py"
-        index = json.loads((py / "index.json").read_text())
-        singles = [py / f"sel-{n}.ptf" for n in names]
+        index = json.loads((py / "index.json").read_text())      # by selection name
+        by_file = {e["file"]: dict(e, name=n) for n, e in index.items()}
+        path = {n: py / f"{e['file']}.ptf" for n, e in index.items()}
         # the bundles test_layout.py builds in other orders (not the chained copies of a
         # patch, which only test the patcher)
         extra = [f for f in py.glob("*.ptf") if not f.name.startswith("sel-") and
                  all(p["name"] in names for p in json.loads(f.with_suffix(".map.json").read_text())["patches"])]
-        every = py / ("sel-" + "+".join(names) + ".ptf")
-        mixes = sorted(py / f"{n}.ptf" for n in index if py / f"{n}.ptf" not in singles and py / f"{n}.ptf" != every)
-        cover = cover_set(mixes, sites, {n: e["end"] for n, e in index.items()}, [every])
+        singles = {f"sel-{n}" for n in names}
+        every = "sel-" + "+".join(names)
+        mixes = [path[n] for n in sorted(index) if n not in singles and n != every]
+        cover = cover_set(mixes, sites, {e["file"]: e["end"] for e in index.values()}, [path[every]])
         print(f"cover set: {len(cover)} of {len(mixes) + 1} mixes, plus {len(extra)} bundles in other orders",
               flush=True)
-        (out / "cover_set.txt").write_text("".join(f"{Path(index[f.stem]['spec']).parent.name}  {f.stem}\n"
-                                                   for f in cover))
+        (out / "cover_set.txt").write_text("".join(f"{Path(by_file[f.stem]['spec']).parent.name}  "
+                                                   f"{by_file[f.stem]['name']}\n" for f in cover))
         if mixes_of:
             unknown = set(mixes_of) - set(names)
             if unknown:
                 sys.exit(f"--mixes-of: no mod {', '.join(sorted(unknown))}")
             pick = [n for n in names if n in mixes_of]          # the web patcher's order
-            chosen = [py / ("sel-" + "+".join(c) + ".ptf")
-                      for k in range(2, len(pick) + 1) for c in itertools.combinations(pick, k)]
-            missing = [f.stem for f in chosen if f.stem not in index]
+            chosen = ["sel-" + "+".join(c) for k in range(2, len(pick) + 1) for c in itertools.combinations(pick, k)]
+            missing = [n for n in chosen if n not in index]
             if missing:
                 sys.exit(f"--mixes-of: not in the harness's passes: {', '.join(missing)}")
-            extra += [f for f in chosen if f not in cover and f != every]
+            extra += [path[n] for n in chosen if path[n] not in cover and n != every]
             print(f"--mixes-of: {len(chosen)} mixes of {', '.join(pick)}", flush=True)
-        built, bad = rebuild_mixes(stock, harness, index, [f.stem for f in cover + extra if f.parent == py
-                                                           and f.name.startswith("sel-")], workers)
+        built, bad = rebuild_mixes(stock, harness, by_file, [f.stem for f in cover + extra if f.stem in by_file],
+                                   workers)
         for n in bad:
             r.results.append((n, "rebuild", False, "not the .ptf the harness checked"))
         failed += len(bad)

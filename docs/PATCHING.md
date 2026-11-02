@@ -187,7 +187,8 @@ and edit its `patch.json`:
 1. List the patches you want in `include`, as paths relative to the bundle's folder.
    They are placed in flash in that order. Your own patches can be listed too.
 2. Change `name`, and set `version` to 1–3 characters that tell your build apart.
-   Config shows `1.2.0-<version>`; longer text doesn't show.
+   Config shows `1.2.0-<version>`. Exactly 5 characters also work (Config shows
+   `1.2-<version>`); any other length doesn't show.
 3. Leave `stock_image_sha256` and `version_word` as they are.
 
 ```bash

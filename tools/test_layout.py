@@ -85,7 +85,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-from patch_ptf import (RAM_DEFAULT_ORDER, RAM_REGIONS, bl_target, branch_form, load_rel, load_symbols,  # noqa: E402
+from patch_ptf import (RAM_DEFAULT_ORDER, RAM_REGIONS, bl_target, branch_form, load_rel, load_symbols, version_prefix,  # noqa: E402
                        thumb_bl)
 from ptf import read_ptf  # noqa: E402
 
@@ -264,7 +264,8 @@ def verify(label: str, out: Path, specs: list[Path], version: str | None, stock:
     vptr =struct.unpack_from("<I", img, 0x600CBF9C - base0)[0]
     text = img[vptr - base0:].split(b"\0")[0].decode()
     if version:
-        check(text == "%d.%d.%d-" + version and vptr >= end, f"version text {text!r} after the last patch")
+        check(text == version_prefix(version.encode()).decode() + version and vptr >= end,
+              f"version text {text!r} after the last patch")
     else:
         check(text.startswith("%d.%d.%d-"), f"version text {text!r} (the patch's own)")
 

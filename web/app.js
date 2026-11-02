@@ -1,7 +1,7 @@
 // The page: choose the stock firmware, choose mods, patch, download.
 // The patching itself is web/patcher.js; this file only drives it.
 import {
-  PatchError, allIds, patchFirmware, planSelection, readPtf, versionTextOf, versionWordAt,
+  PatchError, allIds, patchFirmware, planSelection, readPtf, versionShown, versionTextOf, versionWordAt,
 } from "./patcher.js";
 
 const $ = (id) => document.getElementById(id);
@@ -99,8 +99,8 @@ function renderGrid() {
   const inAll = allIds(state.manifest, state.allSpec);
   const everything = inAll.length === state.manifest.patches.length;
   $("select-all-label").textContent = everything
-    ? `Select all (the “all” bundle, 1.2.0-${state.allSpec.version})`
-    : `Select the “all” bundle: ${titles(inAll).join(", ")} (1.2.0-${state.allSpec.version})`;
+    ? `Select all (the “all” bundle, ${versionShown(state.allSpec.version)})`
+    : `Select the “all” bundle: ${titles(inAll).join(", ")} (${versionShown(state.allSpec.version)})`;
   $("select-all").addEventListener("change", (e) => {
     state.selected = new Set(e.target.checked ? inAll : []);
     update();
@@ -118,8 +118,8 @@ function update() {
   if (ids.length) {
     const plan = planSelection(state.manifest, state.allSpec, ids);
     const what = plan.kind === "single" ? `${titles(ids)[0]} on its own`
-      : plan.kind === "all" ? `the “all” bundle, version text 1.2.0-${state.allSpec.version}`
-      : `${titles(ids).join(" + ")}, version text 1.2.0-${plan.spec.version}`;
+      : plan.kind === "all" ? `the “all” bundle, version text ${versionShown(state.allSpec.version)}`
+      : `${titles(ids).join(" + ")}, version text ${versionShown(plan.spec.version)}`;
     const strong = document.createElement("strong");
     strong.textContent = what;
     sel.append("Selected: ", strong, ". ");
@@ -180,7 +180,7 @@ function explain(bytes, file, digest, want) {
     const stockEnd = 0x601bab78;
     if (ptf.base + ptf.image.length > stockEnd) {
       const text = versionTextOf(ptf.image, ptf.base, 0x600cbf9c);
-      if (/^1\.2\.0-.{1,3}$/.test(text)) {
+      if (/^1\.2(\.0-.{1,3}|-.{5})$/.test(text)) {
         return `${file.name} is already patched (it shows ${text} in Config). Start from the unmodified ${want.file}. ${again}`;
       }
     }

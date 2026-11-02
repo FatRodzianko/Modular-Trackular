@@ -28,9 +28,18 @@ const manifest = JSON.parse(readFileSync(join(siteDir, "manifest.json"), "utf8")
 const allSpec = JSON.parse(readFileSync(join(siteDir, manifest.all), "utf8"));
 mkdirSync(outDir, { recursive: true });
 
+// mixVersion's names for a 15th mod on (none in the manifest yet): bit 14 alone and with
+// each lower bit, 25 bits all set, and 500 more from a fixed sequence
+const masks = [1 << 14, 2 ** 25 - 1, ...Array.from({ length: 14 }, (_, b) => (1 << 14) | (1 << b))];
+for (let x = 1, i = 0; i < 500; i++) {
+  x = (x * 1103515245 + 12345) % 2 ** 31;
+  masks.push(((x % 2 ** 25) | (1 << (14 + (i % 11)))) >>> 0);
+}
 console.log(JSON.stringify({ constants: {
   VERSION_PREFIX: P.VERSION_PREFIX, VERSION_MAX: P.VERSION_MAX, ALIGN: P.ALIGN,
+  VERSION_LONG_PREFIX: P.VERSION_LONG_PREFIX, VERSION_LONG: P.VERSION_LONG,
   RAM_REGIONS: P.RAM_REGIONS, RAM_DEFAULT_ORDER: P.RAM_DEFAULT_ORDER,
+  MIX_VERSIONS: masks.map((m) => [m, P.mixVersion(m)]),
 } }));
 
 for (const job of JSON.parse(readFileSync(jobsPath, "utf8"))) {
@@ -62,11 +71,12 @@ for (const job of JSON.parse(readFileSync(jobsPath, "utf8"))) {
       specUrl = pathToFileURL(path).href;
       result.spec = job.spec;
     }
-    const outName = `${job.name}.ptf`;
+    const file = job.file ?? job.name;         // the output files' name
+    const outName = `${file}.ptf`;
     stock ??= P.readPtf(stockBytes, "stock firmware");
     const out = await P.patchFirmware({ stockBytes, stock, spec, specUrl, io, outName, sha256 });
     writeFileSync(join(outDir, outName), out.ptf);
-    writeFileSync(join(outDir, `${job.name}.map.json`), out.map);
+    writeFileSync(join(outDir, `${file}.map.json`), out.map);
     const at = P.versionWordAt(spec);
     Object.assign(result, {
       ok: true, sha256: await sha256(out.ptf),

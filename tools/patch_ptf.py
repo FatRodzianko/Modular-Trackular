@@ -101,6 +101,17 @@ from ptf import Record, encode_ptf, read_ptf  # noqa: E402
 
 VERSION_PREFIX = b"%d.%d.%d-"
 VERSION_MAX = 3                     # "1.2.0-" + 3 characters: longer text doesn't show
+VERSION_LONG_PREFIX = b"%d.%d-"     # or "1.2-" + exactly VERSION_LONG characters (also 9 shown)
+VERSION_LONG = 5
+
+
+def version_prefix(version: bytes) -> bytes:
+    return VERSION_LONG_PREFIX if len(version) == VERSION_LONG else VERSION_PREFIX
+
+
+def version_shown(version: bytes) -> str:
+    """The text Config shows for a bundle's version (1.2.0-ABC or 1.2-ABCDE)."""
+    return version_prefix(version).decode().replace("%d.%d.%d", "1.2.0").replace("%d.%d", "1.2") + version.decode()
 ALIGN = 16                          # where a patch may start (keeps 4-byte literal alignment)
 FLASH_SECTOR = 0x1000               # flash erase sector
 FLASH_PAGE = 0x100                  # flash program page
@@ -382,8 +393,8 @@ def main() -> int:
                 sys.exit(f"{inc} is for another firmware")
             parts.append(load_patch(ispec, ipath.parent, in_bundle=True))
         version = spec["version"].encode()
-        if not 0 < len(version) <= VERSION_MAX:
-            sys.exit(f"version text {spec['version']!r}: 1 to {VERSION_MAX} characters")
+        if not (0 < len(version) <= VERSION_MAX or len(version) == VERSION_LONG):
+            sys.exit(f"version text {spec['version']!r}: 1 to {VERSION_MAX} characters, or {VERSION_LONG}")
     else:
         parts = [load_patch(spec, pdir, in_bundle=False)]
         version = None
@@ -503,12 +514,12 @@ def main() -> int:
     if version is not None:
         end = (end + 3) & ~3
         vaddr = end
-        text = VERSION_PREFIX + version + b"\0"
+        text = version_prefix(version) + version + b"\0"
         version_text = (vaddr, text)
         end = vaddr + len(text)
         vw = spec["version_word"]
         words.append(({"at": vw["at"], "old": vw["old"], "to": "version text",
-                       "note": f"1.2.0-{version.decode()}"}, vaddr, {"name": spec["name"]}))
+                       "note": version_shown(version)}, vaddr, {"name": spec["name"]}))
 
     for wd, value, p in words:
         at = int(wd["at"], 16)
@@ -583,7 +594,7 @@ def main() -> int:
             print(f"  late RAM: {p['name']} {p['late_size']} bytes at {p['late'][0]:#x} ({p['late'][1]})")
     layout = {
         "output": out_path.name,
-        "version_text": "1.2.0-" + (version.decode() if version is not None else "(the patch's own)"),
+        "version_text": version_shown(version) if version is not None else "1.2.0-(the patch's own)",
         "patches": [{
             "name": p["name"],
             "code": [f"{p['base']:#010x}", f"{p['base'] + len(p['blob']):#010x}"],

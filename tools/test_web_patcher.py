@@ -39,8 +39,11 @@ Needs Node (runs web/patcher.js through tools/web_patcher_node.mjs). It:
   - checks web/expected.json (the hashes the page accepts) holds exactly the
     selections' hashes; --update rewrites it.
 Outputs: <out dir>/py, each selection's .map.json, and index.json: for each selection that
-passed, its .ptf's SHA-256, where its image ends (the last non-0xFF byte, for the test
-runner's cover set) and the spec it was patched from in <out dir>/site. A selection's
+passed, its files' name, its .ptf's SHA-256, where its image ends (the last non-0xFF byte,
+for the test runner's cover set) and the spec it was patched from in <out dir>/site. A
+selection's files are named sel-<its spec's folder> (sel-swing, sel-all, sel-mix-1AU), not
+by its mods, so no name grows with the number of mods; a check fails if any file written
+under <out dir> is more than MAX_PATH characters below it. A selection's
 .ptf (4.6 MB; 88 GB for fourteen mods' 16,383) is deleted once it passed: the test runner
 rebuilds the few mixes its emulator tests run on, and checks each against its SHA-256.
 A selection that failed keeps its .ptf, for a look. The bundles in other orders keep
@@ -93,6 +96,7 @@ PROCS = os.cpu_count() or 8
 CODE = [ROOT / "tools" / f for f in ("patch_ptf.py", "ptf.py", "test_layout.py", "test_web_patcher.py",
                                      "web_patcher_node.mjs")] + [ROOT / "web" / "patcher.js"]
 KEEP = ("py", "selections.json")              # what a run keeps from the one before
+MAX_PATH = 80                                 # characters below <out dir>, for any file written
 
 
 def check(ok: bool, what: str) -> None:
@@ -249,7 +253,8 @@ def tested_hashes() -> dict[str, tuple[str, bool]]:
 
 def name_problems(plans: dict[str, dict]) -> tuple[list[str], list[str]]:
     """Selections whose spec paths or version texts match ignoring case (Windows and FAT
-    ignore it), and version texts that aren't 1 to VERSION_MAX letters and digits. Only
+    ignore it), and version texts that aren't 1 to VERSION_MAX letters and digits, or
+    exactly VERSION_LONG. Only
     bundles (mixes and patch/all) have a version text in their spec; a single mod's is in
     its code."""
     clashes = []
@@ -262,7 +267,8 @@ def name_problems(plans: dict[str, dict]) -> tuple[list[str], list[str]]:
                     clashes.append(f"{n} and {seen[v.lower()]}: {field} {v}")
                 seen.setdefault(v.lower(), n)
     bad = sorted({str(pl["version"]) for pl in plans.values() if pl["ok"] and pl.get("version") is not None
-                  and not re.fullmatch(r"[0-9A-Za-z]{1,%d}" % patch_ptf.VERSION_MAX, str(pl["version"]))})
+                  and not re.fullmatch(r"[0-9A-Za-z]{1,%d}|[0-9A-Za-z]{%d}" % (patch_ptf.VERSION_MAX, patch_ptf.VERSION_LONG),
+                                       str(pl["version"]))})
     return clashes, bad
 
 
@@ -378,6 +384,7 @@ def main() -> int:
         "slicethru-insns": "patch/slicethru-insns/patch.json",
         "all-insns": bundle("all-insns", [i if i != "slicethru" else "slicethru-insns" for i in ids], "INS"),
         "tail-chain": bundle("tail-chain", ["tracklen", "tracklen-tails"], "PTC"),
+        "long-version": bundle("long-version", ["colorsong", "humanize"], "K7Q2M"),
     }
     refusals = {
         "with-ramdiag": (bundle("with-ramdiag", ["colorsong", "ramdiag"], "BAD"), stock, "standalone"),
@@ -413,14 +420,19 @@ def main() -> int:
           "RAM_REGIONS (addresses, flags, order) as in patch_ptf.py")
     check(consts["RAM_DEFAULT_ORDER"] == patch_ptf.RAM_DEFAULT_ORDER, "RAM_DEFAULT_ORDER as in patch_ptf.py")
     check(consts["ALIGN"] == patch_ptf.ALIGN and consts["VERSION_MAX"] == patch_ptf.VERSION_MAX
-          and consts["VERSION_PREFIX"].encode() == patch_ptf.VERSION_PREFIX, "ALIGN, VERSION_MAX, VERSION_PREFIX")
+          and consts["VERSION_PREFIX"].encode() == patch_ptf.VERSION_PREFIX
+          and consts["VERSION_LONG"] == patch_ptf.VERSION_LONG
+          and consts["VERSION_LONG_PREFIX"].encode() == patch_ptf.VERSION_LONG_PREFIX,
+          "ALIGN, VERSION_MAX, VERSION_PREFIX, VERSION_LONG, VERSION_LONG_PREFIX")
+    print("version texts for a 15th mod on")
+    long = consts["MIX_VERSIONS"]
+    check(all(re.fullmatch(r"[0-9A-Z]{%d}" % patch_ptf.VERSION_LONG, v) and int(v, 36) == m for m, v in long)
+          and len({v for _, v in long}) == len({m for m, _ in long}),
+          f"{len(long)} mixes with bit 14 to 24: {patch_ptf.VERSION_LONG} capitals or digits each, the mix's bits "
+          f"in base 36 (so all different), shown as 1.2-{long[0][1]} (9 characters)")
 
     selections = [list(c) for n in range(1, len(ids) + 1) for c in itertools.combinations(ids, n)]
     sel_jobs = [{"name": "sel-" + "+".join(c), "ids": c} for c in selections]
-    names = {j["name"] for j in sel_jobs}
-    for f in py_dir.iterdir():                    # selections the page no longer offers
-        if f.name.split(".")[0] not in names:
-            f.unlink()
 
     # the selections that passed before with the same inputs, from the page's own plans
     _, plans = run_js(site, stock, [dict(j, plan=True) for j in sel_jobs], outdir / "js")
@@ -428,15 +440,23 @@ def main() -> int:
     clashes, bad = name_problems(plans)
     check(not clashes, f"the {len(plans)} selections' spec paths and version texts are unique ignoring case"
           + "".join(f"\n          {c}" for c in clashes[:10]))
-    check(not bad, f"version texts are letters and digits, at most {patch_ptf.VERSION_MAX}"
+    check(not bad, f"version texts are letters and digits, at most {patch_ptf.VERSION_MAX} or exactly "
+          f"{patch_ptf.VERSION_LONG}"
           + (f": {', '.join(bad[:10])}" if bad else ""))
     if failures:                                  # before the long part
         print(f"{len(failures)} failure(s), before patching anything")
         return 1
+    # each selection's files: sel-<its spec's folder>, short whatever the number of mods
+    files = {n: "sel-" + Path(pl["spec"]).parent.name if pl["ok"] and pl.get("spec")
+             else "sel-x" + hashlib.sha256(n.encode()).hexdigest()[:12] for n, pl in plans.items()}
+    check(len(set(files.values())) == len(files), "the selections' file names are unique")
+    for f in py_dir.iterdir():                    # selections the page no longer offers, older names
+        if f.name.split(".")[0] not in set(files.values()):
+            f.unlink()
     base = hashlib.sha256("|".join([*(file_sha(f) for f in CODE), file_sha(stock)]).encode()).hexdigest()
     keys = {n: selection_key(base, site, pl) if pl["ok"] else None for n, pl in plans.items()}
-    cached = {n for n, k in keys.items() if k in cache and outputs_as_written(py_dir, n, cache[k])}
-    todo = [j for j in sel_jobs if j["name"] not in cached]
+    cached = {n for n, k in keys.items() if k in cache and outputs_as_written(py_dir, files[n], cache[k])}
+    todo = [dict(j, file=files[j["name"]]) for j in sel_jobs if j["name"] not in cached]
     _, js_new = run_js(site, stock, todo, outdir / "js", procs)
     js_sel = {j["name"]: cache[keys[j["name"]]]["js"] if j["name"] in cached else js_new[j["name"]]
               for j in sel_jobs}
@@ -457,12 +477,13 @@ def main() -> int:
         version = None if js["kind"] == "single" else json.loads((site / js["spec"]).read_text())["version"]
         return (js["key"], specs, version)
 
-    py_jobs = [(site, sel["name"], js_sel[sel["name"]].get("spec"), stock, outdir, js_sel[sel["name"]]["ok"],
+    py_jobs = [(site, sel["file"], js_sel[sel["name"]].get("spec"), stock, outdir, js_sel[sel["name"]]["ok"],
                 layout_args(sel)) for sel in todo]
     py_jobs += [(extra, n, s, stock, outdir, js_extra[n]["ok"], None) for n, s in other_orders.items()]
     py_jobs += [(extra, n, s, st, outdir, False, None) for n, (s, st, _) in refusals.items()]
+    py_names = [sel["name"] for sel in todo] + list(other_orders) + list(refusals)
     with ProcessPoolExecutor(procs, initializer=_init_worker, initargs=(str(stock),)) as pool:
-        py = dict(zip([j[1] for j in py_jobs], pool.map(_py_job, *zip(*py_jobs), chunksize=4)))
+        py = dict(zip(py_names, pool.map(_py_job, *zip(*py_jobs), chunksize=4)))
     for n in cached:                              # as they were when they passed
         py[n] = SimpleNamespace(returncode=0, stdout="", stderr="", same=True, same_map=True,
                                 layout_checked=True, layout_failed=0, layout_log="")
@@ -486,6 +507,8 @@ def main() -> int:
     print("the bundles test_layout.py builds in other orders")
     for n in other_orders:
         same(n, n)
+    check(js_extra["long-version"].get("version_text") == "1.2-K7Q2M",
+          f"a 5-character version: the image's own text reads 1.2-K7Q2M ({js_extra['long-version'].get('version_text')})")
 
     print("refusals")
     for n, (_, _, why) in refusals.items():
@@ -517,8 +540,8 @@ def main() -> int:
                 and pr.layout_checked and not pr.layout_failed:
             passed[keys[n]] = {"js": js, "map": pr.map, "end": pr.end}
     cache_path.write_text(json.dumps(passed, indent=0) + "\n")
-    index = {n: {"sha256": passed[k]["js"]["sha256"], "end": passed[k]["end"], "spec": js_sel[n]["spec"]}
-             for n, k in keys.items() if k in passed}
+    index = {n: {"file": files[n], "sha256": passed[k]["js"]["sha256"], "end": passed[k]["end"],
+                 "spec": js_sel[n]["spec"]} for n, k in keys.items() if k in passed}
     (py_dir / "index.json").write_text(json.dumps(index, indent=0) + "\n")
 
     print("hardware-tested builds")
@@ -545,6 +568,11 @@ def main() -> int:
     check(json.loads(exp_path.read_text()) == want,
           f"holds exactly the {len(selections)} selections' hashes and the patch files' digest "
           "(run with --update after changing a patch)")
+
+    print("file names")
+    longest = max((p.relative_to(outdir).as_posix() for p in outdir.rglob("*")), key=len)
+    check(len(longest) <= MAX_PATH, f"every file written is at most {MAX_PATH} characters below the output "
+          f"folder (longest {len(longest)}: {longest})")
 
     print(f"outputs in {outdir}")
     print(f"{len(failures)} failure(s)")

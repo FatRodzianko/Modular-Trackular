@@ -11,6 +11,10 @@
 
 export const VERSION_PREFIX = "%d.%d.%d-";
 export const VERSION_MAX = 3;
+export const VERSION_LONG_PREFIX = "%d.%d-";   // or "1.2-" + exactly VERSION_LONG characters (also 9 shown)
+export const VERSION_LONG = 5;
+const versionPrefix = (version) => (version.length === VERSION_LONG ? VERSION_LONG_PREFIX : VERSION_PREFIX);
+export const versionShown = (v) => versionPrefix(v).replace("%d.%d.%d", "1.2.0").replace("%d.%d", "1.2") + v;
 export const ALIGN = 16;
 export const FLASH_SECTOR = 0x1000;   // flash erase sector, as in tools/patch_ptf.py
 export const FLASH_PAGE = 0x100;      // flash program page
@@ -471,8 +475,8 @@ export async function patchFirmware({ stockBytes, stock: parsed, spec, specUrl, 
       parts.push(await loadPatch(ispec, iurl, true, io, log));
     }
     version = ascii(spec.version);
-    if (!(0 < version.length && version.length <= VERSION_MAX)) {
-      fail(`version text ${JSON.stringify(spec.version)}: 1 to ${VERSION_MAX} characters`);
+    if (!((0 < version.length && version.length <= VERSION_MAX) || version.length === VERSION_LONG)) {
+      fail(`version text ${JSON.stringify(spec.version)}: 1 to ${VERSION_MAX} characters, or ${VERSION_LONG}`);
     }
   } else {
     parts = [await loadPatch(spec, specUrl, false, io, log)];
@@ -610,11 +614,11 @@ export async function patchFirmware({ stockBytes, stock: parsed, spec, specUrl, 
   if (version !== null) {
     end = alignUp(end, 4);
     const vaddr = end;
-    const text = concat([ascii(VERSION_PREFIX), version, new Uint8Array([0])]);
+    const text = concat([ascii(versionPrefix(spec.version)), version, new Uint8Array([0])]);
     versionText = [vaddr, text];
     end = vaddr + text.length;
     const vw = spec.version_word;
-    words.push([{ at: vw.at, old: vw.old, to: "version text", note: `1.2.0-${spec.version}` }, vaddr, { name: spec.name }]);
+    words.push([{ at: vw.at, old: vw.old, to: "version text", note: versionShown(spec.version) }, vaddr, { name: spec.name }]);
   }
 
   for (const [wd, value, p] of words) {
@@ -691,7 +695,7 @@ export async function patchFirmware({ stockBytes, stock: parsed, spec, specUrl, 
   }
   const layout = {
     output: outName,
-    version_text: "1.2.0-" + (version !== null ? spec.version : "(the patch's own)"),
+    version_text: version !== null ? versionShown(spec.version) : "1.2.0-(the patch's own)",
     patches: parts.map((p) => ({
       name: p.name,
       code: [hx10(p.base), hx10(p.base + p.blob.length)],
@@ -706,12 +710,12 @@ export async function patchFirmware({ stockBytes, stock: parsed, spec, specUrl, 
 }
 
 // The text Config shows: the format string the version word points to, with the
-// stock "%d.%d.%d" filled in as 1.2.0 (what tools/emu/check_version.py prints).
+// stock "%d.%d.%d" filled in as 1.2.0, or "%d.%d" as 1.2 (what tools/emu/check_version.py prints).
 export function versionTextOf(image, base, wordAt) {
   const ptr = getU32(image, wordAt - base);
   let s = "";
   for (let i = ptr - base; i >= 0 && i < image.length && image[i] !== 0; i++) s += String.fromCharCode(image[i]);
-  return s.replace("%d.%d.%d", "1.2.0");
+  return s.replace("%d.%d.%d", "1.2.0").replace("%d.%d", "1.2");
 }
 
 // ---- What the page builds for a selection ----------------------------------------
@@ -756,7 +760,21 @@ export function selectionKey(manifest, ids) {
 // with bit 13 the last digit becomes a letter, "G" for 0 to "V" for F. Only capitals and
 // digits, so no two names differ only in case (Windows and the SD card ignore case).
 // Mixes of the first eight mods keep their "M" names, and mixes without bit 12 or 13
-// keep theirs.
+// keep theirs. A mix with bit 14 or above (a 15th mod on) has a 5-character version
+// instead, its bits in base 36 (shown as "1.2-" + those 5, still 9 characters): unique
+// by construction up to bit 24, and never the same length as a 3-character name.
+export function mixVersion(mask) {
+  if (mask >> 14) {
+    if (mask >= 36 ** VERSION_LONG) throw new PatchError("selection code has no room past bit 24");
+    return mask.toString(36).toUpperCase().padStart(VERSION_LONG, "0");
+  }
+  const high = (mask >> 8) & 31;
+  const letter = high <= 13 ? 0x4d + high : high <= 25 ? 0x41 + (high - 14) : 0x30 + (high - 26);
+  const low = mask & 0xff;
+  const last = mask & (1 << 13) ? String.fromCharCode(0x47 + (low & 15)) : (low & 15).toString(16).toUpperCase();
+  return String.fromCharCode(letter) + (low >> 4).toString(16).toUpperCase() + last;
+}
+
 export function planSelection(manifest, allSpec, ids) {
   const chosen = manifest.patches.filter((p) => ids.includes(p.id));
   if (!chosen.length || chosen.length !== new Set(ids).size) throw new PatchError("unknown or empty selection");
@@ -767,12 +785,7 @@ export function planSelection(manifest, allSpec, ids) {
     return { kind: "all", key, specPath: manifest.all, spec: null };
   }
   const mask = chosen.reduce((m, p) => m | (1 << p.bit), 0);
-  const high = (mask >> 8) & 31;
-  if (mask >> 14) throw new PatchError("selection code has no room for bit 14");
-  const letter = high <= 13 ? 0x4d + high : high <= 25 ? 0x41 + (high - 14) : 0x30 + (high - 26);
-  const low = mask & 0xff;
-  const last = mask & (1 << 13) ? String.fromCharCode(0x47 + (low & 15)) : (low & 15).toString(16).toUpperCase();
-  const version = String.fromCharCode(letter) + (low >> 4).toString(16).toUpperCase() + last;
+  const version = mixVersion(mask);
   const names = chosen.map((p) => p.id);
   const spec = {
     name: `mix-${version}`,

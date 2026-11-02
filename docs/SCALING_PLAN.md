@@ -41,6 +41,7 @@ The cover set is 23 mixes. Per release run:
 **4. The names run out.**
 - Config shows `1.2.0-` plus at most 3 characters.
 - 3 characters from A–Z and 0–9 give 46,656 names, enough for 15 mods (32,767 mixes) but not 16.
+- Solved in Phase 3 below: mixes with a 15th mod on show `1.2-` plus 5 characters.
 
 ### Another limit I found while checking: RAM
 
@@ -87,6 +88,7 @@ These help whatever happens later, and none of them changes a byte of any firmwa
 - The test runner picks the cover set from those and rebuilds only its 23 mixes, into `harness/cover/` as `mix-<version text>.ptf`. A rebuild that isn't byte-identical to what the harness checked is a failure, and its tests don't run.
 - Nothing is checked less: byte identity and the layout checks still run on every mix before its `.ptf` is deleted.
 - What you lose: browsing any mix's `.ptf` without building it first (`patch_ptf.py` with its spec from `harness/site/`).
+- **File names no longer grow with the number of mods** (2026-11-01). The harness used to name each mix's files after its mods (`sel-humanize+interpolate+…`), which put its longest path at 247 of Windows' 260 characters with 14 mods, so one or two more mods would have broken it. Now a selection's files are named by its spec's folder (`sel-swing`, `sel-all`, `sel-mix-1AU`), the runner's rebuilt cover mixes likewise (`mix-1AU.ptf`), and the harness fails if any file it writes is more than 80 characters below its output folder.
 
 Together, 1a and 1b should bring a typical one-mod release run back near your 60-minute goal. The web harness's doubling stays, and that's what Phase 2 is for.
 
@@ -173,20 +175,14 @@ Chords stays usable on its own meanwhile.
 - After that, every one-mod change at 15 mods would rebuild about 16,000 mixes (roughly 80 min).
 - That's paid again and again until Phase 2 lands.
 
-### Phase 3: names for mod 16 and beyond
+### Phase 3: names for mod 15 and beyond
 
-**Up to 15 mods**, the current names all stay. Bit 14 (chords) uses the second character `G`–`V` instead of `0`–`F`, the way bit 13 already uses the last character. Colorsong + chords would be `1.2.0-MG1`.
-
-**From mod 16, no 3-character name can be unique.** The options:
-
-1. **A shorter prefix for new mixes (recommended, if a check passes).**
-   - **How:** mixes with mod 15 or later show `1.2-` plus 5 characters, encoding the mix in base 36. That's room for 25 mods.
-   - **What keeps its name:** existing names, single builds and patch/all keep `1.2.0-`.
-   - **What it needs:** the patch already supplies the whole format string, so this is a text change. Before deciding, it needs an emulator check:
-     - that nothing reads the version text besides Config's display (a memory watch on `0x200205d4` through boot, Config, save and load);
-     - that 9 wide characters (like `1.2-WWWWW`) still show, rendered with `eve.py`.
-2. **Mod packs.** Related small mods share one checkbox (for example a "sequencer extras" pack), so the web patcher stays at 15 or fewer. No firmware or naming change, but less choice for users.
-3. **A short build code that isn't unique**, with the full mod list in the file name and on the page. I don't recommend it: two different firmwares could show the same text in Config, which makes bug reports ambiguous.
+Done (2026-11-01), ahead of any new mod, so names never limit how many mods there are.
+- **Existing names don't change.** Every mix of the current 14 mods keeps its 3-character name after `1.2.0-`, so every current build is byte-identical (`web/expected.json` unchanged).
+- **A mix with a 15th mod or later on** (bit 14 and up) shows `1.2-` plus 5 characters: the mix's bits in base 36, capitals and digits only (`mixVersion` in `web/patcher.js`). Still 9 characters in Config, unique by construction up to 25 mods, and never the same length as a 3-character name.
+- **Why it's safe:** the patch already writes the whole format string, so this is a text change. The firmware writes the version text once at boot (`0x600cbe88`) and only Config's label and its "Current version" item display it; nothing parses it.
+- **Tests:** the harness checks the 5-character names for 516 masks with bit 14 to 24 (each decodes back to its mask, so all differ) and builds a reordered bundle with a 5-character version (`long-version`), whose image reads `1.2-K7Q2M`. `test_layout.py` checks the format matches the version's length.
+- **The page** shows the same text: its version reading (`versionTextOf`), the selection and "all" labels and its already-patched check all handle both forms. The first run of the new check caught `versionTextOf` turning only `%d.%d.%d` into numbers.
 
 ### An alternative to Phase 2 I'm not recommending: switches instead of mixes
 
@@ -205,7 +201,7 @@ That's far more risk than Phase 2, which changes only the build tools.
    Then 1d, the deep tier's steps, one at a time, with the timed overnight run last.
 3. **Phase 2.** A design session first, plan only, with a timed prototype; then build, with an overnight deep run.
 4. **Chords joins** patch/all and the web patcher, using the bit-14 names.
-5. **Before mod 16:** the emulator check on the version text, then the name choice.
+5. **Names for mod 15 and beyond.** Done (Phase 3).
 6. **Watch RAM.** Before planning a new mod, check what startup RAM it needs against the 832 B left.
 
 ## Numbers to confirm as each step lands
