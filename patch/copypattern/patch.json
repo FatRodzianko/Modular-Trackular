@@ -1,6 +1,6 @@
 {
   "name": "copypattern",
-  "description": "Pattern screen button (More, More, button 3, or 4 with humanize, record mode) that copies the current pattern, with its unsaved edits and every track's length, into the next empty pattern, playing or stopped, and stays on the current pattern",
+  "description": "Pattern screen button (More, More, button 3, or 4 with humanize, record mode) that copies the current pattern, with its unsaved edits and every track's length (and, with tracklen, its Trk Len lengths), into the next empty pattern, playing or stopped, and stays on the current pattern",
   "firmware": "TrackerPlus 1.2.0",
   "stock_image_sha256": "0d924ba9352ea0ce24672ee252b44b760bb949a8d8faf3bac2d39594962e1f3b",
   "bin": "build/copypattern.bin",
@@ -60,7 +60,16 @@
       "old": "34b80360",
       "to": "mt_version_fmt",
       "version": true,
-      "note": "version text 1.2.0-cp4"
+      "note": "version text 1.2.0-cp5"
+    }
+  ],
+  "links": [
+    {
+      "word": "mt_cp_tl_copy",
+      "patch": "tracklen",
+      "symbol": "mt_tl_copy_lengths",
+      "thumb": true,
+      "note": "Variable Track Length's copy of a pattern's lengths, when it is in the build: the new pattern gets the source's track lengths"
     }
   ]
 }

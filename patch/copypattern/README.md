@@ -3,9 +3,10 @@
 A patch for Polyend Tracker+ firmware 1.2.0. It adds a **Copy to New** button to the
 Pattern screen. Pressing it copies the pattern you're on into the next empty pattern:
 every track, every step and each track's length, including edits you haven't saved
-yet. You stay on the pattern you're on, whether the Tracker+ is playing or stopped;
-switch to the copy yourself when you want it. Installed on its own, Config shows the
-firmware version as `1.2.0-cp4`.
+yet. With Variable Track Length (patch/tracklen) installed too, the copy also gets the
+pattern's Trk Len lengths. You stay on the pattern you're on, whether the Tracker+ is
+playing or stopped; switch to the copy yourself when you want it. Installed on its own,
+Config shows the firmware version as `1.2.0-cp5`.
 
 **Status:** tested on hardware, on its own (third button) and with humanize (fourth
 button, Humanize on the third), and in `patch/all`.
@@ -123,7 +124,7 @@ No compiler needed: the compiled patch is in `prebuilt/`. See
 [docs/PATCHING.md](../../docs/PATCHING.md) for getting and checking the stock firmware.
 
 ```bash
-python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/copypattern/patch.json build/TrackerPlus_cp4.ptf
+python tools/patch_ptf.py path/to/TrackerPlus_1.2.0.ptf patch/copypattern/patch.json build/TrackerPlus_cp5.ptf
 ```
 
 To combine it with other mods, list it in a bundle spec (see "Choosing patches" in
@@ -143,7 +144,7 @@ patch/copypattern/build.sh
 Needs `pip install unicorn capstone numpy`:
 
 ```bash
-python tools/emu/test_copypattern.py build/TrackerPlus_cp4.ptf
+python tools/emu/test_copypattern.py build/TrackerPlus_cp5.ptf
 ```
 
 It runs the stock code with the patch in place, with a fake SD card:
@@ -163,12 +164,15 @@ It runs the stock code with the patch in place, with a fake SD card:
   switch), another project opened meanwhile, the file manager busy, a write error.
 - **File rules:** nothing on the press, at most one pattern file per update, reads of
   at most 256 bytes, the stock update running every time.
+- **Track lengths:** with tracklen in the build, the new pattern gets the source's Trk
+  Len lengths in place of its own (stopped and playing); a failed copy copies none.
+  Without it, the link to tracklen is 0.
 
 ## Install and revert
 
 Install as described in [docs/PATCHING.md](../../docs/PATCHING.md): copy the patched
 `.ptf` to `/Firmware` on the SD card next to the stock `TrackerPlus_1.2.0.ptf`, then
-Config → Firmware → the patched file. Config should show `1.2.0-cp4 Build 1504`.
+Config → Firmware → the patched file. Config should show `1.2.0-cp5 Build 1504`.
 
 To revert: Config → Firmware → `TrackerPlus_1.2.0.ptf`. Copied patterns are ordinary
 patterns and stay in your projects. The patch keeps no files of its own.

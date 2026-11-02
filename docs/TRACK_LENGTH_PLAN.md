@@ -321,8 +321,8 @@ in pieces of at most 256 bytes, only while the file manager is idle, as slicethr
   every track at the pattern's length. The patterns' own files are untouched.
 
 **Limits** (all optional fixes later, none needed for a first version):
-- Copying a pattern to another number (copypattern, the Song screen's copy) doesn't copy
-  its lengths; the target keeps its own.
+- The Song screen's copy of a pattern doesn't copy its lengths; the target keeps its
+  own. (Copy to New does, since copypattern cp5 and tracklen tl8.)
 - Expand and Shrink stretch a pattern's steps but not its track lengths.
 - Undo doesn't undo a length change.
 - Like the other mods' files, the lengths are written to the project folder when they

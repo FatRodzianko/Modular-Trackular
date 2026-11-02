@@ -37,6 +37,12 @@ its Humanize button must still be there).
      - the file rules: nothing on the press, at most one pattern file per update,
        reads of at most 256 bytes, the stock update on every call, a second press
        during a copy ignored.
+4. Variable Track Length's lengths. Without tracklen in the build, the link word
+   (mt_cp_tl_copy) is 0. With it, the word holds tracklen's mt_tl_copy_lengths, and
+   with lengths in tracklen's table: stopped, the new pattern gets the source's lengths
+   in place of its own, and a source without lengths clears them; the current pattern
+   changing and a write error copy none; playing in song mode, they are copied and
+   playback stays on the current pattern.
 """
 from __future__ import annotations
 
@@ -50,7 +56,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import seq_timing  # noqa: E402
 from fakefs import FakeFS  # noqa: E402
-from layout import patch_code  # noqa: E402
+from layout import patch_code, patch_function, patch_ram  # noqa: E402
 from machine import Machine  # noqa: E402
 
 SEQ = 0x20017274
@@ -647,6 +653,90 @@ def copy_checks(ptf: Path) -> None:
     check(r.stock_updates == r.hook_calls, f"the stock update ran on every call ({r.stock_updates})")
 
 
+def length_checks(ptf: Path) -> None:
+    word = patch_function(ptf, "copypattern", "mt_cp_tl_copy")[0]
+    r = Rig(ptf, Path(tempfile.mkdtemp(prefix="copypattern_tl_")))
+    m = r.m
+    if not TL_CODE:
+        check(m.r32(word) == 0, "no tracklen in the build: the link to its copy of the lengths is 0")
+        return
+    print("Variable Track Length's lengths (tracklen in the build)")
+    target = patch_function(ptf, "tracklen", "mt_tl_copy_lengths")[0] | 1
+    check(m.r32(word) == target, f"the link word holds tracklen's mt_tl_copy_lengths ({m.r32(word):#x})")
+    table = patch_ram(ptf, "tracklen") + 4                  # after its magic: 256 patterns x 16 tracks
+
+    def lens(p: int) -> tuple:
+        return tuple(m.uc.mem_read(table + 16 * p, 16))
+
+    def set_lens(p: int, v: tuple) -> None:
+        m.write(table + 16 * p, bytes(v))
+
+    def settle() -> None:                                   # tracklen's own update, in either chain order
+        r.update()
+        r.update()
+
+    mine = (6, 0, 3, 0, 0, 31, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0)
+    stale = (0, 9, 0, 0, 2) + (0,) * 11
+    none = (0,) * 16
+    r.reset(current=1)
+    r.update()                                              # tracklen sets up its RAM
+    set_lens(1, mine)
+    set_lens(2, stale)
+    m.write(r.play, busy_pattern(32, seed=30))
+    msg, n, _ = r.copy()
+    settle()
+    check(msg == "Copied to pattern 2" and lens(2) == mine and lens(1) == mine,
+          f"stopped: {msg!r}, pattern 2 gets pattern 1's lengths in place of its own, 1 unchanged")
+    r.reset(current=1)
+    set_lens(1, none)
+    set_lens(2, stale)
+    msg, n, _ = r.copy()
+    settle()
+    check(msg == "Copied to pattern 2" and lens(2) == none,
+          f"a source without lengths: the target's go, it follows the pattern ({msg!r})")
+
+    r.reset(current=1)
+    set_lens(1, mine)
+    set_lens(3, stale)
+    r.fs.put(path_of(2), r.stock_write(busy_pattern(16, seed=20)))   # one update to look at
+    r.messages.clear()
+    r.press()
+    r.update()
+    m.w8(CUR_PATTERN, 4)                                    # switched by hand
+    r.update()
+    settle()
+    check(r.messages == ["Pattern changed - try again"] and lens(3) == stale and lens(4) == none,
+          f"the current pattern changes: dropped, no lengths copied ({r.messages})")
+    r.reset(current=1)
+    set_lens(2, stale)
+    r.fs.fail_writes = True
+    msg, n, _ = r.copy()
+    settle()
+    check(msg == "Copy failed - SD card" and lens(2) == stale, f"{msg!r}: no lengths copied")
+
+    r.reset(current=1)
+    m.w8(SETTINGS + 0x2C, 2)                                # MIDI out: jack
+    m.write(r.play, busy_pattern(128, seed=5, instruments=range(48, 64), fx_types=PLAIN_FX))
+    m.write(r.preload, busy_pattern(128, seed=6, instruments=range(48, 64), fx_types=PLAIN_FX))
+    m.write(PLAYLIST, bytes([1, 2, 0]))
+    r.used(1, 0xFFFF)
+    r.used(2, 0xFFFF)
+    set_lens(1, mine)
+    set_lens(3, stale)
+    m.call(SEQ_PLAY_FROM, SEQ, 0)
+    m.w8(SEQ_SONG_MODE, 1)
+
+    def ticks():
+        for _ in range(24):
+            m.ticks += 1
+            m.call(SEQ_TICK, SEQ, max_insns=2_000_000)
+    msg, n, _ = r.copy(between=ticks)
+    settle()
+    check(msg == "Copied to pattern 3" and lens(3) == mine and m.uc.mem_read(SEQ_PLAYING, 1)[0]
+          and m.uc.mem_read(CUR_PATTERN, 1)[0] == 1,
+          f"playing in song mode: {msg!r}, pattern 3 gets the lengths, still playing pattern 1")
+
+
 def main() -> int:
     global CODE, HZ_CODE, TL_CODE, SLOT
     ptf = Path(sys.argv[1])
@@ -663,6 +753,7 @@ def main() -> int:
     print(f"copypattern at {CODE[0]:#x}..{CODE[1]:#x}" + (", with humanize" if HZ_CODE else ""))
     button_checks(ptf)
     copy_checks(ptf)
+    length_checks(ptf)
     print(f"\n{len(failures)} failure(s)")
     for f in failures:
         print("  " + f)

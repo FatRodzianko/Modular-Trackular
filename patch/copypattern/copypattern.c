@@ -31,7 +31,9 @@
  *    buffer (the editor's pattern, with any unsaved edits) as the empty pattern's
  *    file, header and CRC included. Then the stock usage update sets its Song screen
  *    mask, and the project is marked as having unsaved changes, as a stock pattern
- *    save does.
+ *    save does. With Variable Track Length (patch/tracklen) in the build, the
+ *    patcher links mt_cp_tl_copy to its mt_tl_copy_lengths ("links"), and the new
+ *    pattern gets the source's track lengths too; without it the word is 0.
  * The copy is dropped if the current pattern changes before it is written ("Pattern
  * changed - try again"), and silently if another project is opened meanwhile.
  * Nothing in the sequencer changes, so the screen stays on the current pattern,
@@ -46,7 +48,7 @@
 #include <stdint.h>
 
 #ifndef COPYPATTERN_VERSION
-#define COPYPATTERN_VERSION "cp4"
+#define COPYPATTERN_VERSION "cp5"
 #endif
 
 /* COPYPATTERN_PASSTHROUGH: diagnostic build where every hook only calls the original
@@ -140,6 +142,7 @@ typedef void (*bind_fn)(void *manager, uint32_t index, uint32_t flag, void_fn ha
 typedef void (*ctrl_fn)(void *display, int ctrl, const void *arg);
 typedef int (*snprintf_fn)(char *buf, uint32_t size, const char *fmt, ...);
 typedef void (*update_fn)(void *screen, void *a1, void *a2, void *a3);
+typedef void (*tl_copy_fn)(uint32_t from, uint32_t to);
 
 void mt_cp_button(void);
 
@@ -152,6 +155,7 @@ CHAIN_WORD(mt_cp_next_label2);              /* disp_ctrl_set_ptr38 0x60101d75 */
 CHAIN_WORD(mt_cp_next_colors);              /* disp_ctrl_set_colors 0x60101da5 */
 CHAIN_WORD(mt_cp_next_data);                /* disp_ctrl_set_data 0x60101df9 */
 CHAIN_WORD(mt_cp_next_pattern_update);      /* Pattern screen update 0x600e1f99 */
+CHAIN_WORD(mt_cp_tl_copy);                  /* tracklen's mt_tl_copy_lengths ("links"), 0 without it */
 
 /* ---- state ----------------------------------------------------------------------- */
 
@@ -334,6 +338,8 @@ static void write_copy(void *fs, uint32_t target, const char *path)
     ((usage_fn)FW_USAGE_UPDATE)(FW_FM, target, data);
     ((obj_fn)FW_MARK_UNSAVED)(FW_FM);
     *(volatile uint8_t *)(FW_PROJECT + PROJECT_UNSAVED) |= 1;
+    if (mt_cp_tl_copy)                      /* Variable Track Length: the lengths too */
+        ((tl_copy_fn)mt_cp_tl_copy)(CP->source, target);
     finish("Copied to pattern %d", target);
 }
 

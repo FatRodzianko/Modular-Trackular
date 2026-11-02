@@ -54,8 +54,8 @@ OFF after it, so once it plays its track counts as sounding until an OFF plays o
 a short track its note comes round every loop, so this shows up much sooner. And a hit
 in the second half of a step is recorded on the next step.
 
-Copy to New (patch/copypattern) copies a pattern without its lengths: set them again in
-the new pattern.
+Copy to New (patch/copypattern) copies the pattern's lengths too: the new pattern plays
+them as the original does.
 
 The lengths are saved with the project, in `tracklen.bin` in its folder, a moment after
 each change (and the file is removed when no length is left). Opening a project loads its

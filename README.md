@@ -65,7 +65,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   [patch/legato/README.md](patch/legato/README.md).
 - **copypattern**: a Copy to New button on the Pattern screen (record mode, next to
   Humanize) copies the current pattern, with its unsaved edits and every track's
-  length, into the next empty pattern, playing or stopped, and stays on the current
+  length (Trk Len lengths too, with tracklen), into the next empty pattern, playing or stopped, and stays on the current
   pattern. Its button sits next to Humanize's, or in Humanize's place without it.
   Tested on hardware. See
   [patch/copypattern/README.md](patch/copypattern/README.md).
@@ -98,7 +98,7 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
   the Song list; Performance stays on while the block loops (as Loop Performance does
   for one pattern). Tested on hardware, on its own and in patch/all. See
   [patch/songloop/README.md](patch/songloop/README.md).
-- **all**: all fourteen mods above in one firmware (version text `1.2.0-MLN`), from
+- **all**: all fourteen mods above in one firmware (version text `1.2.0-MPL`), from
   [patch/all/patch.json](patch/all/patch.json). Tested on hardware.
 - **chords**: more MIDI chords. Turning the encoder on a MIDI Chord FX (`0`) past the
   last stock chord goes on to the major and minor triad inversions, then the maj7,
