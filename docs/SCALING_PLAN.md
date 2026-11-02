@@ -1,6 +1,6 @@
 # Plan: more mods with less testing
 
-Status: Phase 1a, 1b and 1c are built and committed (test tooling only), and so are the names for mod 15 and beyond (Phase 3); 1d step 3 is built; the rest of 1d is planned; the rest is plan only.
+Status: Phase 1a, 1b and 1c are built and committed (test tooling only), and so are the names for mod 15 and beyond (Phase 3); 1d steps 1 to 3 are done (the deep tier timed at 3 h 55 min on 6 cores); 1d step 4 is planned; the rest is plan only.
 
 ## The problem today (14 mods in the web patcher)
 
@@ -107,10 +107,11 @@ Where its time goes, from the runner's own per-test times (not a timed deep run)
 | masterfx | 8 % |
 | everything else | 12 % |
 
-The runner's formula puts the whole tier at about 12.0 h with `--jobs 2`, and about 4.5 h with `--jobs 7`.
+The runner's formula puts the whole tier at about 12.0 h with `--jobs 2`, and about 4.5 h with `--jobs 7`. Timed with step 3 in: 3 h 55 min with `--jobs 6` (below).
 
 The steps, cheapest first:
 1. **Run it overnight on every core.** No code change: the default `--jobs` is one less than the number of cores (7 here), and the daytime limit of 2 doesn't apply overnight. Done means a timed overnight run, which replaces the 4.5 h estimate above.
+   - **Timed (2026-11-01):** 234.6 min with `--jobs 6`, step 3 in. See "Timed for 1d: the whole deep tier" below.
 2. **Time each long test by section.** One full run each of synths, resample, PHASE, test_bundle_cost.py and masterfx on patch/all, with each section timed, so the next two steps go where the time is.
 3. **Share the stock firmware's runs within one deep run.** Several sections run stock firmware with the same inputs for every build, for example synths' stock-output comparison (`run_pair`). Those results are identical from build to build, so a deep run could work them out once and reuse them for each build.
    - They'd be kept only for that one run, so the deep tier still takes nothing from before it started.
@@ -280,7 +281,21 @@ Full synths and PHASE on patch/all, each run twice at the same moment (one compu
 | synths | 1,493 s | 861 s | 632 s (42 %) |
 | PHASE | 587 s | 341 s | 246 s (42 %) |
 
-10 of a deep run's 11 full runs of each read instead of computing: about 10 × 878 ≈ 8,800 s of CPU saved per deep run (step 2's estimate was 10,300 s; the rig checks, 31 s, aren't shared). A job that waits for a figure being worked out is never slower than working it out itself. The overnight deep run will time the whole tier.
+10 of a deep run's 11 full runs of each read instead of computing: about 10 × 878 ≈ 8,800 s of CPU saved per deep run (step 2's estimate was 10,300 s; the rig checks, 31 s, aren't shared). A job that waits for a figure being worked out is never slower than working it out itself. The deep run below timed the whole tier with sharing in.
+
+### Timed for 1d: the whole deep tier (2026-11-01)
+
+One deep run, `--jobs 6`, processor affinity 6 of the 8 cores, step 3 in, nothing from the cache: 256 jobs, 0 failed, **234.6 min** (3 h 55 min).
+
+| Stage | Jobs | Runner's estimate | Took |
+|---|---|---|---|
+| Layout | 1 | 2 min | under 1 min |
+| Each patch alone, patch/all, diagnostic builds, web harness | 81 | 142 min | 131 min |
+| Cover set (23 mixes) and the 5 reordered bundles | 174 | 314 min | 103 min |
+
+- The web harness (all 16,383 selections) was the last job of its stage to finish, so it set that stage's length.
+- The runner's estimate for the cover-set stage was three times too long. Its per-job times predate step 3 and were taken under a different load.
+- On 7 cores overnight it should take a little less. That hasn't been timed.
 
 ### Still estimates, not timed
 
