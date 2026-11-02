@@ -319,7 +319,7 @@ Arp values, including Random (957 cases, 0 mismatches). The literal is back to
 - The literal is a data word in ITCM, which MPU region 5 maps RW Normal (FINDINGS
   section 8). No patch has written ITCM at run time before, so the hardware check covers
   the Arp (section 10).
-- The fallback, if that is unwanted, is a clean-room `arp_next` for extended values only,
+- The fallback, if that is unwanted, is our own `arp_next` for extended values only,
   checked against stock the same way. It's bigger and riskier, so it's not the plan.
 
 ### 4.4 Entering and showing

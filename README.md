@@ -275,6 +275,12 @@ python tools/emu/test_rescan.py build/TrackerPlus_c11.ptf "path/to/<project A>" 
 - Before flashing anything new, confirm you can get back: switching firmware through
   Config, and the emergency reflash (FINDINGS section 3).
 
+## Contributing
+
+New mods and fixes are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers what a pull
+request needs: the patch layout, the rules shared hooks and RAM follow, which tests to
+run and what results to include.
+
 ## Credits and related work
 
 Polyend's [tracker-lib](https://github.com/polyend/tracker-lib) (file formats), and

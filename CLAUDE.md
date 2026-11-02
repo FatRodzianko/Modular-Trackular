@@ -94,5 +94,5 @@ Before starting anything expected to take more than 10 minutes, tell the user th
 - **Git.** Commit only when the user explicitly says so. Never push. Commit author email: `46849520+FatRodzianko@users.noreply.github.com`.
 - **Privacy.** Committed files must not contain local absolute paths (user home directories) or the user's own project names. Repo-relative paths and local file names are fine.
 - **Patch READMEs.** Say what the patch is, how it works, how to build it and how to revert. No version history.
-- **Clean room.** Never copy Polyend code or assets into the repo. Distribute only patches, never modified `.ptf` files.
+- **No Polyend code.** Never copy Polyend code or assets into the repo. Distribute only patches, never modified `.ptf` files.
 - Don't install packages or download files without asking.
