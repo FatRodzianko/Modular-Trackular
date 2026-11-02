@@ -33,7 +33,8 @@ patch reaches the block only through that word.
 
 A bundle spec combines several patches into one firmware: "include" lists their
 patch.json files (relative to the bundle's folder), in the order they are placed, and
-"version" gives the version text (Config shows 1.2.0-<version>, at most 3 characters).
+"version" gives the version text: 1 to 3 characters (Config shows 1.2.0-<version>), or
+exactly 5 (Config shows 1.2-<version>); longer text doesn't show.
 The included patches' own version-text words ("version": true) are dropped, and the
 bundle's text is appended after the last patch.
 

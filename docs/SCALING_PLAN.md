@@ -1,6 +1,6 @@
 # Plan: more mods with less testing
 
-Status: Phase 1a and 1b are built and committed, 1c is built (test tooling only); 1d is planned; the rest is plan only.
+Status: Phase 1a, 1b and 1c are built and committed (test tooling only), and so are the names for mod 15 and beyond (Phase 3); 1d step 3 is built; the rest of 1d is planned; the rest is plan only.
 
 ## The problem today (14 mods in the web patcher)
 
@@ -116,6 +116,7 @@ The steps, cheapest first:
    - They'd be kept only for that one run, so the deep tier still takes nothing from before it started.
    - Before relying on it, a check that the shared results equal fresh ones, value for value, on two different builds.
    - Worth doing only if step 2 shows those runs are a real share of the time.
+   - **Built (2026-11-01):** `tools/emu/stock_share.py`. Synths' `run_pair` stock half, synths' and PHASE's stock voice allocation. `run_tests.py` empties `<out>/stock_share` at the start of each run; the first job to need a figure works it out, jobs needing it at the same moment wait on an OS file lock (released if a job dies), later ones read it. Checked with `MT_STOCK_SHARE_VERIFY=1` on patch/all and synths alone, all four full runs at once: every shared figure (6 output comparisons, 5 allocations) equal to a fresh one, 0 failures. Timed below.
 4. **Profile the emulator on the slowest section** (Python's own profiler, nothing to install). Take only changes to the test code or the emulator that leave every result exactly as it was. Checked by comparing each changed section's outputs before and after, value for value.
 
 Not planned:
@@ -269,6 +270,17 @@ One full run of each on `patch/all`, every section timed, with other runs on the
 - PHASE's voice allocation, inside its level checks: stock 263 s, the build 92 s.
 
 So a full synths run spends about 765 s, and a full PHASE run about 263 s, on stock work that gives the same answer for every build. A deep run has 11 full runs of each (synths alone, patch/all, the 8 cover mixes that have synths, and one reordered bundle), so sharing that work within the run would save about 10 × (765 + 263) ≈ 10,300 s of CPU. That's roughly 18 % of the tier's CPU time by the runner's estimate, or about 35–40 min of a 4.5 h overnight run on 7 cores. Worked out from these timings, not timed as a deep run.
+
+### Timed for 1d step 3: sharing stock results (2026-11-01)
+
+Full synths and PHASE on patch/all, each run twice at the same moment (one computing everything, one reading a filled share folder), so the load was the same for both; `--jobs` doesn't apply, 4 processes on 6 cores:
+
+| Test | Computing | Reading shared | Saved |
+|---|---|---|---|
+| synths | 1,493 s | 861 s | 632 s (42 %) |
+| PHASE | 587 s | 341 s | 246 s (42 %) |
+
+10 of a deep run's 11 full runs of each read instead of computing: about 10 × 878 ≈ 8,800 s of CPU saved per deep run (step 2's estimate was 10,300 s; the rig checks, 31 s, aren't shared). A job that waits for a figure being worked out is never slower than working it out itself. The overnight deep run will time the whole tier.
 
 ### Still estimates, not timed
 

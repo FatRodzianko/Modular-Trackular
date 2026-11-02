@@ -52,6 +52,11 @@ before is not run again, so a rerun after a change only runs what the change tou
 --no-cache and the deep tier run everything. The cache also keeps each test's measured
 duration, for the time estimate.
 
+Stock-firmware results that are the same for every build (stock VAP's voice allocation,
+the stock half of synths' output comparisons) are worked out once per run and shared by
+the jobs (tools/emu/stock_share.py, in <out>/stock_share, emptied at the start of each
+run): the deep tier runs synths and PHASE in full on 11 builds.
+
 Full masterfx and synths on patch/all (release): their full mode adds checks that depend
 on the patch's own code alone, so a full pass is also recorded against that patch's own
 files (patch.json, prebuilt/, build/) and the test code. While those are unchanged,
@@ -496,6 +501,10 @@ def main() -> int:
     workers = int(opt("--jobs", max(1, (os.cpu_count() or 2) - 1)))
     out = Path(opt("--out", ROOT / "build" / "testrun")).resolve()
     out.mkdir(parents=True, exist_ok=True)
+    share = out / "stock_share"           # stock results this run's jobs share (tools/emu/stock_share.py)
+    shutil.rmtree(share, ignore_errors=True)
+    share.mkdir()
+    os.environ["MT_STOCK_SHARE"] = str(share)
     problems = preflight(tier)
     if problems:
         print("preflight failed (nothing run):\n" + "\n".join(f"  {p}" for p in problems))

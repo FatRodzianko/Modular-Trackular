@@ -115,6 +115,7 @@ from layout import patch_code, patch_late_ram  # noqa: E402
 from machine import FAKE_DISPLAY_VT, Machine  # noqa: E402
 from patch_ptf import bl_target  # noqa: E402
 import project_save  # noqa: E402
+import stock_share  # noqa: E402
 
 ACD, FAT, VAP, WTFM, PERC = sr.ACD, sr.FAT, sr.VAP, sr.WTFM, sr.PERC
 WAVE = 3                            # WAVE's model id
@@ -434,13 +435,18 @@ def hook_checks(ptf: Path, stock: Path) -> None:
 # ---- 3. stock output --------------------------------------------------------------------
 
 def run_pair(ptf: Path, stock: Path, models, polys, setup, blocks=150, seed=1):
-    out = []
-    for path, patched in ((ptf, True), (stock, False)):
+    """script() on the patched build and on stock firmware; the stock rig isn't returned
+    (its output is shared between the jobs of a test run, tools/emu/stock_share.py)."""
+    def run(path, patched):
         r = Rig(path, patched)
         r.configure(models, polys)
         setup(r)
-        out.append((script(r, blocks, seed), r))
-    return out
+        return script(r, blocks, seed), r
+
+    def stock_run():
+        return run(stock, False)[0]
+    what = f"run_pair {models} {polys} {setup.__name__} {setup.__defaults__} {blocks} {seed}"
+    return [run(ptf, True), (stock_share.shared(stock, what, stock_run), None)]
 
 
 def stock_output_checks(ptf: Path, stock: Path) -> None:
@@ -1661,7 +1667,8 @@ def allocation_checks(ptf: Path, stock: Path) -> None:
     pluck = dict(aenv_att=0.0, aenv_dec=0.5, aenv_sus=0.0, aenv_rel=0.5)      # VAP's Init amp envelope
     for label, params in (("a pluck", pluck), ("sustained, Release 0.5", dict(pluck, aenv_sus=1.0)),
                           ("sustained, Release 1.0", dict(pluck, aenv_sus=1.0, aenv_rel=1.0))):
-        a, b = allocation(stock, False, params), allocation(ptf, True, params)
+        a = stock_share.shared(stock, f"allocation {sorted(params.items())}", lambda: allocation(stock, False, params))
+        b = allocation(ptf, True, params)
         same = sum(1 for x, y in zip(a, b) if x == y)
         check(a == b, f"{label}: the same voice for every note on as stock VAP ({same} of {len(a)} the same)")
 

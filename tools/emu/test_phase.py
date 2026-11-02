@@ -61,6 +61,7 @@ from fakefs import FakeFS  # noqa: E402
 from layout import patch_code, patch_late_ram  # noqa: E402
 from machine import Machine  # noqa: E402
 from patch_ptf import bl_target  # noqa: E402
+import stock_share  # noqa: E402
 
 ACD, FAT, VAP, WTFM, PERC = sr.ACD, sr.FAT, sr.VAP, sr.WTFM, sr.PERC
 WAVE, PHASE = ts.WAVE, ts.PHASE
@@ -1457,7 +1458,8 @@ def level_checks(ptf: Path, stock: Path) -> None:
           f"velocity sets the level: {lv[127]:.4f} at 127, {lv[64]:.4f} at 64 (64/127 = {64 / 127:.4f})")
     pluck = dict(dca_att=0.0, dca_dec=0.5, dca_sus=0.0, dca_rel=0.5)
     for label, params in (("a pluck", pluck), ("sustained, Release 1.0", dict(pluck, dca_sus=1.0, dca_rel=1.0))):
-        a, b = allocation(stock, False, params), allocation(ptf, True, params)
+        a = stock_share.shared(stock, f"allocation {sorted(params.items())}", lambda: allocation(stock, False, params))
+        b = allocation(ptf, True, params)
         same = sum(1 for x, y in zip(a, b) if x == y)
         check(a == b, f"voice allocation, {label}: the same voice for every note on as stock VAP ({same} of {len(a)})")
     r = phase_rig(ptf, polys=(2, 1, 1))
