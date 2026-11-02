@@ -1,8 +1,10 @@
 // The page: choose the stock firmware, choose mods, patch, download.
-// The patching itself is web/patcher.js; this file only drives it.
+// The patching itself is web/patcher.js; this file only drives it. Before offering a
+// download it has web/verify.js, written apart from the patcher, check every byte.
 import {
   PatchError, allIds, patchFirmware, planSelection, readPtf, versionShown, versionTextOf, versionWordAt,
 } from "./patcher.js";
+import { verifyFirmware } from "./verify.js";
 
 const $ = (id) => document.getElementById(id);
 const base = document.baseURI;
@@ -234,6 +236,9 @@ async function build() {
     const name = `TrackerPlus_${code}.ptf`;
     const digest = await sha256(out.ptf);
     lines.push(`file sha256 ${digest}`);
+    const check = await verifyFirmware({ ptfBytes: out.ptf, stockBytes: state.stock, spec, specUrl, io });
+    lines.push(check.ok ? `check: every byte accounted for (${check.parts.join(", ")})`
+                        : `check FAILED:\n  ${check.problems.join("\n  ")}`);
     $("log").textContent = lines.join("\n");
 
     const fact = (k, v) => {
@@ -249,8 +254,14 @@ async function build() {
     fact("Size", `${out.ptf.length.toLocaleString("en-US")} bytes`);
     fact("SHA-256", digest);
 
+    if (!check.ok) {
+      show(status, "✗ The check of this output against the stock firmware and the patch files failed (see the " +
+        "log), so there's nothing to download. Reload the page and try again; if it happens again, please report " +
+        "it on GitHub.", "bad");
+      return;
+    }
     const expected = state.expected.selections[plan.key];
-    if (expected !== digest) {
+    if (expected !== undefined && expected !== digest) {
       show(status, "✗ This output doesn't match the reference patcher's output for this selection, so there's " +
         "nothing to download. Reload the page and try again; if it happens again, please report it on GitHub.", "bad");
       return;
@@ -258,8 +269,12 @@ async function build() {
     const tested = state.manifest.tested_builds[digest];
     show(status, tested
       ? `✓ Byte-identical to the hardware-tested build: ${tested}.`
-      : "✓ Byte-identical to what the repository's Python patcher makes for this selection. This combination " +
-        "hasn't been tested on hardware as one firmware: keep the stock file in /Firmware.", tested ? "ok" : "info");
+      : (expected !== undefined
+        ? "✓ Byte-identical to what the repository's Python patcher makes for this selection, and every byte " +
+          "checked against the stock firmware and the patch files. "
+        : "✓ Every byte checked against the stock firmware and the patch files. ") +
+        "This combination hasn't been tested on hardware as one firmware: keep the stock file in /Firmware.",
+      tested ? "ok" : "info");
     if (plan.spec) {
       $("spec").textContent = JSON.stringify(plan.spec, null, 2) + "\n";
       $("spec-box").hidden = false;

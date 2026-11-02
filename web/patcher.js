@@ -456,8 +456,10 @@ function symbol(p, name) {
 // paths in it resolve against `specUrl`). Returns the new .ptf's bytes, its .map.json
 // text and the log. Throws PatchError where patch_ptf.py refuses. `stock`, if given, is
 // readPtf(stockBytes) already done (the test harness patches one stock many times); it
-// isn't changed.
-export async function patchFirmware({ stockBytes, stock: parsed, spec, specUrl, io, outName, sha256, onLog }) {
+// isn't changed. `readBack: false` skips reading the output back (the harness, building
+// most mixes in memory; it reads back the ones it builds in full).
+export async function patchFirmware({ stockBytes, stock: parsed, spec, specUrl, io, outName, sha256, onLog,
+  readBack = true }) {
   const log = onLog ?? (() => {});
   const ptf = parsed ?? readPtf(stockBytes, "stock firmware");
 
@@ -685,9 +687,11 @@ export async function patchFirmware({ stockBytes, stock: parsed, spec, specUrl, 
   const patched = { records: [...records, ...added, ...endRecords], base: ptf.base, image: fullImage, start: ptf.start };
   const out = ascii(encodePtf(patched));
 
-  const check = readPtf(out, outName);
-  if (check.base !== ptf.base || !bytesEqual(check.image, fullImage) || check.start !== ptf.start) fail("read-back mismatch");
-  if (dataRanges(check).length !== 1) fail(`output has gaps: ${JSON.stringify(dataRanges(check))}`);
+  if (readBack) {
+    const check = readPtf(out, outName);
+    if (check.base !== ptf.base || !bytesEqual(check.image, fullImage) || check.start !== ptf.start) fail("read-back mismatch");
+    if (dataRanges(check).length !== 1) fail(`output has gaps: ${JSON.stringify(dataRanges(check))}`);
+  }
   log(`wrote ${outName}: ${fullImage.length} bytes (${parts.map((p) => `${p.name} ${p.blob.length} bytes at ${hx(p.base)}`).join(", ")})`);
   for (const p of parts) {
     if (p.ram) log(`  RAM: ${p.name} ${p.ram_size} bytes at ${hx(p.ram[0])} (${p.ram[1]})`);

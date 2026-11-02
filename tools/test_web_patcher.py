@@ -7,7 +7,7 @@ Needs Node (runs web/patcher.js through tools/web_patcher_node.mjs). It:
   - stages the site with web/stage.py, as the deployment does, and runs both patchers
     on the staged files (so both use the prebuilt patches);
   - checks patcher.js's constants (RAM regions, alignment, version text) equal
-    patch_ptf.py's;
+    patch_ptf.py's, and so do web/verify.js's (its own copy of the layout rules);
   - before patching anything, checks every selection's spec path, and every bundle's
     version text, is unique ignoring case (Windows and FAT ignore it, so two would
     overwrite each other or read the same in Config), and that the version texts are
@@ -15,7 +15,15 @@ Needs Node (runs web/patcher.js through tools/web_patcher_node.mjs). It:
   - for every selection the page offers (each mod alone, patch/all, every other mix),
     plans it as the page does, patches it in JavaScript, patches the same spec with
     patch_ptf.py, and checks the .ptf files are byte-identical and the .map.json files
-    equal;
+    equal; past MAX_COMPARE selections (more than 15 mods), patch_ptf.py builds only
+    those compared() picks (every selection of 1 to 3 mods and of all but up to 2, then
+    an even spread);
+  - runs web/verify.js, the check the page runs before every download, on every
+    selection and on the bundles in other orders: it must accept them all; and on
+    builds broken on purpose (tools/verify_corrupt.mjs: a stock byte, a hook, a
+    relocation, RAM out of its region or overlapping, a chain word, the version text,
+    padding, the copy table, an ITCM stub, the .ptf text) made from each mod alone,
+    patch/all and two mixes: it must reject every one;
   - does the same for the bundles tools/test_layout.py builds in other orders
     (reversed, masterfx first, every mod reversed, humanize with a chained copy);
   - does the same for ITCM hooks: condtrig placed first, and condtrig with a copy of
@@ -36,8 +44,9 @@ Needs Node (runs web/patcher.js through tools/web_patcher_node.mjs). It:
     text) on every selection's output;
   - checks the single-mod and patch/all outputs against the hardware-tested SHA-256s
     in docs/PATCHING.md and web/manifest.json;
-  - checks web/expected.json (the hashes the page accepts) holds exactly the
-    selections' hashes; --update rewrites it.
+  - checks web/expected.json (the hashes the page accepts) holds exactly the hashes
+    of the selections both patchers built (all of them, up to MAX_COMPARE); --update
+    rewrites it.
 Outputs: <out dir>/py, each selection's .map.json, and index.json: for each selection that
 passed, its files' name, its .ptf's SHA-256, where its image ends (the last non-0xFF byte,
 for the test runner's cover set) and the spec it was patched from in <out dir>/site. A
@@ -55,13 +64,23 @@ patcher in Node processes, patch_ptf.py in a pool of worker processes that parse
 stock firmware once (patch_ptf.py's own code, called in the worker instead of in a new
 interpreter per selection).
 
+In memory: neither patcher reads back the 6 MB .ptf it just wrote (most of their time), and
+patch_ptf.py's text comes from fast_encode (the stock records' lines encoded once per
+worker), its parsed output kept for its read-back and the layout checks. Every FULL_EVERY-th
+selection, each mod alone and patch/all are built in full instead, as the patchers run on
+their own (their encoders, their read-backs, the layout checks reading the file), and
+fast_encode must give the same text on each; the test runner also rebuilds the cover mixes
+with patch_ptf.py itself and checks their SHA-256. Profiled 2026-11-02: 1.5 s and 0.27 s
+per mix in full, 0.16 s and 0.11 s in memory.
+
 The selections' cache (<out dir>/selections.json): a selection's key is a digest of the
-patcher code (both patchers, test_layout.py and this file), the stock firmware, the spec
+patcher code (both patchers, the page's check, test_layout.py and this file), the stock firmware, the spec
 the page plans for it and every patch file that spec uses. A selection whose key passed
-before (byte-identical, layout checks passed), and whose .map.json in <out dir>/py is
+before (byte-identical or past MAX_COMPARE, layout checks passed, web/verify.js
+accepted it), and whose .map.json in <out dir>/py is
 still as written, isn't patched or checked again: a change to one patch reruns only the
-selections that contain it. --no-cache runs them all. The bundles in other orders and
-the refusals always run.
+selections that contain it. --no-cache runs them all. The bundles in other orders, the
+refusals and the broken builds always run.
 """
 from __future__ import annotations
 
@@ -83,20 +102,25 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "web"))
 import patch_ptf  # noqa: E402
 import stage  # noqa: E402
 import test_layout  # noqa: E402
-from ptf import read_ptf  # noqa: E402
+from ptf import _line as ptf_line, read_ptf  # noqa: E402
 
 failures: list[str] = []
 PROCS = os.cpu_count() or 8
 CODE = [ROOT / "tools" / f for f in ("patch_ptf.py", "ptf.py", "test_layout.py", "test_web_patcher.py",
-                                     "web_patcher_node.mjs")] + [ROOT / "web" / "patcher.js"]
+                                     "web_patcher_node.mjs", "verify_corrupt.mjs")] \
+    + [ROOT / "web" / f for f in ("patcher.js", "verify.js")]
 KEEP = ("py", "selections.json")              # what a run keeps from the one before
 MAX_PATH = 80                                 # characters below <out dir>, for any file written
+FULL_EVERY = 64                               # every 64th selection built as patch_ptf.py runs alone
+MAX_COMPARE = 32767                           # selections patch_ptf.py also builds (all, to 15 mods)
 
 
 def check(ok: bool, what: str) -> None:
@@ -131,35 +155,119 @@ def run_js(site: Path, stock: Path, jobs: list[dict], out: Path, procs: int = 1)
 # ---- the Python side, in worker processes ----------------------------------------------
 
 _stock_img = b""
+_stock_lines: dict[tuple[int, bytes], str] = {}  # a stock data record (address, bytes) -> its line
+_read_cached = None
+_written: dict[Path, object] = {}                # .ptf just written -> its parsed form (in memory)
 
 
 def _init_worker(stock: str) -> None:
-    """Parse the stock firmware once per worker, and load each patch's files once for the
-    layout checks. patch_ptf.py gets a fresh copy of the parsed stock on every call (it
-    replaces the copy's image and record list, as it would a newly read file's)."""
-    global _stock_img
+    """Parse the stock firmware once per worker, encode its data records' lines once, and
+    load each patch's files once for the layout checks. patch_ptf.py gets a fresh copy of
+    the parsed stock on every call (it replaces the copy's image and record list, as it
+    would a newly read file's)."""
+    global _stock_img, _read_cached
     stock_path = Path(stock)
     parsed = read_ptf(stock_path)
     _stock_img = bytes(parsed.image)
+    for r in parsed.records:
+        if r.kind == 0:
+            _stock_lines[(r.addr, r.payload)] = ptf_line(len(r.payload), r.addr & 0xFFFF, 0, r.payload)
 
     def read_cached(path: Path):
         if Path(path) == stock_path:
             return dataclasses.replace(parsed, records=list(parsed.records), image=bytearray(parsed.image))
         return read_ptf(path)
 
+    _read_cached = read_cached
     patch_ptf.read_ptf = read_cached
     test_layout.patch_files = functools.lru_cache(None)(test_layout.patch_files)
 
 
+def fast_encode(p) -> str:
+    """ptf.encode_ptf's text, faster: a data record whose address and bytes are a stock
+    record's reuses that record's line, and the 16-byte records after the stock image (the
+    patches) are encoded together with numpy. The harness checks it equals encode_ptf on
+    the selections it builds in full (FULL_EVERY)."""
+    lines: list[str | None] = []
+    tail = []
+    for r in p.records:
+        if r.kind == 0:
+            off = r.addr - p.base
+            payload = bytes(p.image[off:off + len(r.payload)])
+            line = _stock_lines.get((r.addr, payload))
+            if line is None:
+                if len(payload) == 16:
+                    tail.append((len(lines), r.addr & 0xFFFF, payload))
+                    lines.append(None)
+                    continue
+                line = ptf_line(len(payload), r.addr & 0xFFFF, 0, payload)
+            lines.append(line)
+        else:
+            lines.append(ptf_line(len(r.payload), r.addr, r.kind, r.payload))
+    if tail:
+        raw = np.zeros((len(tail), 21), np.uint8)
+        raw[:, 0] = 16
+        addrs = np.array([t[1] for t in tail], np.uint32)
+        raw[:, 1], raw[:, 2] = addrs >> 8, addrs & 0xFF
+        raw[:, 4:20] = np.frombuffer(b"".join(t[2] for t in tail), np.uint8).reshape(len(tail), 16)
+        raw[:, 20] = (-raw[:, :20].sum(axis=1, dtype=np.int64)) & 0xFF
+        text = raw.tobytes().hex().upper()
+        for i, (pos, _, _) in enumerate(tail):
+            lines[pos] = ":" + text[42 * i:42 * i + 42]
+    return "\r\n".join(lines) + "\r\n"
+
+
+def _encode_kept(p) -> str:
+    """patch_ptf.py's encoder in memory: fast_encode, keeping the parsed output for its
+    read-back and the layout checks instead of reading the 6 MB file back."""
+    text = fast_encode(p)
+    _written[Path(_argv_out[0])] = dataclasses.replace(p, records=list(p.records), image=bytearray(p.image))
+    return text
+
+
+_argv_out = [""]
+
+
+def _read_kept(path: Path):
+    return _written[Path(path)] if Path(path) in _written else _read_cached(path)
+
+
 def _py_job(site: Path, name: str, spec: str | None, stock: Path, outdir: Path, compare: bool,
-            verify: tuple | None) -> SimpleNamespace | None:
+            verify: tuple | None, full: bool = True, python: bool = True) -> SimpleNamespace | None:
     """patch_ptf.py on one spec; then, if asked, the comparison with the web patcher's
-    output (whose .ptf is deleted when it's identical) and test_layout.py's checks."""
+    output (whose .ptf is deleted when it's identical) and test_layout.py's checks.
+    Not `python` (a selection past MAX_COMPARE): no patch_ptf.py, only the web patcher's
+    output, which web/verify.js checked; its map is kept and its .ptf deleted, as for one
+    that passed.
+    Not `full`: in memory (fast_encode, and the output's parsed form kept for patch_ptf.py's
+    read-back and the layout checks, not read from the file). `full`: as patch_ptf.py runs
+    on its own, and fast_encode's text compared with its encoder's."""
     if not spec:
         return None
     out = outdir / "py" / f"{name}.ptf"
+    if not python:
+        a = outdir / "js" / f"{name}.ptf"
+        shutil.copyfile(a.with_suffix(".map.json"), out.with_suffix(".map.json"))
+        r = SimpleNamespace(returncode=0, stdout="", stderr="", same=None, same_map=None, layout_checked=False,
+                            layout_failed=0, layout_log="", full=None, fast_same=None, compared=False,
+                            end=data_end(a), map=hashlib.sha256(a.with_suffix(".map.json").read_bytes()).hexdigest())
+        a.unlink()
+        return r
     so, se = io.StringIO(), io.StringIO()
     argv, sys.argv = sys.argv, ["patch_ptf.py", str(stock), str(site / spec), str(out)]
+    fast_same = None
+    real_encode = patch_ptf.encode_ptf
+    if full:
+        def encode_both(p):
+            nonlocal fast_same
+            text = real_encode(p)
+            fast_same = fast_encode(p) == text
+            return text
+        patch_ptf.encode_ptf = encode_both
+    else:
+        _argv_out[0] = str(out)
+        patch_ptf.encode_ptf = _encode_kept
+        patch_ptf.read_ptf = _read_kept
     try:
         with contextlib.redirect_stdout(so), contextlib.redirect_stderr(se):
             rc = patch_ptf.main()
@@ -172,8 +280,12 @@ def _py_job(site: Path, name: str, spec: str | None, stock: Path, outdir: Path, 
         se.write(traceback.format_exc())
     finally:
         sys.argv = argv
+        patch_ptf.encode_ptf = real_encode
+        patch_ptf.read_ptf = _read_cached
+    kept = _written.pop(out, None)
     r = SimpleNamespace(returncode=rc, stdout=so.getvalue(), stderr=se.getvalue(), same=None, same_map=None,
-                        layout_checked=False, layout_failed=0, layout_log="", end=None, map=None)
+                        layout_checked=False, layout_failed=0, layout_log="", end=None, map=None, full=full,
+                        fast_same=fast_same, compared=True)
     if rc:
         return r
     if compare:
@@ -186,7 +298,7 @@ def _py_job(site: Path, name: str, spec: str | None, stock: Path, outdir: Path, 
         key, specs, version = verify
         n0 = len(test_layout.failures)
         with contextlib.redirect_stdout(io.StringIO()) as buf:
-            test_layout.verify(key, out, specs, version, _stock_img)
+            test_layout.verify(key, out, specs, version, _stock_img, parsed=kept)
         r.layout_checked = True
         r.layout_failed = len(test_layout.failures) - n0
         r.layout_log = buf.getvalue() if r.layout_failed else ""
@@ -195,6 +307,23 @@ def _py_job(site: Path, name: str, spec: str | None, stock: Path, outdir: Path, 
         r.map = hashlib.sha256(out.with_suffix(".map.json").read_bytes()).hexdigest()
         out.unlink()                              # passed: the index keeps what the test runner needs
     return r
+
+
+def compared(sel_jobs: list[dict], budget: int = MAX_COMPARE) -> set[str]:
+    """The selections patch_ptf.py builds too, byte for byte against the web patcher's:
+    all of them while they fit in `budget`. Past it, every selection of one to three mods
+    (so every pair and triple of mods that share a hook) and of all mods but up to two,
+    then an even spread of the rest, the same ones each run. Every selection, compared or
+    not, is checked by web/verify.js, as the page checks it."""
+    names = [sel["name"] for sel in sel_jobs]
+    if len(names) <= budget:
+        return set(names)
+    most = max(len(sel["ids"]) for sel in sel_jobs)
+    must = [sel["name"] for sel in sel_jobs if len(sel["ids"]) <= 3 or len(sel["ids"]) >= most - 2]
+    set_must = set(must)
+    rest = [n for n in names if n not in set_must]
+    room = max(0, budget - len(must))
+    return set_must | {rest[i * len(rest) // room] for i in range(room)}
 
 
 def data_end(ptf: Path) -> int:
@@ -424,6 +553,18 @@ def main() -> int:
           and consts["VERSION_LONG"] == patch_ptf.VERSION_LONG
           and consts["VERSION_LONG_PREFIX"].encode() == patch_ptf.VERSION_LONG_PREFIX,
           "ALIGN, VERSION_MAX, VERSION_PREFIX, VERSION_LONG, VERSION_LONG_PREFIX")
+    v = consts["VERIFY"]                          # web/verify.js: its own copy of the rules
+    v_regions = {k: [s, e, sorted(f)] for k, (s, e, f) in v["RAM_REGIONS"].items()}
+    check(v_regions == py_regions and list(v["RAM_REGIONS"]) == list(patch_ptf.RAM_REGIONS)
+          and v["RAM_DEFAULT_ORDER"] == patch_ptf.RAM_DEFAULT_ORDER and v["ALIGN"] == patch_ptf.ALIGN
+          and v["FLASH_SECTOR"] == patch_ptf.FLASH_SECTOR and v["FLASH_PAGE"] == patch_ptf.FLASH_PAGE
+          and v["COPY_TABLE"] == patch_ptf.COPY_TABLE and v["ITCM_ENTRY"] == patch_ptf.ITCM_ENTRY
+          and v["STUB_ENTRY"] == patch_ptf.STUB_ENTRY and tuple(v["STUB_ENTRY_STOCK"]) == patch_ptf.STUB_ENTRY_STOCK
+          and v["ITCM_STUBS"] == patch_ptf.ITCM_STUBS and v["REGS"] == patch_ptf.ITCM_ARG_REGS
+          and v["PREFIX_SHORT"].encode() == patch_ptf.VERSION_PREFIX
+          and v["PREFIX_LONG"].encode() == patch_ptf.VERSION_LONG_PREFIX,
+          "web/verify.js's RAM regions, alignment, flash padding, copy table, ITCM stubs and version "
+          "prefixes as in patch_ptf.py")
     print("version texts for a 15th mod on")
     long = consts["MIX_VERSIONS"]
     check(all(re.fullmatch(r"[0-9A-Z]{%d}" % patch_ptf.VERSION_LONG, v) and int(v, 36) == m for m, v in long)
@@ -443,6 +584,14 @@ def main() -> int:
     check(not bad, f"version texts are letters and digits, at most {patch_ptf.VERSION_MAX} or exactly "
           f"{patch_ptf.VERSION_LONG}"
           + (f": {', '.join(bad[:10])}" if bad else ""))
+    print("compare budget")
+    fake = [{"name": "+".join(map(str, c)), "ids": c} for n in range(1, 17) for c in itertools.combinations(range(16), n)]
+    picked = compared(fake)
+    check(compared(sel_jobs[:MAX_COMPARE]) == {s["name"] for s in sel_jobs[:MAX_COMPARE]}
+          and len(picked) == MAX_COMPARE and picked == compared(fake)
+          and all(sel["name"] in picked for sel in fake if len(sel["ids"]) <= 3 or len(sel["ids"]) >= 14),
+          f"all selections while there are at most {MAX_COMPARE}; past that (16 mods: {len(fake)}), "
+          f"{MAX_COMPARE}: every one of 1-3 mods and of all but 0-2, then the same spread each run")
     if failures:                                  # before the long part
         print(f"{len(failures)} failure(s), before patching anything")
         return 1
@@ -456,7 +605,12 @@ def main() -> int:
     base = hashlib.sha256("|".join([*(file_sha(f) for f in CODE), file_sha(stock)]).encode()).hexdigest()
     keys = {n: selection_key(base, site, pl) if pl["ok"] else None for n, pl in plans.items()}
     cached = {n for n, k in keys.items() if k in cache and outputs_as_written(py_dir, files[n], cache[k])}
-    todo = [dict(j, file=files[j["name"]]) for j in sel_jobs if j["name"] not in cached]
+    # In memory, but every FULL_EVERY-th selection (by its place among all of them, so the
+    # same ones each run), each mod alone and patch/all as the patchers run on their own.
+    full = {sel["name"] for i, sel in enumerate(sel_jobs)
+            if i % FULL_EVERY == 0 or plans[sel["name"]].get("kind") in ("single", "all")}
+    todo = [dict(j, file=files[j["name"]], full=j["name"] in full) for j in sel_jobs if j["name"] not in cached]
+    by_python = compared(sel_jobs)
     _, js_new = run_js(site, stock, todo, outdir / "js", procs)
     js_sel = {j["name"]: cache[keys[j["name"]]]["js"] if j["name"] in cached else js_new[j["name"]]
               for j in sel_jobs}
@@ -469,6 +623,15 @@ def main() -> int:
                              outdir / "js")
         js_extra.update(js_other)
 
+    # the page's check on broken firmware: each mod alone, patch/all, the first mix and the
+    # largest one, each broken in every way tools/verify_corrupt.mjs knows
+    mixes = [n for n in plans if plans[n].get("kind") == "mix" and plans[n]["ok"]]
+    broken_from = [n for n in plans if plans[n].get("kind") in ("single", "all") and plans[n]["ok"]]
+    broken_from += [mixes[0], max(mixes, key=len)] if mixes else []
+    _, js_broken = run_js(site, stock, [{"name": n, "spec": plans[n]["spec"], "corrupt": True,
+                                         "file": "broken-" + files[n][4:], "full": False}
+                                        for n in dict.fromkeys(broken_from)], outdir / "js", procs)
+
     def layout_args(sel: dict) -> tuple | None:
         js = js_sel[sel["name"]]
         if not js["ok"]:
@@ -478,21 +641,26 @@ def main() -> int:
         return (js["key"], specs, version)
 
     py_jobs = [(site, sel["file"], js_sel[sel["name"]].get("spec"), stock, outdir, js_sel[sel["name"]]["ok"],
-                layout_args(sel)) for sel in todo]
-    py_jobs += [(extra, n, s, stock, outdir, js_extra[n]["ok"], None) for n, s in other_orders.items()]
-    py_jobs += [(extra, n, s, st, outdir, False, None) for n, (s, st, _) in refusals.items()]
+                layout_args(sel), sel["name"] in full, sel["name"] in by_python) for sel in todo]
+    py_jobs += [(extra, n, s, stock, outdir, js_extra[n]["ok"], None, True, True) for n, s in other_orders.items()]
+    py_jobs += [(extra, n, s, st, outdir, False, None, True, True) for n, (s, st, _) in refusals.items()]
     py_names = [sel["name"] for sel in todo] + list(other_orders) + list(refusals)
     with ProcessPoolExecutor(procs, initializer=_init_worker, initargs=(str(stock),)) as pool:
         py = dict(zip(py_names, pool.map(_py_job, *zip(*py_jobs), chunksize=4)))
     for n in cached:                              # as they were when they passed
         py[n] = SimpleNamespace(returncode=0, stdout="", stderr="", same=True, same_map=True,
-                                layout_checked=True, layout_failed=0, layout_log="")
+                                layout_checked=True, layout_failed=0, layout_log="",
+                                compared=cache[keys[n]].get("compared", True))
 
     def same(name: str, label: str) -> bool:
         js, pr = js_extra.get(name) or js_sel[name], py[name]
         if not js["ok"] or pr is None or pr.returncode:
             check(False, f"{label}: both patched (js: {js.get('error')}; py: {pr and (pr.stdout + pr.stderr)[-300:]})")
             return False
+        if not pr.compared:                       # past MAX_COMPARE: web/verify.js's check alone
+            check(bool(js.get("verified")), f"{label}: web patcher only, checked by web/verify.js "
+                  f"({js['sha256'][:12]}…)")
+            return bool(js.get("verified"))
         check(pr.same and pr.same_map, f"{label}: .ptf byte-identical to patch_ptf.py's, .map.json equal "
               f"({js['sha256'][:12]}…)")
         return pr.same
@@ -503,7 +671,8 @@ def main() -> int:
     for sel in sel_jobs:
         js = js_sel[sel["name"]]
         if same(sel["name"], f"{js.get('kind', '?'):6} {js.get('version_text')}  {'+'.join(sel['ids'])}"):
-            expected[js["key"]] = js["sha256"]
+            if py[sel["name"]].compared:         # a hash patch_ptf.py made too
+                expected[js["key"]] = js["sha256"]
     print("the bundles test_layout.py builds in other orders")
     for n in other_orders:
         same(n, n)
@@ -519,6 +688,28 @@ def main() -> int:
     check(not js["ok"] and "doesn't support future_hooks" in js["error"],
           "a spec using a key the port doesn't know (future_hooks) is refused")
 
+    print("the page's own check (web/verify.js)")
+    unverified = [n for n in [*(s["name"] for s in sel_jobs), *other_orders]
+                  if (js_extra.get(n) or js_sel[n])["ok"] and not (js_extra.get(n) or js_sel[n]).get("verified")]
+    for n in unverified[:5]:
+        print(f"    {n}: {(js_extra.get(n) or js_sel[n]).get('verify_problems')}")
+    check(not unverified, f"accepts every build: the {len(sel_jobs)} selections and the {len(other_orders)} "
+          f"bundles in other orders" + (f" ({len(unverified)} rejected)" if unverified else ""))
+    tried = sum(len(js.get("corrupt", {}).get("tried", [])) for js in js_broken.values())
+    missed = [f"{n}: {m}" for n, js in js_broken.items() for m in js.get("corrupt", {}).get("missed", [])]
+    for m in missed[:10]:
+        print(f"    missed {m}")
+    check(all(js["ok"] and js.get("verified") for js in js_broken.values()) and tried > 0 and not missed,
+          f"rejects all {tried} deliberately broken builds made from {len(js_broken)} selections (each mod "
+          f"alone, patch/all, two mixes)" + (f"; missed {len(missed)}" if missed else ""))
+
+    print("in memory and in full")
+    built = [pr for pr in py.values() if pr is not None and not pr.returncode and getattr(pr, "full", None) is not None]
+    whole = [pr for pr in built if pr.full]
+    check(bool(whole) and all(pr.fast_same for pr in whole),
+          f"{len(whole)} of the {len(built)} builds made as patch_ptf.py runs on its own (its encoder, the "
+          f"6 MB read-back); the in-memory encoder gives the same text on every one")
+
     print("test_layout.py checks on every selection")
     bad = 0
     for sel in sel_jobs:
@@ -527,8 +718,10 @@ def main() -> int:
             print(pr.layout_log)
             bad += 1
     checked = sum(1 for sel in sel_jobs if py[sel["name"]] is not None and py[sel["name"]].layout_checked)
-    check(bad == 0 and checked == len(sel_jobs),
-          f"placement, RAM, relocation, chain words, hooked sites and version text for all {len(sel_jobs)}")
+    want = sum(1 for sel in sel_jobs if py[sel["name"]] is None or py[sel["name"]].compared)
+    check(bad == 0 and checked == want,
+          f"placement, RAM, relocation, chain words, hooked sites and version text for all {want} "
+          f"built by patch_ptf.py too")
 
     # the selections' cache: every current selection that passed, the new ones as written
     passed = {}
@@ -536,9 +729,9 @@ def main() -> int:
         n, js, pr = sel["name"], js_sel[sel["name"]], py[sel["name"]]
         if n in cached:
             passed[keys[n]] = cache[keys[n]]
-        elif keys[n] and js["ok"] and pr is not None and not pr.returncode and pr.same and pr.same_map \
-                and pr.layout_checked and not pr.layout_failed:
-            passed[keys[n]] = {"js": js, "map": pr.map, "end": pr.end}
+        elif keys[n] and js["ok"] and js.get("verified") and pr is not None and not pr.returncode and (
+                (pr.same and pr.same_map and pr.layout_checked and not pr.layout_failed) or not pr.compared):
+            passed[keys[n]] = {"js": js, "map": pr.map, "end": pr.end, "compared": pr.compared}
     cache_path.write_text(json.dumps(passed, indent=0) + "\n")
     index = {n: {"file": files[n], "sha256": passed[k]["js"]["sha256"], "end": passed[k]["end"],
                  "spec": js_sel[n]["spec"]} for n, k in keys.items() if k in passed}
@@ -557,7 +750,10 @@ def main() -> int:
           "manifest tested_builds are all tested builds in docs/PATCHING.md")
 
     print("web/expected.json")
-    check(list(expected) == stage.selection_keys(), "the selections are the ones web/stage.py expects")
+    both = [js_sel[sel["name"]].get("key") for sel in sel_jobs if py[sel["name"]] is None or py[sel["name"]].compared]
+    check(list(expected) == [k for k in stage.selection_keys() if k in set(both)] and stage.expected_keys_ok(expected),
+          f"the selections are the ones web/stage.py expects: the {len(both)} both patchers built, each mod "
+          "alone and all of them among them")
     exp_path = ROOT / "web" / "expected.json"
     want = {"inputs_sha256": stage.inputs_digest(), "selections": expected}
     if update and not failures:
@@ -566,7 +762,7 @@ def main() -> int:
     elif update:
         print("  not updated: there are failures")
     check(json.loads(exp_path.read_text()) == want,
-          f"holds exactly the {len(selections)} selections' hashes and the patch files' digest "
+          f"holds exactly the {len(expected)} selections' hashes and the patch files' digest "
           "(run with --update after changing a patch)")
 
     print("file names")

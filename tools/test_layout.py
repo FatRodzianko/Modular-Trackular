@@ -131,9 +131,10 @@ def build(stock: Path, spec: Path, out: Path) -> bool:
     return r.returncode == 0
 
 
-def verify(label: str, out: Path, specs: list[Path], version: str | None, stock: bytes) -> None:
+def verify(label: str, out: Path, specs: list[Path], version: str | None, stock: bytes, parsed=None) -> None:
+    """`parsed`: the output already parsed (what read_ptf(out) gives), not read again."""
     print(label)
-    ptf = read_ptf(out)
+    ptf = parsed if parsed is not None else read_ptf(out)
     img, base0 = bytes(ptf.image), ptf.base
     layout = {q["name"]: q for q in json.loads(out.with_suffix(".map.json").read_text())["patches"]}
     end = STOCK_END

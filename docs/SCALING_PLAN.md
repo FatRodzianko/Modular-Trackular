@@ -1,6 +1,6 @@
 # Plan: more mods with less testing
 
-Status: Phase 1a, 1b and 1c are built and committed (test tooling only), and so are the names for mod 15 and beyond (Phase 3); 1d steps 1 to 3 are done (the deep tier timed at 3 h 55 min on 6 cores); 1d step 4 is planned; the rest is plan only.
+Status: Phase 1a, 1b and 1c are built and committed (test tooling only), and so are the names for mod 15 and beyond (Phase 3); 1d steps 1 to 3 are done (the deep tier timed at 3 h 55 min on 6 cores); 1d step 4 is planned; Phase 2 (2026-11-02: the page checks every download, the harness builds in memory) is built and passed a release run (43.2 min, was 118.6), not committed; the rest is plan only.
 
 ## The problem today (14 mods in the web patcher)
 
@@ -124,58 +124,51 @@ Not planned:
 - **Splitting long tests into parallel parts.** The runner already starts the longest jobs first, and no single job (a full synths run is about 22–30 min) comes near a deep run's length, so the parts wouldn't shorten it.
 - **Letting the deep tier use the cache.** That would make it a second release tier and remove the one run that checks what the cache keys might miss.
 
-### Phase 2: stop the doubling with "fixed slots" (before chords joins the web patcher)
+### Phase 2: check every download in the browser, and build the harness's mixes in memory
 
-**The idea:** patch/all's layout becomes the layout for every mix. A mix is the All image with the unticked mods taken out:
-- their code and RAM stay unused, at the same addresses;
-- their hook words go back to stock;
-- each shared hook chain skips them.
+Decided 2026-11-02, replacing "fixed slots" (dropped, see below). Every mix keeps today's bytes, RAM layout and performance.
 
-**Why it suits your risk tolerance:**
-- **Nothing hardware-tested changes.**
-  - patch/all is built exactly as now, so its bytes are identical.
-  - Single-mod builds keep using each mod's own spec, so they're unchanged too.
-  - Only multi-mod mixes change bytes, and no current mix has been hardware-tested as a whole. The tested-builds list's older All bundles were built from older mod versions, so they no longer match any mix the page makes.
-  - The tools would prove this: a hard check that All and every single build are byte-identical before and after.
-- **The page's check stays complete.** It would no longer look up one hash per mix. It would check every byte of what it built:
-  - the stock regions, against stock;
-  - each mod's slot, against one hash per mod;
-  - each hook and chain word, against a small table per shared site.
+**Why the harness doubles.** The page builds the firmware in the browser and compares its hash with the one `patch_ptf.py` got for that exact mix (`web/expected.json`). To have those hashes, the harness builds every mix twice, in Python and in JavaScript: 16,383 mixes × 2 at 14 mods, and twice that for each new mod.
 
-  Every byte is covered, so this is as strict as today's check, not a sample. It works because slots can't overlap, which is checked once for the whole layout.
-- **Testing becomes linear.**
+**Where its time goes** (profiled 2026-11-02, 40 mixes on one core, nothing else running):
 
-  | Check | Today | With fixed slots |
-  |---|---|---|
-  | Web harness | 2^N builds | each mod's slot once, plus each shared site's chain combinations |
-  | Cover set | as now | smaller |
+| Step | Python (`patch_ptf.py` + `test_layout.verify`) | JavaScript (`patcher.js` under Node) |
+|---|---|---|
+| Re-reading the 6 MB output it just wrote | 958 ms | ~100 ms (36 %) |
+| Encoding the 6 MB `.ptf` text | 378 ms | ~55 ms (19 %) |
+| Building and checking | ~90 ms | ~45 ms |
+| The rest (memory, hashing, files) | ~66 ms | ~73 ms |
+| **Per mix** | **1,492 ms** | **273 ms** |
 
-  The busiest site has about 5 mods, so 32 chain variants.
+A prototype of the Python side in memory (stock record lines encoded once, the output's image kept instead of re-read) took 161 ms per mix, and all 40 mixes came out with the SHA-256 the harness had recorded.
 
-  The cover set shrinks because a mod's RAM is always in one place:
-  - The "RAM block at a region's start, middle and end" cases go away.
-  - The "padded or not" case goes away, since every mix has the All image's size.
-  - What remains is each pair of neighbours on a shared hook chain, plus mixes that leave mods out of a chain.
-- **Adding a mod stays cheap:**
-  - The new mod goes last in patch/all, so every existing mod keeps its address.
-  - Testing a new mod means its own tests, its slot, the chains it joins, and the cover mixes it's in. It doesn't mean rebuilding everything.
+**The three parts:**
+1. **In-memory harness (option 2).** Both sides build each mix without re-reading their own output, and encode the unchanged stock records once. The full checks (the real encoder, the read-back) still run on a fixed sample of mixes in every run, and `run_tests.py` already rebuilds the cover mixes with the real `patch_ptf.py` and checks their SHA-256. Nothing users get changes.
+2. **A byte-by-byte check on the page (option 1).** `web/verify.js`, separate from the builder, reads the finished `.ptf` and accounts for every byte: the stock bytes, each hook site, each chain and link word, each mod's code with its relocation removed, each RAM block (in a region the mod may use, aligned, not overlapping another), the ITCM stubs and copy table entry, the version text and the padding; any byte no rule explains is a failure. It decodes branches and hex itself rather than reusing the builder's encoder. The page runs it on every download and refuses one that fails. It is `test_layout.verify`'s checks, ported, plus the stock-byte and padding coverage those didn't have.
+   - The harness runs it on every mix and every reordered bundle, which it must accept, and on deliberately broken firmware it must reject: `tools/verify_corrupt.mjs` breaks each mod alone, patch/all and two mixes in 13 to 17 ways each (a stock byte, a hook put back, a byte of a mod's code, a gap byte, a relocated word, RAM moved out of its region or onto another mod's, a chain word, the version text, padding added or cut, the copy table, an ITCM stub, a bad checksum, lowercase hex, a missing record, LF line endings), 242 builds in all. Its copy of the layout rules is checked equal to `patch_ptf.py`'s.
+   - What it allows: a RAM block anywhere free (in a region the mod may use, aligned, not overlapping), not only where the builder would put it. Any such placement is safe; the builders' exact choice is what the hash comparison checks.
+   - The page also keeps the stored-hash check for every mix the harness compared, and patch/all and the single-mod builds keep theirs against the hardware-tested SHA-256s.
+3. **Compare the two builders as widely as a set number of mixes allows.** Every mix while there are at most `MAX_COMPARE` (32,767: up to 15 mods). Beyond that (`compared()` in `test_web_patcher.py`): every mix of one to three mods (so every pair and triple of mods sharing a hook site), every mix of all mods but up to two, then an even spread of the rest up to `MAX_COMPARE`, the same ones each run. Only compared mixes' hashes go into `expected.json`; for the others the page says the every-byte check passed, and not that they match the Python builder. `web/stage.py` publishes an `expected.json` holding fewer mixes only if each mod alone and patch/all are among them.
 
-**Costs and catches:**
-- **It's a sizeable change:** `patch_ptf.py`, `patcher.js`, `test_web_patcher.py`, `test_layout.py`, `stage.py` and the format of `expected.json`.
-- **Mixes download larger.** A mix is always the size of patch/all, so it flashes a little slower.
-- **The mod order in patch/all is frozen.** Reordering would move every slot.
+**Timed (2026-11-02, `--jobs 6`, 6 cores):** the release run that brought it in took 43.2 min, 256 jobs, 0 failed (the one before, with the old harness redoing every mix, 118.6 min). The harness redid all 16,383 mixes in 30.0 min, about 0.11 s a mix; 280 of them were built in full, and 241 broken builds were all rejected. `web/expected.json` came out unchanged. The cover stage took 11.6 min (42 quick-mode jobs whose last pass was in full mode, in the deep run).
 
-**Recommended order:**
-1. A design session writes the detailed design, including the byte-check format, and times a prototype.
-2. Then it gets built, with an overnight deep run.
-3. Then chords joins as mod 15 under the new scheme.
+**What it gives** (harness only, `--jobs 6`, from that run: 0.11 s a mix compared, ~0.064 s a mix the page's check alone covers; a one-patch change redoes the half of the mixes that contain it):
 
-Chords stays usable on its own meanwhile.
+| Mods | Before | Phase 2, one-patch change | Phase 2, every mix |
+|---|---|---|---|
+| 14 | ~59 min | ~15 min | 30 min (measured) |
+| 15 | ~2 h | ~30 min | ~60 min |
+| 16 | ~4 h | ~45 min | ~1.6 h |
+| 20 | ~2.5 days | ~9 h | ~19 h |
+| 25 | months | ~12 days | ~25 days |
 
-**Why not add chords first under today's scheme:**
-- The harness would go to 32,767 mixes × 2 builds, about 2.5–3 hours once (an estimate).
-- After that, every one-mod change at 15 mods would rebuild about 16,000 mixes (roughly 80 min).
-- That's paid again and again until Phase 2 lands.
+`MAX_COMPARE` caps only the Python side. Past 15 mods the harness still builds every mix in JavaScript and runs the page's check on it (the cover set is chosen from every mix's map), so that part still doubles with each mod. Capping it too needs the cover set chosen without building every mix (from each mod's size and RAM, which decide where everything lands) and the harness checking a sample past a second budget, with the page's check still on every download. Not built; it matters from about 17 mods.
+
+Every mix, at every size, also passes the page's check before it can be downloaded. A bad firmware gets through only if the JavaScript builder has a bug in a mix the harness didn't compare and the every-byte check misses it; more likely such a bug shows as a refused download. The pinhole reflash with the stock `.ptf` recovers a unit either way (FINDINGS section 3).
+
+**Fixed slots, dropped (2026-11-02).** Every mix would have been patch/all with the unticked mods switched off. Checked against all 16,369 multi-mod mixes, it would move RAM: for the audio blocks of synths and masterfx, 1,024 mixes faster, 3,444 slower, 5,118 some of each, 2,700 unchanged, by amounts the emulator can't measure (it doesn't model memory waits). It would also have changed the firmware writer itself, frozen the mod order, and made every mix patch/all's size. The checks above stop the doubling without any of that.
+
+**A related idea, not planned:** RAM handed out by how often it's used (synths' and masterfx's per-sample state to DTCM first, colorsong's colors to SDRAM). Today it's first come, first served in the listed order, so a mix without colorsong puts masterfx's main block in OCRAM rather than DTCM. It would change patch/all's bytes, so it needs a hardware test.
 
 ### Phase 3: names for mod 15 and beyond
 
@@ -194,14 +187,14 @@ I'm not recommending it now:
 - Every mod needs a new tested "off" path, which means hardware re-testing everything.
 - Switches that survive restarts need a new settings file, with the Save As care that settings files have needed before.
 
-That's far more risk than Phase 2, which changes only the build tools.
+That's far more risk than Phase 2, which changes only the test tools and the page's check.
 
 ## What I'd do, in order
 
 1. **1a (per-test cache keys) and 1b (resample's quick mode first).** One session, timed before and after. A release run checks it. Nothing users get changes.
 2. **1c, the harness disk change.** Done.
    Then 1d, the deep tier's steps, one at a time, with the timed overnight run last.
-3. **Phase 2.** A design session first, plan only, with a timed prototype; then build, with an overnight deep run.
+3. **Phase 2.** The in-memory harness, the page's every-byte check and the compare limit, in one change with one release run (`--update`).
 4. **Chords joins** patch/all and the web patcher, using the bit-14 names.
 5. **Names for mod 15 and beyond.** Done (Phase 3).
 6. **Watch RAM.** Before planning a new mod, check what startup RAM it needs against the 832 B left.
@@ -300,6 +293,6 @@ One deep run, `--jobs 6`, processor affinity 6 of the 8 cores, step 3 in, nothin
 ### Still estimates, not timed
 
 - the 2.5–3 hour 15-mod harness run;
-- the Phase 2 harness time.
+- the Phase 2 harness time (from the 2026-11-02 profile; timed when it lands).
 
 Each step's session should time its own change and update this file.

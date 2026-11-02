@@ -8,7 +8,12 @@
 // <out dir>/<name>.ptf and .map.json, and, for a mix, the spec it made to
 // <site dir>/patch/<spec name>/patch.json, where tools/patch_ptf.py can read it.
 // A selection job with "plan": true is only planned (its spec written, nothing patched;
-// its result gives the spec's path and version).
+// its result gives the spec's path and version). "full": false skips reading the output
+// back (the harness builds most mixes in memory; see test_web_patcher.py's FULL_EVERY).
+// Every build is then checked by web/verify.js, the page's own check, and the result is
+// in the job's line ("verified", "verify_problems"). A job with "corrupt": true also
+// breaks its build in each way tools/verify_corrupt.mjs knows, and reports the ones the
+// check missed ("corrupt": {"tried", "missed"}); it writes no files.
 // The stock firmware is parsed once, for all the jobs. Prints one JSON line per job.
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -17,13 +22,17 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const P = await import(pathToFileURL(join(here, "..", "web", "patcher.js")).href);
+const V = await import(pathToFileURL(join(here, "..", "web", "verify.js")).href);
+const { corruptions } = await import(pathToFileURL(join(here, "verify_corrupt.mjs")).href);
 
 const [siteDir, stockPath, jobsPath, outDir] = process.argv.slice(2).map((a) => resolve(a));
 const site = pathToFileURL(siteDir + "/").href;
 const io = { fetch: async (url) => new Uint8Array(readFileSync(fileURLToPath(url))) };
+const read = new Map();                              // the verifier's reads: patch files don't change
+const vio = { fetch: async (url) => (read.has(url) ? read.get(url) : read.set(url, await io.fetch(url)).get(url)) };
 const sha256 = async (bytes) => createHash("sha256").update(bytes).digest("hex");
 const stockBytes = new Uint8Array(readFileSync(stockPath));
-let stock = null;                                    // parsed on the first job that patches
+let stock = null, vstock = null;                     // parsed on the first job that patches
 const manifest = JSON.parse(readFileSync(join(siteDir, "manifest.json"), "utf8"));
 const allSpec = JSON.parse(readFileSync(join(siteDir, manifest.all), "utf8"));
 mkdirSync(outDir, { recursive: true });
@@ -39,6 +48,10 @@ console.log(JSON.stringify({ constants: {
   VERSION_PREFIX: P.VERSION_PREFIX, VERSION_MAX: P.VERSION_MAX, ALIGN: P.ALIGN,
   VERSION_LONG_PREFIX: P.VERSION_LONG_PREFIX, VERSION_LONG: P.VERSION_LONG,
   RAM_REGIONS: P.RAM_REGIONS, RAM_DEFAULT_ORDER: P.RAM_DEFAULT_ORDER,
+  VERIFY: { ALIGN: V.ALIGN, FLASH_SECTOR: V.FLASH_SECTOR, FLASH_PAGE: V.FLASH_PAGE,
+            RAM_REGIONS: V.RAM_REGIONS, RAM_DEFAULT_ORDER: V.RAM_DEFAULT_ORDER, COPY_TABLE: V.COPY_TABLE,
+            ITCM_ENTRY: V.ITCM_ENTRY, STUB_ENTRY: V.STUB_ENTRY, STUB_ENTRY_STOCK: V.STUB_ENTRY_STOCK,
+            ITCM_STUBS: V.ITCM_STUBS, REGS: V.REGS, PREFIX_SHORT: V.PREFIX_SHORT, PREFIX_LONG: V.PREFIX_LONG },
   MIX_VERSIONS: masks.map((m) => [m, P.mixVersion(m)]),
 } }));
 
@@ -74,14 +87,30 @@ for (const job of JSON.parse(readFileSync(jobsPath, "utf8"))) {
     const file = job.file ?? job.name;         // the output files' name
     const outName = `${file}.ptf`;
     stock ??= P.readPtf(stockBytes, "stock firmware");
-    const out = await P.patchFirmware({ stockBytes, stock, spec, specUrl, io, outName, sha256 });
-    writeFileSync(join(outDir, outName), out.ptf);
-    writeFileSync(join(outDir, `${file}.map.json`), out.map);
+    const out = await P.patchFirmware({ stockBytes, stock, spec, specUrl, io, outName, sha256,
+                                        readBack: job.full !== false });
+    if (!job.corrupt) {                        // a job to break needs no files
+      writeFileSync(join(outDir, outName), out.ptf);
+      writeFileSync(join(outDir, `${file}.map.json`), out.map);
+    }
     const at = P.versionWordAt(spec);
     Object.assign(result, {
       ok: true, sha256: await sha256(out.ptf),
       version_text: at === null ? null : P.versionTextOf(out.image, out.base, at),
     });
+    // the page's check: from the file's text on a full job, else from the image in memory
+    vstock ??= V.parseStock(stockBytes);
+    const v = await V.verifyFirmware({ ...(job.full === false ? { built: out } : { ptfBytes: out.ptf }),
+                                       stock: vstock, spec, specUrl, io: vio });
+    Object.assign(result, { verified: v.ok, verify_problems: v.problems.slice(0, 5) });
+    if (job.corrupt) {
+      const missed = [], tried = [];
+      for (const [what, input] of await corruptions({ out, spec, specUrl, stockImage: vstock.image, io: vio })) {
+        tried.push(what);
+        if ((await V.verifyFirmware({ ...input, stock: vstock, spec, specUrl, io: vio })).ok) missed.push(what);
+      }
+      result.corrupt = { tried, missed };
+    }
   } catch (e) {
     Object.assign(result, { ok: false, error: e instanceof P.PatchError ? e.message : String(e.stack ?? e) });
   }

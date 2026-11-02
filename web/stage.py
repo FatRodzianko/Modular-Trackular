@@ -2,15 +2,15 @@
 
   python web/stage.py <out dir> [--no-check]
 
-Copies the page (web/index.html, app.js, patcher.js, style.css, manifest.json,
-expected.json) and, for every mod in web/manifest.json and the patch/all bundle,
+Copies the page (web/index.html, app.js, patcher.js, verify.js, style.css,
+manifest.json, expected.json) and, for every mod in web/manifest.json and the patch/all bundle,
 its patch.json and the prebuilt files it names (prebuilt_bin, prebuilt_sym,
 prebuilt_rel), at the same paths as in the repository. Nothing else: no build/
 output, no other patches, and never a .ptf or .hex file.
 
 Each staging is a build, named by a digest of everything it serves. The staged page
 asks for its code by that name (app.js?v=<build>, patcher.js?v=<build>,
-style.css?v=<build>), app.js knows it, and build.json holds it. A browser that still has
+verify.js?v=<build>, style.css?v=<build>), app.js knows it, and build.json holds it. A browser that still has
 an earlier build's page or code cached (GitHub Pages lets it keep them 10 minutes)
 finds build.json naming another build and reloads as ?build=<that build>, which fetches
 the new page and so the new code; the patch files, which the page always revalidates,
@@ -33,7 +33,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
-PAGE = ["index.html", "app.js", "patcher.js", "style.css", "manifest.json", "expected.json"]
+PAGE = ["index.html", "app.js", "patcher.js", "verify.js", "style.css", "manifest.json", "expected.json"]
 NEVER = {".ptf", ".hex"}
 
 
@@ -89,12 +89,20 @@ def selection_keys() -> list[str]:
     return ["+".join(c) for n in range(1, len(ids) + 1) for c in itertools.combinations(ids, n)]
 
 
+def expected_keys_ok(keys) -> bool:
+    """expected.json holds a hash for each selection both patchers built (all of them up to
+    the harness's MAX_COMPARE, a chosen part past it): only selections the page offers,
+    always each mod alone and all of them together."""
+    ids = [p["id"] for p in json.loads((WEB / "manifest.json").read_text())["patches"]]
+    return set(keys) <= set(selection_keys()) and set(ids) | {"+".join(ids)} <= set(keys)
+
+
 def main() -> int:
     out = Path(next(a for a in sys.argv[1:] if not a.startswith("--")))
     if "--no-check" not in sys.argv:
         expected = json.loads((WEB / "expected.json").read_text())
         if expected.get("inputs_sha256") != inputs_digest() or \
-                sorted(expected.get("selections", {})) != sorted(selection_keys()):
+                not expected_keys_ok(expected.get("selections", {})):
             sys.exit("web/expected.json is out of date: run tools/test_web_patcher.py <stock .ptf> --update")
     if out.exists():
         shutil.rmtree(out)
@@ -109,6 +117,7 @@ def main() -> int:
     for name, pairs in (("index.html", [('src="app.js"', f'src="app.js?v={build}"'),
                                         ('href="style.css"', f'href="style.css?v={build}"')]),
                         ("app.js", [('from "./patcher.js";', f'from "./patcher.js?v={build}";'),
+                                    ('from "./verify.js";', f'from "./verify.js?v={build}";'),
                                     ('const BUILD = "dev";', f'const BUILD = "{build}";')])):
         text = (out / name).read_text(encoding="utf-8")
         for old, new in pairs:

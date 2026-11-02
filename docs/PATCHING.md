@@ -49,7 +49,11 @@ Python command below does, without installing anything:
    `1.2.0-U01`). With tracklen it is sixteen further on, `C` to `L` and then the digits
    `0` to `5` (colorsong + tracklen is `1.2.0-C01`). With songloop the last hex digit
    becomes a letter, `G` for 0 to `V` for F (colorsong + songloop is `1.2.0-M0H`).
-3. Patch and download. The page only offers the file when its SHA-256 is the one
+3. Patch and download. Before offering the file, the page checks every byte of it
+   (`web/verify.js`, written apart from the patcher): each byte must be the stock
+   firmware's, a patch's own code with its addresses moved where it was placed, a hook
+   pointing where the patch files say, or padding, and each patch's RAM must sit in
+   free RAM without overlapping another's. It also checks the file's SHA-256 is the one
    `tools/patch_ptf.py` makes for that selection (`web/expected.json`), and says when
    it's also one of the hardware-tested builds in the table below. A mix that isn't in
    the table hasn't been tested on hardware as one firmware.
@@ -372,7 +376,9 @@ python tools/test_layout.py path/to/TrackerPlus_1.2.0.ptf build/layout
 
 `tools/test_web_patcher.py` (needs Node) runs the web patcher's code on every selection
 the page offers and on `test_layout.py`'s other bundle orders, checks each output is
-byte-identical to `patch_ptf.py`'s, and runs `test_layout.py`'s checks on them. After
+byte-identical to `patch_ptf.py`'s, and runs `test_layout.py`'s checks on them. It runs
+the page's own check (`web/verify.js`) on every one of them, and on builds broken on
+purpose (`tools/verify_corrupt.mjs`), which it must all reject. After
 changing a patch, or the mods in `web/manifest.json`, run it with `--update` to refresh
 `web/expected.json`; the Pages workflow refuses to publish until then. The release tier
 does that in the same run when given `--update`, so the harness doesn't run twice:
