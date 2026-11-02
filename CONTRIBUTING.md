@@ -1,13 +1,27 @@
 # Contributing to Modular-Trackular
 
-New mods, fixes and notes are welcome, whether you write them yourself or with an AI
-coding agent. This page says what a pull request needs, so it can be checked and merged
-quickly.
+Modular-Trackular is feature-complete for Tracker+ firmware 1.2.0. It takes bug reports
+and bug fixes, not new mods. New mods go to
+[Modular-Trackular-Plus](https://github.com/FatRodzianko/Modular-Trackular-Plus), which
+builds on Polyend's Tracker-CE firmware.
 
-**Before you build something big**, open an issue describing the mod. Say which screens
-it changes, which stock functions you plan to hook, and how much RAM it needs. Several
-hook sites and most of the fast RAM are already shared (see "Rules for patches" below),
-so agreeing on the design first saves you a rewrite.
+## Reporting a bug
+
+Open an issue with:
+- the version text Config shows (it names the exact build, for example `1.2.0-MPL`);
+- whether you installed it from the web patcher or from a patch in this repository;
+- what you did, what you expected, and what happened;
+- whether stock 1.2.0 does the same.
+
+## Fixing a bug
+
+Fixes are welcome, whether you write them yourself or with an AI coding agent. This
+page says what a pull request needs, so it can be checked and merged quickly.
+
+**Before you change anything big**, comment on the issue with the fix you plan: which
+patch, which stock functions it hooks, and whether its RAM use changes. Several hook
+sites and most of the fast RAM are shared (see "Rules for patches" below), so agreeing
+on the fix first saves you a rewrite.
 
 ## The rules that can't bend
 
@@ -24,30 +38,26 @@ so agreeing on the design first saves you a rewrite.
   home folder) or the names of your own projects. Repository-relative paths are fine.
 - **License.** Contributions are under the repository's [MIT license](LICENSE).
 
-## What a new mod looks like
+## What a fix looks like
 
-A new mod comes in as a **standalone patch**: its own folder, its own test, and its own
-build (for example `1.2.0-ch2`). It joins the `patch/all` bundle and the web patcher
-later, as a separate step the maintainer does after the mod has been tested on
-hardware. Joining changes every bundle's layout and the web patcher's tests, so it is
-kept apart from the mod itself.
-
-A pull request for a new mod adds or changes:
+A pull request for a fix changes:
 
 | What | Where |
 |---|---|
-| The patch | `patch/<name>/`: `<name>.c`, `link.ld`, `build.sh`, `patch.json`, `prebuilt/` (the built `.bin`, `.sym`, `.rel`) and a `README.md` |
-| The emulator test | `tools/emu/test_<name>.py` |
-| Test runner entries | `tools/run_tests.py`: the patch in `NOT_IN_WEB`, and in `STOCK_ARG` if its test also takes the stock `.ptf` |
-| Layout checks | `tools/test_layout.py`: the patch alone, after `patch/all`'s patches, and first with them after it (see how chords is listed) |
-| Docs | the root `README.md` (mod list, layout table, tools table) and the tested-status table in `docs/PATCHING.md` |
+| The patch | `patch/<name>/`: the source, and `prebuilt/` (the built `.bin`, `.sym`, `.rel`) rebuilt from it |
+| Its version text | the patch's own text moves on (for example `ch2` to `ch3`), so a bug report's version text shows whether it has the fix |
+| The emulator test | `tools/emu/test_<name>.py`: a check that fails without the fix and passes with it |
+| Docs | the patch's `README.md` if what it does changed, and the tested-status table in `docs/PATCHING.md` |
 
-`patch/colorsong/` is a complete example of a patch, and `patch/chords/` is the most
-recent one to arrive as a standalone patch. How patches work (hooks, relocation, RAM,
-`patch.json`) is in [docs/PATCHING.md section 6](docs/PATCHING.md#6-writing-your-own-patch),
-and the firmware itself in [docs/FINDINGS.md](docs/FINDINGS.md).
+A fix to a patch in `patch/all` changes that bundle and the web patcher's builds too.
+The maintainer gives `patch/all` its new version text and updates `web/expected.json`,
+or you can, with the release tier's `--update` (see "Tests to run").
 
-The patch's README says what it does, how it works, how to build it and how to go back
+How patches work (hooks, relocation, RAM, `patch.json`) is in
+[docs/PATCHING.md section 6](docs/PATCHING.md#6-writing-your-own-patch), and the
+firmware itself in [docs/FINDINGS.md](docs/FINDINGS.md).
+
+A patch's README says what it does, how it works, how to build it and how to go back
 to stock. It has no version history; that's what git is for.
 
 ## Rules for patches
@@ -87,19 +97,20 @@ prints a time estimate before the long part; `--jobs N` limits how many tests ru
 once.
 
 ```bash
-# a new standalone mod, or a change inside one patch's own folder
+# while working on a fix
 python tools/run_tests.py path/to/TrackerPlus_1.2.0.ptf --tier quick
 
-# anything that changes other patches, patch/all, tools/patch_ptf.py, web/ or shared emulator code
+# a fix to a patch in patch/all, or anything that changes patch/all, tools/patch_ptf.py, web/ or shared emulator code
 python tools/run_tests.py path/to/TrackerPlus_1.2.0.ptf --tier release
 ```
 
 - **quick** runs the layout checks and every patch's emulator test on each patch alone
-  and on `patch/all`, including standalone mods like yours. It is the required run for a
-  new standalone mod.
+  and on `patch/all`. It is enough for a fix to a standalone patch (chords and the
+  diagnostics).
 - **release** adds the web patcher harness and the tests on the cover set of web
-  mixes. It takes longer, so it's only required when your change reaches beyond your
-  own patch folder. The maintainer runs it before merging anyway.
+  mixes. It takes longer, and it's required for a fix to any patch in `patch/all`,
+  because that changes the web patcher's builds. The maintainer runs it before merging
+  anyway.
 - The results are in `build/testrun/summary.txt` (or under `--out`). Both tiers end
   with a line like `tier quick: 81 jobs, 0 failed, ...`.
 
@@ -146,5 +157,4 @@ The maintainer:
 - tests the build on hardware.
 
 A pull request may get questions or requested changes. After hardware testing it's
-merged as a standalone mod, and it can join `patch/all` and the web patcher in a later
-step.
+merged, and the web patcher picks it up from `master`.

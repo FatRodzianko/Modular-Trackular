@@ -7,6 +7,11 @@ Reverse engineering notes, tools and firmware mods for the **Polyend Tracker+**
 apply to your own copy of the stock firmware from polyend.com. Do not share modified
 `.ptf` files.
 
+**Status: final.** Modular-Trackular is feature-complete for firmware 1.2.0 and now
+gets bug fixes only. New mods, and further work on chords, continue in
+[Modular-Trackular-Plus](https://github.com/FatRodzianko/Modular-Trackular-Plus),
+which builds on Polyend's Tracker-CE firmware.
+
 ## What's here
 
 - **colorsong**: colors the Song screen's track blocks by their content. Blocks with
@@ -103,8 +108,8 @@ apply to your own copy of the stock firmware from polyend.com. Do not share modi
 - **chords**: more MIDI chords. Turning the encoder on a MIDI Chord FX (`0`) past the
   last stock chord goes on to the major and minor triad inversions, then the maj7,
   min7 and dom7 inversions, then every other chord of up to four notes within an
-  octave (values 30–236). The Arp plays them too. On its own for now (version text
-  `1.2.0-ch2`): not yet in patch/all or the web patcher. Tested on hardware. See
+  octave (values 30–236). The Arp plays them too. On its own only (version text
+  `1.2.0-ch2`): it stays out of patch/all and the web patcher. Tested on hardware. See
   [patch/chords/README.md](patch/chords/README.md).
 - **ramdiag**: a diagnostic, installed on its own, that checks on the device which
   RAM regions stay untouched in use and how far the heap grows, to find room for
@@ -277,9 +282,11 @@ python tools/emu/test_rescan.py build/TrackerPlus_c11.ptf "path/to/<project A>" 
 
 ## Contributing
 
-New mods and fixes are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers what a pull
-request needs: the patch layout, the rules shared hooks and RAM follow, which tests to
-run and what results to include.
+Bug reports and fixes are welcome; new mods go to
+[Modular-Trackular-Plus](https://github.com/FatRodzianko/Modular-Trackular-Plus).
+[CONTRIBUTING.md](CONTRIBUTING.md) covers what a bug report and a fix's pull request
+need: the rules shared hooks and RAM follow, which tests to run and what results to
+include.
 
 ## Credits and related work
 
